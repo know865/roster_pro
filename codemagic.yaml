@@ -1,20 +1,17 @@
 workflows:
   roster-pro-v2:
     name: Roster Pro V2
-    instance_type: mac_mini_m2
     environment:
       flutter: 3.22.2
     scripts:
-      - name: Fix empty repo
+      - name: Create project
         script: |
           if [ ! -d "android" ]; then
-            flutter create . --platforms=android --project-name roster_pro
+            flutter create . --project-name roster_pro --platforms=android
           fi
       - name: Get packages
         script: flutter pub get
       - name: Build APK
-        script: flutter build apk --release --verbose
+        script: flutter build apk --release
     artifacts:
-      - build/**/outputs/**/*.apk
-      - build/**/*.apk
-      - "**/*.apk"
+      - build/app/outputs/flutter-apk/*.apk
