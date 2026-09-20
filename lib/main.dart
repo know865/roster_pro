@@ -35,7 +35,7 @@ class MainPage extends StatefulWidget { @override State<MainPage> createState() 
 
 class MainPageState extends State<MainPage> {
   int tab = 0;
-  Map roster = {};
+  Map<String,String> roster = {};
   List<Shift> shifts = [];
   DateTime focused = DateTime.now();
   DateTime selected = DateTime.now();
@@ -86,9 +86,8 @@ class MainPageState extends State<MainPage> {
 
   double monthlyHours() {
     double sum = 0;
-    List keys = roster.keys.toList();
-    for (var key in keys) {
-      DateTime d = DateTime.parse(key.toString());
+    for (var key in roster.keys) {
+      DateTime d = DateTime.parse(key);
       if (d.year == focused.year && d.month == focused.month) { sum = sum + hoursOf(d); }
     }
     return sum;
@@ -106,18 +105,18 @@ class MainPageState extends State<MainPage> {
 
   void load() async {
     SharedPreferences p = await SharedPreferences.getInstance();
-    String r = p.getString('roster');
-    if (r == null) r = '';
-    if (r!= '') { setState(() { roster = jsonDecode(r); }); }
-    String s = p.getString('shifts');
-    if (s == null) s = '';
-    if (s!= '') {
+    String? r = p.getString('roster');
+    if (r!= null && r!= '') {
+      Map<String,dynamic> decoded = jsonDecode(r);
+      setState(() { roster = decoded.map((k,v)=>MapEntry(k, v.toString())); });
+    }
+    String? s = p.getString('shifts');
+    if (s!= null && s!= '') {
       List decoded = jsonDecode(s);
       setState(() { shifts = decoded.map((e)=>Shift.fromJson(e)).toList(); });
     }
-    double std = p.getDouble('std');
-    if (std!= null) standardWeekly = std;
-    setState((){});
+    double? std = p.getDouble('std');
+    if (std!= null) { setState((){ standardWeekly = std; }); }
   }
 
   @override
@@ -149,9 +148,9 @@ class MainPageState extends State<MainPage> {
   void exportCsv() {
     StringBuffer sb = StringBuffer();
     sb.writeln('日期,星期,班次,開工,收工,工時,津貼');
-    List keys = roster.keys.toList(); keys.sort();
+    List<String> keys = roster.keys.toList(); keys.sort();
     for (var key in keys) {
-      DateTime d = DateTime.parse(key.toString());
+      DateTime d = DateTime.parse(key);
       if (d.year == focused.year && d.month == focused.month) {
         String code = roster[key].toString();
         Shift s = getShiftByCode(code);
@@ -183,7 +182,7 @@ class MainPageState extends State<MainPage> {
       appBar: AppBar(
         title: Text('W${isoWeek(focused).toString().padLeft(2,'0')} ${DateFormat('yyyy年M月').format(focused)}'),
         actions: [
-          IconButton(onPressed: autoRoster, icon: Icon(Icons.auto_awesome), tooltip: '根據已有班次自動排更'),
+          IconButton(onPressed: autoRoster, icon: Icon(Icons.auto_awesome)),
           IconButton(onPressed: exportCsv, icon: Icon(Icons.share)),
         ],
       ),
@@ -233,8 +232,7 @@ class MainPageState extends State<MainPage> {
     double mh = monthlyHours();
     int nightCount = 0; int workCount=0; int phCount=0;
     for (var v in roster.values) { if (v=='夜') nightCount++; if (v=='PH') phCount++; }
-    for (var k in roster.keys) { DateTime d=DateTime.parse(k.toString()); if (d.year==focused.year && d.month==focused.month) { String code=roster[k].toString(); Shift s=getShiftByCode(code); if (s.isWork) workCount++; } }
-
+    for (var key in roster.keys) { DateTime d=DateTime.parse(key); if (d.year==focused.year && d.month==focused.month) { String code=roster[key].toString(); Shift s=getShiftByCode(code); if (s.isWork) workCount++; } }
     return Scaffold(
       appBar: AppBar(title: Text('工時 津貼 報表')),
       body: ListView(padding: EdgeInsets.all(16), children: [
@@ -254,8 +252,6 @@ class MainPageState extends State<MainPage> {
         ]),
         SizedBox(height:12),
         FilledButton.icon(onPressed: exportCsv, icon: Icon(Icons.table_chart), label: Text('Excel匯出 月薪統計 PDF匯出')),
-        SizedBox(height:8),
-        Text('截圖格式: 周曆/月曆/個人/部門 - 用手機系統截圖即 PNG高清', style: TextStyle(fontSize:12)),
       ]),
     );
   }
@@ -264,11 +260,6 @@ class MainPageState extends State<MainPage> {
     return Scaffold(
       appBar: AppBar(title: Text('設定')),
       body: ListView(padding: EdgeInsets.all(16), children: [
-        Text('核心設定', style: TextStyle(fontWeight: FontWeight.bold, fontSize:16)),
-        SwitchListTile(title: Text('根據所選月曆自動排更'), subtitle: Text('按右上角魔法棒'), value: true, onChanged: (v){}),
-        ListTile(title: Text('每星期一顯示 ISO週數 W01-W53'), subtitle: Text('已啟用')),
-        ListTile(title: Text('Google Calendar 雙向同步'), subtitle: Text('V4.1 需開 OAuth'), trailing: OutlinedButton(onPressed: (){}, child: Text('連接'))),
-        Divider(),
         Text('班次編輯 可自由增刪改時間', style: TextStyle(fontWeight: FontWeight.bold, fontSize:16)),
         for (var s in shifts) Card(child: ListTile(
           leading: CircleAvatar(backgroundColor: s.color, child: Text(s.code, style: TextStyle(color: Colors.white, fontSize:10))),
@@ -285,10 +276,6 @@ class MainPageState extends State<MainPage> {
         ListTile(title: Text('每週標準 $standardWeekly h'), subtitle: Slider(value: standardWeekly, min: 30, max: 60, divisions: 30, label: standardWeekly.toString(), onChanged: (v){ setState((){ standardWeekly=v; save(); }); })),
         ListTile(title: Text('交通津貼 $transportBonus 每日'), onTap: (){ askNumber('交通津貼', transportBonus, (v){ setState((){ transportBonus=v; save(); }); }); }),
         ListTile(title: Text('假日津貼 $holidayBonus'), onTap: (){ askNumber('假日津貼', holidayBonus, (v){ setState((){ holidayBonus=v; save(); }); }); }),
-        Divider(),
-        Text('資料儲存', style: TextStyle(fontWeight: FontWeight.bold, fontSize:16)),
-        ListTile(title: Text('Google Drive 備份'), subtitle: Text('本地已自動備份')),
-        ListTile(title: Text('匯入 匯出 JSON'), trailing: IconButton(icon: Icon(Icons.copy), onPressed: exportCsv)),
       ]),
     );
   }
@@ -296,7 +283,7 @@ class MainPageState extends State<MainPage> {
   void askNumber(String title, double current, Function(double) onOk) {
     TextEditingController c = TextEditingController(text: current.toString());
     showDialog(context: context, builder: (ctx){
-      return AlertDialog(title: Text(title), content: TextField(controller: c, keyboardType: TextInputType.number), actions: [TextButton(onPressed: (){Navigator.pop(ctx);}, child: Text('取消')), FilledButton(onPressed: (){ double v = double.tryParse(c.text); if (v==null) v=current; onOk(v); Navigator.pop(ctx); }, child: Text('確定'))]);
+      return AlertDialog(title: Text(title), content: TextField(controller: c, keyboardType: TextInputType.number), actions: [TextButton(onPressed: (){Navigator.pop(ctx);}, child: Text('取消')), FilledButton(onPressed: (){ double? v = double.tryParse(c.text); if (v==null) v=current; onOk(v); Navigator.pop(ctx); }, child: Text('確定'))]);
     });
   }
 
@@ -316,8 +303,7 @@ class MainPageState extends State<MainPage> {
       ])), actions: [
         TextButton(onPressed: (){Navigator.pop(ctx);}, child: Text('取消')),
         FilledButton(onPressed: (){
-          double h = double.tryParse(hC.text);
-          if (h==null) h=8;
+          double? h = double.tryParse(hC.text); if (h==null) h=8;
           setState((){ shifts.add(Shift(codeC.text==''?'新':codeC.text, nameC.text==''?codeC.text:nameC.text, sC.text, eC.text, Colors.primaries[shifts.length%18].value, h, 0, true)); save(); });
           Navigator.pop(ctx);
         }, child: Text('新增'))
@@ -345,8 +331,8 @@ class MainPageState extends State<MainPage> {
             s.name=nameC.text;
             s.start=sC.text;
             s.end=eC.text;
-            double h = double.tryParse(hC.text); if (h!=null) s.hours=h;
-            double b = double.tryParse(bC.text); if (b!=null) s.bonus=b;
+            double? h = double.tryParse(hC.text); if (h!=null) s.hours=h;
+            double? b = double.tryParse(bC.text); if (b!=null) s.bonus=b;
             save();
           });
           Navigator.pop(ctx);
