@@ -13,6 +13,8 @@ workflows:
       - name: Get packages
         script: flutter pub get
       - name: Build APK
-        script: flutter build apk --release
+        script: flutter build apk --release --verbose
     artifacts:
-      - build/app/outputs/flutter-apk/*.apk
+      - build/**/outputs/**/*.apk
+      - build/**/*.apk
+      - "**/*.apk"
