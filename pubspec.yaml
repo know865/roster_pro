@@ -1,6 +1,6 @@
 name: roster_pro
-description: Roster Pro
-version: 2.0.0+1
+description: Roster Pro Full
+version: 3.0.0+1
 environment:
   sdk: '>=3.2.0 <4.0.0'
 dependencies:
@@ -8,5 +8,11 @@ dependencies:
     sdk: flutter
   table_calendar: ^3.1.2
   intl: ^0.19.0
+  shared_preferences: ^2.2.2
+  screenshot: ^2.1.0
+  share_plus: ^8.0.0
+  path_provider: ^2.1.2
+  excel: ^4.0.6
+  pdf: ^3.10.7
 flutter:
   uses-material-design: true
