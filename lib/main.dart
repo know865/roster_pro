@@ -161,7 +161,7 @@ class MainPageState extends State<MainPage> {
     sb.writeln('本月總工時,${monthlyHours()}');
     sb.writeln('標準,${standardWeekly * 4}');
     showDialog(context: context, builder: (c){
-      return AlertDialog(title: Text('Excel CSV匯出 可複製去Excel'), content: SingleChildScrollView(child: SelectableText(sb.toString())), actions: [TextButton(onPressed: (){Navigator.pop(c);}, child: Text('關閉'))]);
+      return AlertDialog(title: Text('Excel CSV匯出'), content: SingleChildScrollView(child: SelectableText(sb.toString())), actions: [TextButton(onPressed: (){Navigator.pop(c);}, child: Text('關閉'))]);
     });
   }
 
@@ -213,15 +213,13 @@ class MainPageState extends State<MainPage> {
         ),
         Container(color: Colors.indigo.shade50, padding: EdgeInsets.all(8), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Text('週 ${weeklyHours(selected)} / $standardWeekly h', style: TextStyle(fontWeight: FontWeight.bold)),
-          Text('差 ${(weeklyHours(selected)-standardWeekly).toStringAsFixed(1)}h 累 ${(monthlyHours()-standardWeekly*4).toStringAsFixed(1)}h', style: TextStyle(color: weeklyHours(selected)>standardWeekly?Colors.red:Colors.green, fontSize:12)),
+          Text('差 ${(weeklyHours(selected)-standardWeekly).toStringAsFixed(1)}h', style: TextStyle(color: weeklyHours(selected)>standardWeekly?Colors.red:Colors.green, fontSize:12)),
         ])),
         Expanded(child: SingleChildScrollView(padding: EdgeInsets.all(8), child: Column(children: [
           Wrap(spacing:6, runSpacing:6, alignment: WrapAlignment.center, children: [
             for (var s in shifts) ChoiceChip(label: Text(s.code), selected: roster.containsKey(k(selected)) && roster[k(selected)]==s.code, selectedColor: s.color.withOpacity(0.4), onSelected: (v){ setState((){ roster[k(selected)]=s.code; save(); }); }),
             ActionChip(label: Text('清除'), onPressed: (){ setState((){ roster.remove(k(selected)); save(); }); }),
           ]),
-          SizedBox(height:8),
-          Text('已選 ${DateFormat('MM/dd E').format(selected)} 排 ${roster.containsKey(k(selected))?roster[k(selected)]:'未排'}'),
         ]))),
       ]),
     );
@@ -238,20 +236,11 @@ class MainPageState extends State<MainPage> {
       body: ListView(padding: EdgeInsets.all(16), children: [
         Card(child: ListTile(title: Text('1. 每班工時'), subtitle: Text(shifts.map((e)=>'${e.code}:${e.hours}h ${e.start}-${e.end}').join('\n')))),
         Card(child: ListTile(title: Text('2. 本週實際 $wh h / 標準 $standardWeekly'), subtitle: Text('差額 ${wh-standardWeekly}h'))),
-        Card(child: ListTile(title: Text('3. 累計差額 工時銀行'), subtitle: Text('本月差 ${(mh-standardWeekly*4).toStringAsFixed(1)}h 月總 $mh h'))),
-        Card(child: ListTile(title: Text('4. 月度 $mh h 年度統計'), subtitle: Text('年度需自行累計 月份切換可見'))),
+        Card(child: ListTile(title: Text('3. 銀行 ${(mh-standardWeekly*4).toStringAsFixed(1)}h 月總 $mh h'))),
         Divider(),
-        Card(color: Colors.amber.shade50, child: ListTile(title: Text('津貼計算'), subtitle: Text('夜更 $nightCount 次 x 80\n交通 $workCount 日 x $transportBonus\n假日 $phCount x $holidayBonus\n總計約 ${nightCount*80 + workCount*transportBonus + phCount*holidayBonus}'))),
-        Divider(),
-        Text('假期管理', style: TextStyle(fontWeight: FontWeight.bold)),
-        Wrap(spacing:8, children: [
-          Chip(label: Text('AL ${roster.values.where((e)=>e=='AL').length}')),
-          Chip(label: Text('SL ${roster.values.where((e)=>e=='SL').length}')),
-          Chip(label: Text('O ${roster.values.where((e)=>e=='O').length}')),
-          Chip(label: Text('PH ${roster.values.where((e)=>e=='PH').length}')),
-        ]),
+        Card(color: Colors.amber.shade50, child: ListTile(title: Text('津貼'), subtitle: Text('夜更 $nightCount x 80\n交通 $workCount x $transportBonus\n假日 $phCount x $holidayBonus\n總計 ${nightCount*80 + workCount*transportBonus + phCount*holidayBonus}'))),
         SizedBox(height:12),
-        FilledButton.icon(onPressed: exportCsv, icon: Icon(Icons.table_chart), label: Text('Excel匯出 月薪統計 PDF匯出')),
+        FilledButton.icon(onPressed: exportCsv, icon: Icon(Icons.table_chart), label: Text('Excel匯出')),
       ]),
     );
   }
@@ -260,11 +249,9 @@ class MainPageState extends State<MainPage> {
     return Scaffold(
       appBar: AppBar(title: Text('設定')),
       body: ListView(padding: EdgeInsets.all(16), children: [
-        Text('班次編輯 可自由增刪改時間', style: TextStyle(fontWeight: FontWeight.bold, fontSize:16)),
         for (var s in shifts) Card(child: ListTile(
           leading: CircleAvatar(backgroundColor: s.color, child: Text(s.code, style: TextStyle(color: Colors.white, fontSize:10))),
           title: Text('${s.name} (${s.code}) ${s.start}-${s.end} ${s.hours}h'),
-          subtitle: Text('津貼 ${s.bonus} ${s.isWork?'上班':'假期'}'),
           trailing: Row(mainAxisSize: MainAxisSize.min, children: [
             IconButton(icon: Icon(Icons.edit, size:18), onPressed: (){ editShift(s); }),
             IconButton(icon: Icon(Icons.delete, size:18), onPressed: (){ setState((){ shifts.remove(s); save(); }); }),
@@ -272,10 +259,7 @@ class MainPageState extends State<MainPage> {
         )),
         FilledButton.icon(onPressed: addShift, icon: Icon(Icons.add), label: Text('新增班次')),
         Divider(),
-        Text('工時 津貼 自訂', style: TextStyle(fontWeight: FontWeight.bold, fontSize:16)),
         ListTile(title: Text('每週標準 $standardWeekly h'), subtitle: Slider(value: standardWeekly, min: 30, max: 60, divisions: 30, label: standardWeekly.toString(), onChanged: (v){ setState((){ standardWeekly=v; save(); }); })),
-        ListTile(title: Text('交通津貼 $transportBonus 每日'), onTap: (){ askNumber('交通津貼', transportBonus, (v){ setState((){ transportBonus=v; save(); }); }); }),
-        ListTile(title: Text('假日津貼 $holidayBonus'), onTap: (){ askNumber('假日津貼', holidayBonus, (v){ setState((){ holidayBonus=v; save(); }); }); }),
       ]),
     );
   }
@@ -283,7 +267,16 @@ class MainPageState extends State<MainPage> {
   void askNumber(String title, double current, Function(double) onOk) {
     TextEditingController c = TextEditingController(text: current.toString());
     showDialog(context: context, builder: (ctx){
-      return AlertDialog(title: Text(title), content: TextField(controller: c, keyboardType: TextInputType.number), actions: [TextButton(onPressed: (){Navigator.pop(ctx);}, child: Text('取消')), FilledButton(onPressed: (){ double? v = double.tryParse(c.text); if (v==null) v=current; onOk(v); Navigator.pop(ctx); }, child: Text('確定'))]);
+      return AlertDialog(title: Text(title), content: TextField(controller: c, keyboardType: TextInputType.number), actions: [
+        TextButton(onPressed: (){Navigator.pop(ctx);}, child: Text('取消')),
+        FilledButton(onPressed: (){
+          double finalVal = current;
+          double? parsed = double.tryParse(c.text);
+          if (parsed!= null) finalVal = parsed;
+          onOk(finalVal);
+          Navigator.pop(ctx);
+        }, child: Text('確定'))
+      ]);
     });
   }
 
@@ -303,8 +296,13 @@ class MainPageState extends State<MainPage> {
       ])), actions: [
         TextButton(onPressed: (){Navigator.pop(ctx);}, child: Text('取消')),
         FilledButton(onPressed: (){
-          double? h = double.tryParse(hC.text); if (h==null) h=8;
-          setState((){ shifts.add(Shift(codeC.text==''?'新':codeC.text, nameC.text==''?codeC.text:nameC.text, sC.text, eC.text, Colors.primaries[shifts.length%18].value, h, 0, true)); save(); });
+          double hh = 8;
+          double? tmp = double.tryParse(hC.text);
+          if (tmp!= null) hh = tmp;
+          setState((){
+            shifts.add(Shift(codeC.text==''?'新':codeC.text, nameC.text==''?codeC.text:nameC.text, sC.text, eC.text, Colors.primaries[shifts.length%18].value, hh, 0, true));
+            save();
+          });
           Navigator.pop(ctx);
         }, child: Text('新增'))
       ]);
@@ -331,8 +329,10 @@ class MainPageState extends State<MainPage> {
             s.name=nameC.text;
             s.start=sC.text;
             s.end=eC.text;
-            double? h = double.tryParse(hC.text); if (h!=null) s.hours=h;
-            double? b = double.tryParse(bC.text); if (b!=null) s.bonus=b;
+            double? h = double.tryParse(hC.text);
+            if (h!=null) s.hours=h;
+            double? b = double.tryParse(bC.text);
+            if (b!=null) s.bonus=b;
             save();
           });
           Navigator.pop(ctx);
