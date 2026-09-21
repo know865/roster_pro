@@ -4,47 +4,38 @@ import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-void main() {
-  runApp(MaterialApp(
-    debugShowCheckedModeBanner: false,
-    theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
-    home: MainPage(),
-  ));
-}
+void main() { runApp(MaterialApp(debugShowCheckedModeBanner:false, theme: ThemeData(useMaterial3:true, colorSchemeSeed: Colors.indigo), home: MainPage())); }
 
 class Shift {
-  String code;
-  String name;
-  String start;
-  String end;
-  int colorValue;
-  double hours;
-  double bonus;
-  bool isWork;
-  Shift(this.code, this.name, this.start, this.end, this.colorValue, this.hours, this.bonus, this.isWork);
-  Map toJson() {
-    return {'code':code,'name':name,'start':start,'end':end,'colorValue':colorValue,'hours':hours,'bonus':bonus,'isWork':isWork};
-  }
-  static Shift fromJson(Map m) {
-    return Shift(m['code'], m['name'], m['start'], m['end'], m['colorValue'], (m['hours'] as num).toDouble(), (m['bonus'] as num).toDouble(), m['isWork']);
-  }
-  Color get color { return Color(colorValue); }
+  String code,name,start,end; int colorValue; double hours,bonus; bool isWork;
+  Shift(this.code,this.name,this.start,this.end,this.colorValue,this.hours,this.bonus,this.isWork);
+  Map toJson()=>{'code':code,'name':name,'start':start,'end':end,'colorValue':colorValue,'hours':hours,'bonus':bonus,'isWork':isWork};
+  static Shift fromJson(Map m)=>Shift(m['code'],m['name'],m['start'],m['end'],m['colorValue'],(m['hours']as num).toDouble(),(m['bonus']as num).toDouble(),m['isWork']);
+  Color get color=>Color(colorValue);
+}
+class RosterPattern{
+  String name; List<String> codes;
+  RosterPattern(this.name,this.codes);
+  Map toJson()=>{'name':name,'codes':codes};
+  static RosterPattern fromJson(Map m)=>RosterPattern(m['name'], List<String>.from(m['codes']));
 }
 
-class MainPage extends StatefulWidget { @override State<MainPage> createState() => MainPageState(); }
+class MainPage extends StatefulWidget{ @override State<MainPage> createState()=>MainPageState(); }
 
-class MainPageState extends State<MainPage> {
-  int tab = 0;
-  Map<String,String> roster = {};
-  List<Shift> shifts = [];
-  DateTime focused = DateTime.now();
-  DateTime selected = DateTime.now();
-  double standardWeekly = 42;
-  double transportBonus = 20;
-  double holidayBonus = 100;
+class MainPageState extends State<MainPage>{
+  int tab=0;
+  Map<String,String> roster={};
+  Map<String,String> notes={};
+  Map<String,double> extra={};
+  List<Shift> shifts=[];
+  List<RosterPattern> patterns=[];
+  DateTime focused=DateTime.now();
+  DateTime selected=DateTime.now();
+  double standardWeekly=42;
+  double cellFontSize=11;
 
-  MainPageState() {
-    shifts = [
+  MainPageState(){
+    shifts=[
       Shift('早','早更','07:00','15:30',Colors.orange.value,8,0,true),
       Shift('中','中更','15:00','23:30',Colors.blue.value,8,0,true),
       Shift('夜','夜更','23:00','07:30',Colors.indigo.value,8,80,true),
@@ -56,288 +47,196 @@ class MainPageState extends State<MainPage> {
     ];
   }
 
-  String k(DateTime d) { return DateFormat('yyyy-MM-dd').format(d); }
+  String k(DateTime d)=>DateFormat('yyyy-MM-dd').format(d);
+  int isoWeek(DateTime d){ DateTime thu=d.add(Duration(days:4-d.weekday)); DateTime jan1=DateTime(thu.year,1,1); return (thu.difference(jan1).inDays/7).floor()+1; }
+  Shift getShiftByCode(String code){ for(var s in shifts){ if(s.code==code) return s; } return Shift('','','','',Colors.grey.value,0,0,false); }
 
-  int isoWeek(DateTime d) {
-    DateTime thu = d.add(Duration(days: 4 - d.weekday));
-    DateTime jan1 = DateTime(thu.year, 1, 1);
-    return (thu.difference(jan1).inDays / 7).floor() + 1;
-  }
-
-  Shift getShiftByCode(String code) {
-    for (var s in shifts) { if (s.code == code) return s; }
-    return Shift('', '', '', '', Colors.grey.value, 0, 0, false);
-  }
-
-  double hoursOf(DateTime d) {
-    String key = k(d);
-    if (roster.containsKey(key) == false) return 0;
-    String code = roster[key].toString();
-    Shift s = getShiftByCode(code);
-    return s.hours;
-  }
-
-  double weeklyHours(DateTime any) {
-    DateTime mon = any.subtract(Duration(days: any.weekday - 1));
-    double sum = 0;
-    for (int i=0;i<7;i++) { sum = sum + hoursOf(mon.add(Duration(days: i))); }
-    return sum;
-  }
-
-  double monthlyHours() {
-    double sum = 0;
-    for (var key in roster.keys) {
-      DateTime d = DateTime.parse(key);
-      if (d.year == focused.year && d.month == focused.month) { sum = sum + hoursOf(d); }
-    }
-    return sum;
-  }
-
-  void save() async {
-    SharedPreferences p = await SharedPreferences.getInstance();
+  void save() async{
+    var p=await SharedPreferences.getInstance();
     p.setString('roster', jsonEncode(roster));
-    List list = shifts.map((e)=>e.toJson()).toList();
-    p.setString('shifts', jsonEncode(list));
-    p.setDouble('std', standardWeekly);
-    p.setDouble('trans', transportBonus);
-    p.setDouble('hol', holidayBonus);
+    p.setString('notes', jsonEncode(notes));
+    Map<String,double> ex=extra; Map<String,dynamic> ex2={}; ex.forEach((k,v){ex2[k]=v;}); p.setString('extra', jsonEncode(ex2));
+    p.setString('shifts', jsonEncode(shifts.map((e)=>e.toJson()).toList()));
+    p.setString('patterns', jsonEncode(patterns.map((e)=>e.toJson()).toList()));
+    p.setDouble('std', standardWeekly); p.setDouble('cellFS', cellFontSize);
+  }
+  void load() async{
+    var p=await SharedPreferences.getInstance();
+    String? r=p.getString('roster'); if(r!=null&&r!=''){ var dec=jsonDecode(r); setState((){roster=(dec as Map).map((k,v)=>MapEntry(k.toString(),v.toString()));}); }
+    String? n=p.getString('notes'); if(n!=null&&n!=''){ var dec=jsonDecode(n); setState((){notes=(dec as Map).map((k,v)=>MapEntry(k.toString(),v.toString()));}); }
+    String? ex=p.getString('extra'); if(ex!=null&&ex!=''){ var dec=jsonDecode(ex); setState((){extra=(dec as Map).map((k,v)=>MapEntry(k.toString(),(v as num).toDouble()));}); }
+    String? s=p.getString('shifts'); if(s!=null&&s!=''){ var dec=jsonDecode(s) as List; setState((){shifts=dec.map((e)=>Shift.fromJson(e)).toList();}); }
+    String? pat=p.getString('patterns'); if(pat!=null&&pat!=''){ var dec=jsonDecode(pat) as List; setState((){patterns=dec.map((e)=>RosterPattern.fromJson(e)).toList();}); }
+    double? std=p.getDouble('std'); if(std!=null) setState(()=>standardWeekly=std);
+    double? fs=p.getDouble('cellFS'); if(fs!=null) setState(()=>cellFontSize=fs);
+  }
+  @override void initState(){ super.initState(); load(); }
+
+  // 年月快速選擇
+  void pickYearMonth(){
+    int y=focused.year; int m=focused.month;
+    showDialog(context: context, builder: (ctx){
+      return AlertDialog(title: Text('快速跳至'), content: Column(mainAxisSize: MainAxisSize.min, children: [
+        Row(children: [Text('年'), Expanded(child: Slider(value: y.toDouble(), min:2024, max:2030, divisions:6, label:y.toString(), onChanged: (v){ setState(()=>y=v.toInt()); })), Text(y.toString())]),
+        Row(children: [Text('月'), Expanded(child: Slider(value: m.toDouble(), min:1, max:12, divisions:11, label:m.toString(), onChanged: (v){ setState(()=>m=v.toInt()); })), Text(m.toString())]),
+      ]), actions: [TextButton(onPressed: ()=>Navigator.pop(ctx), child: Text('取消')), FilledButton(onPressed: (){ setState((){focused=DateTime(y,m,1);}); Navigator.pop(ctx); }, child: Text('確定'))]);
+    });
   }
 
-  void load() async {
-    SharedPreferences p = await SharedPreferences.getInstance();
-    String? r = p.getString('roster');
-    if (r!= null && r!= '') {
-      Map<String,dynamic> decoded = jsonDecode(r);
-      setState(() { roster = decoded.map((k,v)=>MapEntry(k, v.toString())); });
-    }
-    String? s = p.getString('shifts');
-    if (s!= null && s!= '') {
-      List decoded = jsonDecode(s);
-      setState(() { shifts = decoded.map((e)=>Shift.fromJson(e)).toList(); });
-    }
-    double? std = p.getDouble('std');
-    if (std!= null) { setState((){ standardWeekly = std; }); }
+  // 點擊日期格子 -> 記事/OT/額外工時
+  void onCellTap(DateTime d){
+    setState(()=>selected=d);
+    TextEditingController noteC=TextEditingController(text: notes[k(d)]??'');
+    TextEditingController exC=TextEditingController(text: (extra[k(d)]??0).toString());
+    String curCode=roster[k(d)]??'';
+    showModalBottomSheet(context: context, isScrollControlled:true, builder: (ctx){
+      return StatefulBuilder(builder: (ctx,setM){
+        return Padding(padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom, top:16, left:16, right:16), child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(DateFormat('yyyy-MM-dd E').format(d), style: TextStyle(fontWeight: FontWeight.bold, fontSize:18)),
+          SizedBox(height:8),
+          Wrap(spacing:6, runSpacing:6, children: [
+            for(var s in shifts) ChoiceChip(label: Text(s.code), selected: curCode==s.code, selectedColor: s.color.withOpacity(0.4), onSelected: (v){ setM(()=>curCode=v?s.code:''); }),
+            ActionChip(label: Text('清除班次'), onPressed: (){setM(()=>curCode='');}),
+          ]),
+          SizedBox(height:12),
+          TextField(controller: noteC, decoration: InputDecoration(labelText:'記事 / 例如: OT 2h 開會', border: OutlineInputBorder())),
+          SizedBox(height:8),
+          TextField(controller: exC, decoration: InputDecoration(labelText:'額外工時 (可填 2.5)', border: OutlineInputBorder()), keyboardType: TextInputType.number),
+          SizedBox(height:12),
+          Row(children: [Expanded(child: FilledButton(onPressed: (){
+            setState((){
+              if(curCode=='') roster.remove(k(d)); else roster[k(d)]=curCode;
+              if(noteC.text=='') notes.remove(k(d)); else notes[k(d)]=noteC.text;
+              double? vv=double.tryParse(exC.text); if(vv==null||vv==0) extra.remove(k(d)); else extra[k(d)]=vv;
+              save();
+            }); Navigator.pop(ctx);
+          }, child: Text('保存')))]),
+          SizedBox(height:20),
+        ])));
+      });
+    });
   }
 
-  @override
-  void initState() { super.initState(); load(); }
-
-  void autoRoster() {
-    List<String> pattern = [];
-    for (var s in shifts) { if (s.isWork && s.code!= 'OT') pattern.add(s.code); }
-    DateTime start = DateTime(focused.year, focused.month, 1);
-    DateTime end = DateTime(focused.year, focused.month + 1, 0);
-    int idx = 0;
+  void autoRosterSimple(){
+    List<String> pat=[]; for(var s in shifts){ if(s.isWork&&s.code!='OT') pat.add(s.code); }
+    DateTime start=DateTime(focused.year,focused.month,1); DateTime end=DateTime(focused.year,focused.month+1,0); int idx=0;
     setState((){
-      for (DateTime d=start; d.isBefore(end.add(Duration(days:1))); d=d.add(Duration(days:1))) {
-        String key = k(d);
-        if (roster.containsKey(key) == false) {
-          if (d.weekday == 7) { roster[key]='O'; } else {
-            if (pattern.length > 0) {
-              roster[key]=pattern[idx % pattern.length];
-              idx = idx + 1;
-            }
-          }
+      for(DateTime d=start; d.isBefore(end.add(Duration(days:1))); d=d.add(Duration(days:1))){
+        String key=k(d); if(roster.containsKey(key)==false){
+          if(d.weekday==7) roster[key]='O'; else if(pat.isNotEmpty){ roster[key]=pat[idx%pat.length]; idx++; }
         }
-      }
-      save();
-    });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已自動排更 ${focused.month}月')));
-  }
-
-  void exportCsv() {
-    StringBuffer sb = StringBuffer();
-    sb.writeln('日期,星期,班次,開工,收工,工時,津貼');
-    List<String> keys = roster.keys.toList(); keys.sort();
-    for (var key in keys) {
-      DateTime d = DateTime.parse(key);
-      if (d.year == focused.year && d.month == focused.month) {
-        String code = roster[key].toString();
-        Shift s = getShiftByCode(code);
-        sb.writeln('$key,${DateFormat('E').format(d)},${s.code},${s.start},${s.end},${s.hours},${s.bonus}');
-      }
-    }
-    sb.writeln('');
-    sb.writeln('本月總工時,${monthlyHours()}');
-    sb.writeln('標準,${standardWeekly * 4}');
-    showDialog(context: context, builder: (c){
-      return AlertDialog(title: Text('Excel CSV匯出'), content: SingleChildScrollView(child: SelectableText(sb.toString())), actions: [TextButton(onPressed: (){Navigator.pop(c);}, child: Text('關閉'))]);
+      } save();
     });
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: [buildCal(), buildReport(), buildSettings()][tab],
-      bottomNavigationBar: NavigationBar(selectedIndex: tab, onDestinationSelected: (i){ setState((){ tab=i; }); }, destinations: [
-        NavigationDestination(icon: Icon(Icons.calendar_month), label: '月曆'),
-        NavigationDestination(icon: Icon(Icons.bar_chart), label: '報表'),
-        NavigationDestination(icon: Icon(Icons.settings), label: '設定'),
-      ]),
-    );
+  // 特別模式創建 7x22
+  void createPattern(){
+    TextEditingController nameC=TextEditingController(text:'我的22行${patterns.length+1}');
+    int rows=22;
+    showDialog(context: context, builder: (ctx){
+      return AlertDialog(title: Text('創造特別班次模式 7x22'), content: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: nameC, decoration: InputDecoration(labelText:'模式名稱')),
+        SizedBox(height:8), Text('行數 $rows 行 x 7天 = ${rows*7}日週期'),
+      ]), actions: [
+        TextButton(onPressed: ()=>Navigator.pop(ctx), child: Text('取消')),
+        FilledButton(onPressed: (){
+          Navigator.pop(ctx);
+          openPatternEditor(RosterPattern(nameC.text, List.filled(rows*7, shifts.first.code)));
+        }, child: Text('下一步編輯'))
+      ]);
+    });
+  }
+  void openPatternEditor(RosterPattern pat){
+    showDialog(context: context, builder: (ctx){
+      return StatefulBuilder(builder: (ctx,setM){
+        return AlertDialog(title: Text('編輯 ${pat.name} - 點格子循環切班'), content: SizedBox(width: double.maxFinite, height: 400, child: GridView.builder(gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount:7, childAspectRatio:1.2), itemCount: pat.codes.length, itemBuilder: (c,i){
+          String code=pat.codes[i]; Shift s=getShiftByCode(code);
+          return GestureDetector(onTap: (){
+            int idx=shifts.indexWhere((e)=>e.code==code); int next=(idx+1)%shifts.length; setM(()=>pat.codes[i]=shifts[next].code);
+          }, child: Container(margin: EdgeInsets.all(2), decoration: BoxDecoration(color: s.color, borderRadius: BorderRadius.circular(4)), child: Center(child: Text('${i+1}\n$code', textAlign:TextAlign.center, style: TextStyle(color:Colors.white, fontSize:10)))));
+        })), actions: [
+          TextButton(onPressed: ()=>Navigator.pop(ctx), child: Text('取消')),
+          FilledButton(onPressed: (){
+            setState((){ patterns.add(pat); save(); }); Navigator.pop(ctx);
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已保存 ${pat.name}')));
+          }, child: Text('保存模式'))
+        ]);
+      });
+    });
+  }
+  void applyPattern(){
+    if(patterns.isEmpty){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('請先創造模式'))); return; }
+    RosterPattern sel=patterns.first;
+    DateTime sDate=DateTime(focused.year,focused.month,1); DateTime eDate=DateTime(focused.year,focused.month+1,0);
+    showDialog(context: context, builder: (ctx){
+      return StatefulBuilder(builder: (ctx,setM){
+        return AlertDialog(title: Text('套用特別模式排更'), content: Column(mainAxisSize: MainAxisSize.min, children: [
+          DropdownButton<RosterPattern>(value: sel, isExpanded:true, items: [for(var p in patterns) DropdownMenuItem(value:p, child: Text(p.name))], onChanged: (v){ if(v!=null) setM(()=>sel=v); }),
+          SizedBox(height:8),
+          ListTile(title: Text('開始 ${DateFormat('yyyy-MM-dd').format(sDate)}'), onTap: () async { DateTime? d=await showDatePicker(context: ctx, firstDate: DateTime(2024), lastDate: DateTime(2030), initialDate: sDate); if(d!=null) setM(()=>sDate=d); }),
+          ListTile(title: Text('結束 ${DateFormat('yyyy-MM-dd').format(eDate)}'), onTap: () async { DateTime? d=await showDatePicker(context: ctx, firstDate: DateTime(2024), lastDate: DateTime(2030), initialDate: eDate); if(d!=null) setM(()=>eDate=d); }),
+        ]), actions: [
+          TextButton(onPressed: ()=>Navigator.pop(ctx), child: Text('取消')),
+          FilledButton(onPressed: (){
+            setState((){
+              int idx=0; for(DateTime d=sDate;!d.isAfter(eDate); d=d.add(Duration(days:1))){ roster[k(d)]=sel.codes[idx%sel.codes.length]; idx++; } save();
+            }); Navigator.pop(ctx);
+          }, child: Text('開始排更'))
+        ]);
+      });
+    });
   }
 
-  Widget buildCal() {
+  @override Widget build(BuildContext context){
+    return Scaffold(body: [buildCal(), buildReport(), buildSettings()][tab], bottomNavigationBar: NavigationBar(selectedIndex: tab, onDestinationSelected: (i){setState(()=>tab=i);}, destinations: [NavigationDestination(icon: Icon(Icons.calendar_month), label:'月曆'), NavigationDestination(icon: Icon(Icons.bar_chart), label:'報表'), NavigationDestination(icon: Icon(Icons.settings), label:'設定')]));
+  }
+
+  Widget buildCal(){
     return Scaffold(
-      appBar: AppBar(
-        title: Text('W${isoWeek(focused).toString().padLeft(2,'0')} ${DateFormat('yyyy年M月').format(focused)}'),
-        actions: [
-          IconButton(onPressed: autoRoster, icon: Icon(Icons.auto_awesome)),
-          IconButton(onPressed: exportCsv, icon: Icon(Icons.share)),
-        ],
-      ),
+      appBar: AppBar(title: GestureDetector(onTap: pickYearMonth, child: Row(children: [Text('W${isoWeek(focused).toString().padLeft(2,'0')} ${DateFormat('yyyy年M月').format(focused)}'), Icon(Icons.arrow_drop_down)])), actions: [IconButton(onPressed: autoRosterSimple, icon: Icon(Icons.auto_awesome)), IconButton(onPressed: createPattern, icon: Icon(Icons.dashboard_customize)), IconButton(onPressed: applyPattern, icon: Icon(Icons.playlist_play))]),
       body: Column(children: [
         TableCalendar(
-          firstDay: DateTime(2024,1,1),
-          lastDay: DateTime(2030,12,31),
-          focusedDay: focused,
+          firstDay: DateTime(2024,1,1), lastDay: DateTime(2030,12,31), focusedDay: focused,
+          rowHeight: 90, daysOfWeekHeight: 22,
           startingDayOfWeek: StartingDayOfWeek.monday,
-          headerStyle: HeaderStyle(formatButtonVisible: false),
-          selectedDayPredicate: (d){ return isSameDay(selected, d); },
-          onDaySelected: (s,f){ setState((){ selected=s; focused=f; }); },
-          onPageChanged: (f){ setState((){ focused=f; }); },
+          headerVisible:false,
+          selectedDayPredicate: (d)=>isSameDay(selected,d),
+          onDaySelected: (s,f){ setState((){selected=s; focused=f;}); onCellTap(s); },
+          onPageChanged: (f){ setState(()=>focused=f); },
           calendarBuilders: CalendarBuilders(
-            dowBuilder: (ctx, day){
-              if (day.weekday == 1) { return Center(child: Text('一\nW${isoWeek(day)}', textAlign: TextAlign.center, style: TextStyle(fontSize:10, fontWeight: FontWeight.bold, color: Colors.indigo))); }
-              return null;
-            },
-            defaultBuilder: (ctx, day, f){
-              String key = k(day);
-              if (roster.containsKey(key) == false) return null;
-              String code = roster[key].toString();
-              Shift s = getShiftByCode(code);
-              if (s.code == '') return null;
-              return Container(margin: EdgeInsets.all(3), decoration: BoxDecoration(color: s.color, borderRadius: BorderRadius.circular(6)), child: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(day.day.toString(), style: TextStyle(color: Colors.white, fontSize:12, fontWeight: FontWeight.bold)), Text(s.code, style: TextStyle(color: Colors.white, fontSize:9))])));
+            defaultBuilder: (ctx,day,f){
+              String key=k(day); String? code=roster[key]; Shift? sh=code!=null?getShiftByCode(code):null; bool isToday=isSameDay(day, DateTime.now()); bool isSel=isSameDay(day, selected);
+              bool isMon=day.weekday==1;
+              return GestureDetector(onTap: ()=>onCellTap(day), child: Container(margin: EdgeInsets.all(2), decoration: BoxDecoration(color: sh!=null?sh.color:Colors.grey.shade100, borderRadius: BorderRadius.circular(8), border: isToday?Border.all(color:Colors.amber, width:3): isSel?Border.all(color:Colors.indigo, width:2):null), child: Stack(children: [
+                if(isMon) Positioned(top:2, left:2, child: Container(padding: EdgeInsets.symmetric(horizontal:3, vertical:1), decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(3)), child: Text('W${isoWeek(day)}', style: TextStyle(color:Colors.white, fontSize:8)))),
+                Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Text(day.day.toString(), style: TextStyle(fontSize: cellFontSize+2, fontWeight: FontWeight.bold, color: sh!=null?Colors.white:Colors.black87)),
+                  if(sh!=null) Text(sh.code, style: TextStyle(fontSize: cellFontSize, color:Colors.white, fontWeight: FontWeight.w600)),
+                  if(notes.containsKey(key)) Icon(Icons.sticky_note_2, size:12, color:Colors.white),
+                  if(extra.containsKey(key)) Text('+${extra[key]}h', style: TextStyle(fontSize:8, color:Colors.white)),
+                ])),
+              ])));
             },
           ),
         ),
-        Container(color: Colors.indigo.shade50, padding: EdgeInsets.all(8), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Text('週 ${weeklyHours(selected)} / $standardWeekly h', style: TextStyle(fontWeight: FontWeight.bold)),
-          Text('差 ${(weeklyHours(selected)-standardWeekly).toStringAsFixed(1)}h', style: TextStyle(color: weeklyHours(selected)>standardWeekly?Colors.red:Colors.green, fontSize:12)),
+        Container(color: Colors.indigo.shade50, padding: EdgeInsets.all(8), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('${DateFormat('MM/dd E').format(selected)} ${roster[k(selected)]??'未排'} ${(extra[k(selected)]!=null)?'+${extra[k(selected)]}h':''} ${notes[k(selected)]??''}', style: TextStyle(fontWeight: FontWeight.bold)),
         ])),
-        Expanded(child: SingleChildScrollView(padding: EdgeInsets.all(8), child: Column(children: [
-          Wrap(spacing:6, runSpacing:6, alignment: WrapAlignment.center, children: [
-            for (var s in shifts) ChoiceChip(label: Text(s.code), selected: roster.containsKey(k(selected)) && roster[k(selected)]==s.code, selectedColor: s.color.withOpacity(0.4), onSelected: (v){ setState((){ roster[k(selected)]=s.code; save(); }); }),
-            ActionChip(label: Text('清除'), onPressed: (){ setState((){ roster.remove(k(selected)); save(); }); }),
-          ]),
-        ]))),
       ]),
     );
   }
-
-  Widget buildReport() {
-    double wh = weeklyHours(selected);
-    double mh = monthlyHours();
-    int nightCount = 0; int workCount=0; int phCount=0;
-    for (var v in roster.values) { if (v=='夜') nightCount++; if (v=='PH') phCount++; }
-    for (var key in roster.keys) { DateTime d=DateTime.parse(key); if (d.year==focused.year && d.month==focused.month) { String code=roster[key].toString(); Shift s=getShiftByCode(code); if (s.isWork) workCount++; } }
-    return Scaffold(
-      appBar: AppBar(title: Text('工時 津貼 報表')),
-      body: ListView(padding: EdgeInsets.all(16), children: [
-        Card(child: ListTile(title: Text('1. 每班工時'), subtitle: Text(shifts.map((e)=>'${e.code}:${e.hours}h ${e.start}-${e.end}').join('\n')))),
-        Card(child: ListTile(title: Text('2. 本週實際 $wh h / 標準 $standardWeekly'), subtitle: Text('差額 ${wh-standardWeekly}h'))),
-        Card(child: ListTile(title: Text('3. 銀行 ${(mh-standardWeekly*4).toStringAsFixed(1)}h 月總 $mh h'))),
-        Divider(),
-        Card(color: Colors.amber.shade50, child: ListTile(title: Text('津貼'), subtitle: Text('夜更 $nightCount x 80\n交通 $workCount x $transportBonus\n假日 $phCount x $holidayBonus\n總計 ${nightCount*80 + workCount*transportBonus + phCount*holidayBonus}'))),
-        SizedBox(height:12),
-        FilledButton.icon(onPressed: exportCsv, icon: Icon(Icons.table_chart), label: Text('Excel匯出')),
-      ]),
-    );
-  }
-
-  Widget buildSettings() {
-    return Scaffold(
-      appBar: AppBar(title: Text('設定')),
-      body: ListView(padding: EdgeInsets.all(16), children: [
-        for (var s in shifts) Card(child: ListTile(
-          leading: CircleAvatar(backgroundColor: s.color, child: Text(s.code, style: TextStyle(color: Colors.white, fontSize:10))),
-          title: Text('${s.name} (${s.code}) ${s.start}-${s.end} ${s.hours}h'),
-          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-            IconButton(icon: Icon(Icons.edit, size:18), onPressed: (){ editShift(s); }),
-            IconButton(icon: Icon(Icons.delete, size:18), onPressed: (){ setState((){ shifts.remove(s); save(); }); }),
-          ]),
-        )),
-        FilledButton.icon(onPressed: addShift, icon: Icon(Icons.add), label: Text('新增班次')),
-        Divider(),
-        ListTile(title: Text('每週標準 $standardWeekly h'), subtitle: Slider(value: standardWeekly, min: 30, max: 60, divisions: 30, label: standardWeekly.toString(), onChanged: (v){ setState((){ standardWeekly=v; save(); }); })),
-      ]),
-    );
-  }
-
-  void askNumber(String title, double current, Function(double) onOk) {
-    TextEditingController c = TextEditingController(text: current.toString());
-    showDialog(context: context, builder: (ctx){
-      return AlertDialog(title: Text(title), content: TextField(controller: c, keyboardType: TextInputType.number), actions: [
-        TextButton(onPressed: (){Navigator.pop(ctx);}, child: Text('取消')),
-        FilledButton(onPressed: (){
-          double finalVal = current;
-          double? parsed = double.tryParse(c.text);
-          if (parsed!= null) finalVal = parsed;
-          onOk(finalVal);
-          Navigator.pop(ctx);
-        }, child: Text('確定'))
-      ]);
-    });
-  }
-
-  void addShift() {
-    TextEditingController codeC = TextEditingController();
-    TextEditingController nameC = TextEditingController();
-    TextEditingController sC = TextEditingController(text:'09:00');
-    TextEditingController eC = TextEditingController(text:'18:00');
-    TextEditingController hC = TextEditingController(text:'8');
-    showDialog(context: context, builder: (ctx){
-      return AlertDialog(title: Text('新增班次'), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        TextField(controller: codeC, decoration: InputDecoration(labelText:'代碼')),
-        TextField(controller: nameC, decoration: InputDecoration(labelText:'名稱')),
-        TextField(controller: sC, decoration: InputDecoration(labelText:'開工')),
-        TextField(controller: eC, decoration: InputDecoration(labelText:'收工')),
-        TextField(controller: hC, decoration: InputDecoration(labelText:'工時'), keyboardType: TextInputType.number),
-      ])), actions: [
-        TextButton(onPressed: (){Navigator.pop(ctx);}, child: Text('取消')),
-        FilledButton(onPressed: (){
-          double hh = 8;
-          double? tmp = double.tryParse(hC.text);
-          if (tmp!= null) hh = tmp;
-          setState((){
-            shifts.add(Shift(codeC.text==''?'新':codeC.text, nameC.text==''?codeC.text:nameC.text, sC.text, eC.text, Colors.primaries[shifts.length%18].value, hh, 0, true));
-            save();
-          });
-          Navigator.pop(ctx);
-        }, child: Text('新增'))
-      ]);
-    });
-  }
-
-  void editShift(Shift s) {
-    TextEditingController nameC = TextEditingController(text:s.name);
-    TextEditingController sC = TextEditingController(text:s.start);
-    TextEditingController eC = TextEditingController(text:s.end);
-    TextEditingController hC = TextEditingController(text:s.hours.toString());
-    TextEditingController bC = TextEditingController(text:s.bonus.toString());
-    showDialog(context: context, builder: (ctx){
-      return AlertDialog(title: Text('編輯 ${s.code}'), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        TextField(controller: nameC, decoration: InputDecoration(labelText:'名稱')),
-        TextField(controller: sC, decoration: InputDecoration(labelText:'開工時間')),
-        TextField(controller: eC, decoration: InputDecoration(labelText:'收工時間')),
-        TextField(controller: hC, decoration: InputDecoration(labelText:'工時')),
-        TextField(controller: bC, decoration: InputDecoration(labelText:'津貼')),
-      ])), actions: [
-        TextButton(onPressed: (){Navigator.pop(ctx);}, child: Text('取消')),
-        FilledButton(onPressed: (){
-          setState((){
-            s.name=nameC.text;
-            s.start=sC.text;
-            s.end=eC.text;
-            double? h = double.tryParse(hC.text);
-            if (h!=null) s.hours=h;
-            double? b = double.tryParse(bC.text);
-            if (b!=null) s.bonus=b;
-            save();
-          });
-          Navigator.pop(ctx);
-        }, child: Text('保存'))
-      ]);
-    });
+  Widget buildReport(){ return Scaffold(appBar: AppBar(title: Text('報表')), body: ListView(padding: EdgeInsets.all(16), children: [Text('本月 ${roster.keys.where((e){ var d=DateTime.parse(e); return d.year==focused.year&&d.month==focused.month; }).length} 日 已排')])) ;}
+  Widget buildSettings(){
+    return Scaffold(appBar: AppBar(title: Text('設定')), body: ListView(padding: EdgeInsets.all(16), children: [
+      Text('格子文字大小 ${cellFontSize.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.bold)),
+      Slider(value: cellFontSize, min:8, max:20, divisions:12, label: cellFontSize.toStringAsFixed(0), onChanged: (v){ setState(()=>cellFontSize=v); save(); }),
+      Divider(),
+      for(var s in shifts) Card(child: ListTile(leading: CircleAvatar(backgroundColor: s.color, child: Text(s.code, style: TextStyle(color:Colors.white, fontSize:10))), title: Text('${s.name} ${s.code} ${s.start}-${s.end} ${s.hours}h'))),
+      Divider(),
+      Text('自訂排更模式', style: TextStyle(fontWeight: FontWeight.bold, fontSize:16)),
+      for(var p in patterns) Card(child: ListTile(title: Text(p.name), subtitle: Text('${p.codes.length}日 ${p.codes.take(14).join(',')}...'), trailing: IconButton(icon: Icon(Icons.delete), onPressed: (){ setState(()=>patterns.remove(p)); save(); }))),
+      FilledButton.icon(onPressed: createPattern, icon: Icon(Icons.add), label: Text('新增 7x22 模式')),
+      FilledButton.icon(onPressed: applyPattern, icon: Icon(Icons.play_arrow), label: Text('套用模式排更')),
+    ]));
   }
 }
