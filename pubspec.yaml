@@ -2,10 +2,8 @@ name: roster_pro
 description: Roster Pro Full
 publish_to: 'none'
 version: 3.0.1+1
-
 environment:
   sdk: '>=3.2.0 <4.0.0'
-
 dependencies:
   flutter:
     sdk: flutter
@@ -15,11 +13,10 @@ dependencies:
   path_provider: ^2.1.2
   google_sign_in: ^6.2.1
   googleapis: ^13.1.0
-
+  extension_google_sign_in_as_googleapis_auth: ^2.0.12
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
-
 flutter:
   uses-material-design: true
