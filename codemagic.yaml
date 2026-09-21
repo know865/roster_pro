@@ -7,10 +7,11 @@ workflows:
     scripts:
       - name: Fix Android - recreate gradle
         script: |
-          echo "Fixing Gradle"
           rm -rf android
           flutter create. --platforms=android --project-name roster_pro --org com.example.rosterpro
           flutter pub get
+          echo "SHA1 for Google Console"
+          keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android | grep SHA1 || true
       - name: Build APK
         script: flutter build apk --release --no-tree-shake-icons
     artifacts:
