@@ -1,25 +1,19 @@
 workflows:
   Default Workflow:
     name: Default Workflow
-    instance_type: mac_mini_m2
-    max_build_duration: 60
     environment:
       flutter: 3.22.2
       java: 17
-      xcode: latest
-      cocoapods: default
     scripts:
-      - name: Fix old Android project
+      - name: Safe fix - never overwrite lib
         script: |
-          rm -rf android ios web linux macos windows
-          flutter create . --platforms=android --project-name roster_pro --org com.example.rosterpro
+          if [ ! -d "android" ]; then
+            flutter create . --platforms=android --project-name roster_pro --org com.example.rosterpro
+          fi
           flutter pub get
           echo "==== SHA1 FOR GOOGLE CONSOLE ===="
           keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android | grep SHA1 || true
       - name: Build APK
-        script: |
-          flutter build apk --release --no-tree-shake-icons
+        script: flutter build apk --release --no-tree-shake-icons
     artifacts:
       - build/**/outputs/**/*.apk
-      - build/**/outputs/**/mapping.txt
-      - flutter_drive.log
