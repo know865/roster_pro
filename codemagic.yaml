@@ -5,14 +5,12 @@ workflows:
       flutter: 3.22.2
       java: 17
     scripts:
-      - name: Safe fix - never overwrite lib
+      - name: Safe fix
         script: |
           if [ ! -d "android" ]; then
             flutter create . --platforms=android --project-name roster_pro --org com.example.rosterpro
           fi
           flutter pub get
-          echo "==== SHA1 FOR GOOGLE CONSOLE ===="
-          keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android | grep SHA1 || true
       - name: Build APK
         script: flutter build apk --release --no-tree-shake-icons
     artifacts:
