@@ -1,4 +1,5 @@
-import 'dart:convert'; import 'dart:io';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -14,12 +15,13 @@ class ShiftDef{
   factory ShiftDef.fromJson(Map<String,dynamic> j)=>ShiftDef(j['code'],j['label']??j['code'],(j['hours']??8).toDouble(),Color(j['color']??0xFFFF9800),allowance:(j['allowance']??0).toDouble(),ot:(j['ot']??0).toDouble(),start:j['start']??'07:00',end:j['end']??'15:30');
 }
 class ExtraAllowance{
-  String name; double amount; String time; ExtraAllowance(this.name,this.amount,this.time);
+  String name; double amount; String time;
+  ExtraAllowance(this.name,this.amount,this.time);
   Map<String,dynamic> toJson()=>{'name':name,'amount':amount,'time':time};
   factory ExtraAllowance.fromJson(Map<String,dynamic> j)=>ExtraAllowance(j['name'],(j['amount'] as num).toDouble(),j['time']??'00:00');
-  int get minutes{var p=time.split(':'); return int.parse(p[0])*60+int.parse(p[1]);}
+  int get minutes{try{var p=time.split(':'); return int.parse(p[0])*60+int.parse(p[1]);}catch(_){return 0;}}
 }
-class RosterApp extends StatelessWidget{const RosterApp({super.key}); @override Widget build(BuildContext context){return MaterialApp(title:'Roster Pro v6.37',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage());}}
+class RosterApp extends StatelessWidget{const RosterApp({super.key}); @override Widget build(BuildContext context){return MaterialApp(title:'Roster Pro v6.38',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage());}}
 const Map<String,String> hkHolidays={'2026-09-26':'中秋翌日','2026-10-01':'國慶','2026-12-25':'聖誕'};
 
 class MainPage extends StatefulWidget{const MainPage({super.key}); @override State<MainPage> createState()=>MainPageState();}
@@ -70,7 +72,6 @@ void quickJumpMonth({bool forReport=false}){
   ]),actions:[TextButton(onPressed:()=>Navigator.pop(ctx2),child:const Text('取消')),FilledButton(onPressed:(){setState(()=>focused=DateTime(y,m,1));Navigator.pop(ctx2);},child:const Text('跳轉'))]);});});
 }
 
-// 5. 備份到任意位置
 Future<void> backupAnywhere() async{
   String? dir=await FilePicker.platform.getDirectoryPath(dialogTitle:'選擇備份位置');
   if(dir==null) return;
@@ -95,7 +96,6 @@ Future<void> restoreLocalFile() async{
   }catch(e){if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('還原失敗 $e')));}
 }
 
-// 1. 報表匯出
 Future<void> exportReport() async{
   int dim=DateTime(focused.year,focused.month+1,0).day;
   double hrs=0,allow=0,ot=0; Map<String,int> shiftCount={}; Map<String,double> shiftHours={};
@@ -106,18 +106,22 @@ Future<void> exportReport() async{
   shiftCount.forEach((k,v){var d=defs[k]; sb.writeln('$k-${d?.label??''},$v,${shiftHours[k]},${(d?.allowance??0)*v}');});
   sb.writeln('總工時,$hrs'); sb.writeln('OT,$ot,金額,\$${ot*overtimeRate}'); sb.writeln('津貼總額,\$${allow+ot*overtimeRate}');
   String? path=await FilePicker.platform.saveFile(dialogTitle:'匯出報表',fileName:'report_${focused.year}_${focused.month}.csv',type:FileType.custom,allowedExtensions:['csv','txt']);
-  if(path==null){ // fallback 到下載資料夾
-    var dir=await getTemporaryDirectory(); var f=File('${dir.path}/report_${focused.year}_${focused.month}.csv'); await f.writeAsString(sb.toString()); if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已匯出到暫存 ${f.path}')));
-  }else{
-    var f=File(path); await f.writeAsString(sb.toString()); if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已匯出到 $path')));
-  }
+  if(path==null){var dir=await getTemporaryDirectory(); var f=File('${dir.path}/report_${focused.year}_${focused.month}.csv'); await f.writeAsString(sb.toString()); if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已匯出到暫存 ${f.path}')));}
+  else{var f=File(path); await f.writeAsString(sb.toString()); if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已匯出到 $path')));}
 }
 
 Widget calTab(){
-  DateTime first=DateTime(focused.year,focused.month,1); DateTime start=first.subtract(Duration(days:first.weekday-1));
-  List<DateTime> days=List.generate(42,(i)=>start.add(Duration(days:i)));
+  DateTime first=DateTime(focused.year,focused.month,1);
+  DateTime start=first.subtract(Duration(days:first.weekday-1));
+  int daysInMonth=DateTime(focused.year,focused.month+1,0).day;
+  int neededCells=first.weekday-1+daysInMonth;
+  int weeks=(neededCells/7).ceil();
+  if(weeks<5) weeks=5; if(weeks>6) weeks=6;
+  List<DateTime> days=List.generate(weeks*7,(i)=>start.add(Duration(days:i)));
   String selKey=DateFormat('yyyy-MM-dd').format(selectedDay);
-  var selDef=roster[selKey]!=null?defs[roster[selKey]]:null; double selOt=rosterOt[selKey]??selDef?.ot??0;
+  var selDef=roster[selKey]!=null?defs[roster[selKey]]:null;
+  double selOt=rosterOt[selKey]??selDef?.ot??0;
+  String note=rosterNote[selKey]??'無';
   return SafeArea(child:Column(children:[
     Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),child:Row(children:[
       InkWell(onTap:()=>quickJumpMonth(),child:Row(children:[Text('${focused.year}年${focused.month}月',style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold)),const Icon(Icons.arrow_drop_down)])),
@@ -125,12 +129,12 @@ Widget calTab(){
       FilledButton.tonal(onPressed:(){setState((){focused=DateTime.now();selectedDay=DateTime.now();});},child:const Text('今天')),
     ])),
     Padding(padding:const EdgeInsets.symmetric(horizontal:6),child:Row(children:[Container(width:32,child:const Text('週',textAlign:TextAlign.center,style:TextStyle(fontWeight:FontWeight.bold,fontSize:11))),Expanded(child:Row(children:["一","二","三","四","五","六","日"].map((w)=>Expanded(child:Text(w,textAlign:TextAlign.center,style:const TextStyle(fontSize:11)))).toList()))])),
-    Expanded(child:ListView.builder(itemCount:6,padding:EdgeInsets.zero,itemBuilder:(ctx,row){
+    ListView.builder(shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),padding:EdgeInsets.zero,itemCount:weeks,itemBuilder:(ctx,row){
       return Row(children:[
         Container(width:32,alignment:Alignment.center,child:Text('W${isoWeek(days[row*7])}',style:const TextStyle(fontSize:10,color:Colors.grey,fontWeight:FontWeight.bold))),
         Expanded(child:GridView.builder(shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),padding:const EdgeInsets.all(3),gridDelegate:const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount:7,childAspectRatio:0.78,mainAxisSpacing:4,crossAxisSpacing:4),itemCount:7,itemBuilder:(ctx2,col){
           int idx=row*7+col; DateTime day=days[idx]; bool inM=day.month==focused.month; String k=DateFormat('yyyy-MM-dd').format(day);
-          String? code=roster[k]; var def=code!=null?defs[code]:null; bool sel=k==selKey; bool hasNote=rosterNote[k]!=null && rosterNote[k]!.isNotEmpty;
+          String? code=roster[k]; var def=code!=null?defs[code]:null; bool sel=k==selKey;
           Color bg=!inM?const Color(0xFFF5F5F0):sel?Colors.white:def!=null?def.color.withOpacity(0.18):const Color(0xFFFFF0D0);
           return GestureDetector(onTap:(){setState(()=>selectedDay=day);},child:Container(decoration:BoxDecoration(color:bg,borderRadius:BorderRadius.circular(12),border:sel?Border.all(width:2,color:Colors.deepPurple):null),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[
             Text('${day.day}',style:TextStyle(fontWeight:FontWeight.bold,fontSize:calendarFontSize-2,color:inM?Colors.black:Colors.grey)),
@@ -138,13 +142,25 @@ Widget calTab(){
           ])));
         })),
       ]);
-    })),
-    // 2. 貼近日曆底部，無空隙
-    Container(margin:EdgeInsets.zero,padding:const EdgeInsets.fromLTRB(12,8,12,8),decoration:BoxDecoration(color:Colors.white,border:Border(top:BorderSide(color:Colors.grey.shade300))),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-      Text('${DateFormat('MM/dd EEE').format(selectedDay)} ${roster[selKey]??'未排班'}',style:const TextStyle(fontSize:14,fontWeight:FontWeight.bold)),
-      const SizedBox(height:4),
-      Container(padding:const EdgeInsets.symmetric(horizontal:10,vertical:6),decoration:BoxDecoration(color:Colors.grey.shade100,borderRadius:BorderRadius.circular(8)),child:Text('班次：${selDef?.label??'無'} | OT：${selOt}h | 記事：${rosterNote[selKey]??'無'}',style:const TextStyle(fontSize:12))),
-      const SizedBox(height:6), SizedBox(width:double.infinity,height:40,child:OutlinedButton.icon(onPressed:(){showDetail(selectedDay);},icon:const Icon(Icons.edit,size:16),label:const Text('編輯此日',style:TextStyle(fontSize:12)))),
+    }),
+    Container(width:double.infinity,padding:const EdgeInsets.fromLTRB(12,10,12,10),decoration:const BoxDecoration(color:Colors.white,border:Border(top:BorderSide(color:Color(0xFFE0E0E0)))),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+      Row(children:[
+        Text('${DateFormat('MM/dd EEE').format(selectedDay)} ${roster[selKey]??'未排班'}',style:const TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
+        const Spacer(),
+        if(selDef!=null) Container(padding:const EdgeInsets.symmetric(horizontal:10,vertical:4),decoration:BoxDecoration(color:selDef.color,borderRadius:BorderRadius.circular(12)),child:Text(selDef.code,style:const TextStyle(color:Colors.white,fontWeight:FontWeight.bold,fontSize:12))),
+      ]),
+      const SizedBox(height:8),
+      Container(width:double.infinity,padding:const EdgeInsets.all(10),decoration:BoxDecoration(color:const Color(0xFFF5F5F5),borderRadius:BorderRadius.circular(10)),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+        Text('班次：${selDef?.label??'無'} ${selDef!=null?'(${selDef.code})':''}',style:const TextStyle(fontSize:13,fontWeight:FontWeight.bold)),
+        const SizedBox(height:4),
+        Text('時間：${selDef!=null?'${selDef.start} - ${selDef.end} | ${selDef.hours.toStringAsFixed(1)}h': '無'} | 津貼：\$${selDef?.allowance??0}',style:const TextStyle(fontSize:12)),
+        const SizedBox(height:4),
+        Text('OT：${selOt.toStringAsFixed(1)}h (標準 \$${overtimeRate.toStringAsFixed(0)}/h = \$${(selOt*overtimeRate).toStringAsFixed(1)})',style:const TextStyle(fontSize:12)),
+        const SizedBox(height:4),
+        Text('記事：${note.isEmpty?'無':note}',style:const TextStyle(fontSize:12),maxLines:3,overflow:TextOverflow.ellipsis),
+      ])),
+      const SizedBox(height:8),
+      SizedBox(width:double.infinity,height:42,child:OutlinedButton.icon(onPressed:(){showDetail(selectedDay);},icon:const Icon(Icons.edit,size:16),label:const Text('編輯此日'))),
     ])),
   ]));
 }
@@ -174,23 +190,23 @@ Widget reportTab(){
   double extraTotal=0; Map<String,double> extraBreakdown={}; for(var ex in extraAllowances){double sum=0; for(var day in dailyForExtra){ if(day['startMin']>=ex.minutes) sum+=ex.amount; } if(sum>0){extraBreakdown[ex.name]=sum; extraTotal+=sum;}}
   double otAmount=ot * overtimeRate; double totalAllow=allow + extraTotal + otAmount;
   return SafeArea(child:ListView(padding:const EdgeInsets.all(12),children:[
-    Row(children:[InkWell(onTap:()=>quickJumpMonth(forReport:true),child:Row(children:[Text('${focused.year}年${focused.month}月 報表',style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold)),const Icon(Icons.arrow_drop_down)])),const Spacer(),IconButton(icon:const Icon(Icons.ios_share),onPressed:exportReport,tooltip:'匯出報表'), FilledButton.tonal(onPressed:exportReport,child:const Text('匯出'))]),
+    Row(children:[InkWell(onTap:()=>quickJumpMonth(forReport:true),child:Row(children:[Text('${focused.year}年${focused.month}月 報表',style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold)),const Icon(Icons.arrow_drop_down)])),const Spacer(),IconButton(icon:const Icon(Icons.ios_share),onPressed:exportReport,tooltip:'匯出'), FilledButton.tonal(onPressed:exportReport,child:const Text('匯出'))]),
     const SizedBox(height:8),
     Card(color:const Color(0xFFE3F2FD),child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
       const Text('班次統計',style:TextStyle(fontWeight:FontWeight.bold)), const Divider(),
-    ...shiftCount.entries.map((e){double h=shiftHours[e.key]??0; var d=defs[e.key]; return Padding(padding:const EdgeInsets.symmetric(vertical:2),child:Row(children:[Container(width:28,height:28,decoration:BoxDecoration(color:d?.color??Colors.grey,borderRadius:BorderRadius.circular(6)),child:Center(child:Text(e.key,style:const TextStyle(color:Colors.white,fontSize:11)))), const SizedBox(width:8), Text('${d?.label??e.key}'), const Spacer(), Text('${e.value}次 / ${h.toStringAsFixed(1)}h',style:const TextStyle(fontWeight:FontWeight.bold)),]));}),
+   ...shiftCount.entries.map((e){double h=shiftHours[e.key]??0; var d=defs[e.key]; return Padding(padding:const EdgeInsets.symmetric(vertical:2),child:Row(children:[Container(width:28,height:28,decoration:BoxDecoration(color:d?.color??Colors.grey,borderRadius:BorderRadius.circular(6)),child:Center(child:Text(e.key,style:const TextStyle(color:Colors.white,fontSize:11)))), const SizedBox(width:8), Text('${d?.label??e.key}'), const Spacer(), Text('${e.value}次 / ${h.toStringAsFixed(1)}h',style:const TextStyle(fontWeight:FontWeight.bold)),]));}),
       const Divider(), Text('總工時 ${hrs.toStringAsFixed(1)}h / 承上 ${carry}h / 合計 ${(hrs+carry).toStringAsFixed(1)}h'),
     ]))),
     Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
       Text('承上 $carry h + 本月 $hrs h = ${carry+hrs}h',style:const TextStyle(fontWeight:FontWeight.bold)), const Divider(), const Text('每週工時統計 (標準 & 承上) 週數',style:TextStyle(fontWeight:FontWeight.bold)),
-    ...weeklyHours.entries.map((e){double avgCarry=weeklyHours.isEmpty?0:carry/weeklyHours.length; double adjusted=e.value + avgCarry; double diff=adjusted - standardWeeklyHours; return Padding(padding:const EdgeInsets.symmetric(vertical:3),child:Row(children:[Text('W${e.key}',style:const TextStyle(fontWeight:FontWeight.bold)), const SizedBox(width:8), Text('${e.value.toStringAsFixed(1)}h +承上${avgCarry.toStringAsFixed(1)} = ${adjusted.toStringAsFixed(1)}h'), const Spacer(), Text('${diff>=0?'+':''}${diff.toStringAsFixed(1)}h',style:TextStyle(color:diff>0?Colors.red:Colors.green,fontWeight:FontWeight.bold)),]));}),
+   ...weeklyHours.entries.map((e){double avgCarry=weeklyHours.isEmpty?0:carry/weeklyHours.length; double adjusted=e.value + avgCarry; double diff=adjusted - standardWeeklyHours; return Padding(padding:const EdgeInsets.symmetric(vertical:3),child:Row(children:[Text('W${e.key}',style:const TextStyle(fontWeight:FontWeight.bold)), const SizedBox(width:8), Text('${e.value.toStringAsFixed(1)}h +承上${avgCarry.toStringAsFixed(1)} = ${adjusted.toStringAsFixed(1)}h'), const Spacer(), Text('${diff>=0?'+':''}${diff.toStringAsFixed(1)}h',style:TextStyle(color:diff>0?Colors.red:Colors.green,fontWeight:FontWeight.bold)),]));}),
       const Divider(), Text('標準 ${standardWeeklyHours}h/週 | 總差額 ${(carry+hrs - standardWeeklyHours*weeklyHours.length).toStringAsFixed(1)}h'),
     ]))),
     Card(color:const Color(0xFFE8F5E9),child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
       const Text('津貼類別',style:TextStyle(fontWeight:FontWeight.bold)),
-    ...allowByCode.entries.map((e)=>Row(children:[Text(e.key),const Spacer(),Text('\$${e.value.toStringAsFixed(1)}')])),
+   ...allowByCode.entries.map((e)=>Row(children:[Text(e.key),const Spacer(),Text('\$${e.value.toStringAsFixed(1)}')])),
       if(extraBreakdown.isNotEmpty) const Divider(),
-    ...extraBreakdown.entries.map((e){var ex=extraAllowances.firstWhere((x)=>x.name==e.key); return Row(children:[Text('${e.key} (${ex.time}起)'),const Spacer(),Text('\$${e.value.toStringAsFixed(1)}')]);}),
+   ...extraBreakdown.entries.map((e){var ex=extraAllowances.firstWhere((x)=>x.name==e.key); return Row(children:[Text('${e.key} (${ex.time}起)'),const Spacer(),Text('\$${e.value.toStringAsFixed(1)}')]);}),
       const Divider(), Row(children:[const Text('班次津貼'),const Spacer(),Text('\$${allow.toStringAsFixed(1)}')]), Row(children:[Text('OT ${ot.toStringAsFixed(1)}h x \$${overtimeRate.toStringAsFixed(0)}'),const Spacer(),Text('\$${otAmount.toStringAsFixed(1)}')]), Row(children:[const Text('額外津貼 (按時分生效)'),const Spacer(),Text('\$${extraTotal.toStringAsFixed(1)}')]), const Divider(), Row(children:[const Text('津貼總額 (含OT)',style:TextStyle(fontWeight:FontWeight.bold)),const Spacer(),Text('\$${totalAllow.toStringAsFixed(1)}',style:const TextStyle(fontWeight:FontWeight.bold))]),
     ]))),
   ]));
@@ -242,7 +258,7 @@ Widget settingsTab(){
     ]));}).toList())),
     const SizedBox(height:16), const Text('新增津貼類別 (時分生效)',style:TextStyle(fontSize:18,fontWeight:FontWeight.bold)),
     Card(child:Column(children:[
-  ...extraAllowances.asMap().entries.map((en){int idx=en.key; var e=en.value; return ListTile(title:Text(e.name),subtitle:Text('\$${e.amount} 生效時間 ${e.time}'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[
+ ...extraAllowances.asMap().entries.map((en){int idx=en.key; var e=en.value; return ListTile(title:Text(e.name),subtitle:Text('\$${e.amount} 生效時間 ${e.time}'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[
         IconButton(icon:const Icon(Icons.edit,size:18),onPressed:(){
           var nCtrl=TextEditingController(text:e.name); var vCtrl=TextEditingController(text:e.amount.toString()); var tCtrl=TextEditingController(text:e.time);
           showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('編輯津貼'),content:Column(mainAxisSize:MainAxisSize.min,children:[
