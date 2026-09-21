@@ -32,10 +32,10 @@ class _S extends State<MainPage>{
   List<Shift> shifts=[]; List<Allowance> allowances=[]; List<Pattern> patterns=[];
   DateTime focused=DateTime.now(), selected=DateTime.now(), reportMonth=DateTime.now();
   double otR=100, transB=20, fs=12;
-  double weeklyStandard=42, prevBalance=0; // 2.承上餘額
+  double weeklyStandard=42, prevBalance=0;
   final double cellH=72;
   bool showAllShifts=false, showHolidays=true, googleCalEnabled=false;
-  int googleCalMode=0; // 3. 日曆同步模式 0單向 1雙向
+  int googleCalMode=0;
   String lastBackup='從未備份', lastDriveBackup='未備份到Drive';
   final GoogleSignIn _gs = GoogleSignIn(scopes: [drive.DriveApi.driveAppdataScope, drive.DriveApi.driveFileScope]);
   final List<int> presetColors=[0xFFFF9800,0xFF2196F3,0xFF3F51B5,0xFF673AB7,0xFF4CAF50,0xFF795548,0xFFE91E63,0xFF009688,0xFFFF5722,0xFF9C27B0];
@@ -70,7 +70,6 @@ class _S extends State<MainPage>{
 
   void pickYM(Function(DateTime) onPick, DateTime init){ int y=init.year,m=init.month; var yc=TextEditingController(text:y.toString()); showDialog(context:context, builder:(ctx)=>StatefulBuilder(builder:(ctx,setM){ return AlertDialog(title:Text('選擇年月'), content:Column(mainAxisSize:MainAxisSize.min, children:[ Row(children:[ IconButton(icon:Icon(Icons.remove), onPressed:(){ setM((){ y-=1; yc.text=y.toString(); }); }), Expanded(child:TextField(controller:yc, textAlign:TextAlign.center)), IconButton(icon:Icon(Icons.add), onPressed:(){ setM((){ y+=1; yc.text=y.toString(); }); }) ]), Wrap(spacing:4, runSpacing:4, children:[ for(int mm=1;mm<=12;mm++) ChoiceChip(label:Text('${mm}月'), selected:m==mm, onSelected:(v){ setM(()=>m=mm); }) ]), ]), actions:[ TextButton(onPressed:()=>Navigator.pop(ctx), child:Text('取消')), FilledButton(onPressed:(){ int? yy=int.tryParse(yc.text); if(yy!=null) y=yy; onPick(DateTime(y,m,1)); Navigator.pop(ctx); }, child:Text('跳轉')) ] ); })); }
   void editCell(DateTime d){ var noteC=TextEditingController(text:notes[k(d)]??''); var exC=TextEditingController(text:(extra[k(d)]??0).toString()); String cur=roster[k(d)]??''; showModalBottomSheet(context:context, isScrollControlled:true, builder:(ctx)=>StatefulBuilder(builder:(ctx,setM){ return Padding(padding:EdgeInsets.only(bottom:MediaQuery.of(ctx).viewInsets.bottom, left:16,right:16,top:16), child:Column(mainAxisSize:MainAxisSize.min, children:[ Text(DateFormat('yyyy-MM-dd EEEE').format(d),style:TextStyle(fontWeight:FontWeight.bold)), Wrap(spacing:6, children:[ for(var s in shifts) ChoiceChip(label:Text(s.code), selected:cur==s.code, onSelected:(v){ setM(()=>cur=v?s.code:''); }) ]), TextField(controller:noteC, decoration:InputDecoration(labelText:'記事'), maxLines:3), TextField(controller:exC, decoration:InputDecoration(labelText:'額外OT')), SizedBox(height:10), FilledButton(onPressed:(){ setState((){ if(cur=='') roster.remove(k(d)); else roster[k(d)]=cur; if(noteC.text=='') notes.remove(k(d)); else notes[k(d)]=noteC.text; var vv=double.tryParse(exC.text); if(vv==null||vv==0) extra.remove(k(d)); else extra[k(d)]=vv; save(); }); Navigator.pop(ctx); }, child:Text('保存')), SizedBox(height:20), ])); })); }
-  // 4. 可編輯顏色
   void editShiftDialog(Shift? old){
     var codeC=TextEditingController(text:old?.code??''); var nameC=TextEditingController(text:old?.name??''); var stC=TextEditingController(text:old?.start??'07:00'); var enC=TextEditingController(text:old?.end??'15:30'); var hC=TextEditingController(text:(old?.h??8).toString()); int selColor=old?.c??0xFFFF9800;
     showDialog(context:context, builder:(ctx)=>StatefulBuilder(builder:(ctx,setM){
@@ -79,7 +78,7 @@ class _S extends State<MainPage>{
         SizedBox(height:12), Align(alignment:Alignment.centerLeft, child:Text('選擇代表顏色',style:TextStyle(fontWeight:FontWeight.bold))),
         SizedBox(height:8),
         Wrap(spacing:8, runSpacing:8, children:[ for(int col in presetColors) GestureDetector(onTap:(){ setM(()=>selColor=col); }, child:Container(width:36,height:36, decoration:BoxDecoration(color:Color(col), shape:BoxShape.circle, border:selColor==col?Border.all(color:Colors.black,width:3):null)), ) ]),
-        SizedBox(height:8), Container(height:30, decoration:BoxDecoration(color:Color(selColor), borderRadius:BorderRadius.circular(8)), child:Center(child:Text('預覽 $selColor',style:TextStyle(color:Colors.white)))),
+        SizedBox(height:8), Container(height:30, decoration:BoxDecoration(color:Color(selColor), borderRadius:BorderRadius.circular(8)), child:Center(child:Text('預覽',style:TextStyle(color:Colors.white)))),
       ])), actions:[ TextButton(onPressed:()=>Navigator.pop(ctx), child:Text('取消')), FilledButton(onPressed:(){ if(codeC.text=='') return; setState((){ var ns=Shift(codeC.text, nameC.text==''?codeC.text:nameC.text, stC.text, enC.text, selColor, double.tryParse(hC.text)??8, true); if(old==null) shifts.add(ns); else { int idx=shifts.indexOf(old); shifts[idx]=ns; } save(); }); Navigator.pop(ctx); }, child:Text('保存')) ]);
     }));
   }
@@ -111,7 +110,6 @@ class _S extends State<MainPage>{
             int idx=r*7+c; DateTime day=days[idx]; bool out=day.month!=focused.month; String dk=k(day); bool isHol=showHolidays&&hkHolidays.containsKey(dk); bool hasNote=notes[dk]!=null&&notes[dk]!=''; bool isToday=k(day)==k(DateTime.now()); bool isSel=dk==k(selected);
             if(out) return Expanded(child:Container(height:cellH, margin:EdgeInsets.symmetric(horizontal:2), decoration:BoxDecoration(color:Color(0xFFF5F5F5), borderRadius:BorderRadius.circular(12)), child:Center(child:Text(day.day.toString(),style:TextStyle(color:Colors.black26)))));
             String? code=roster[dk]; Shift? sh=code!=null?getS(code):null;
-            // 1. 半格/全格邏輯
             Color full=sh?.color??Color(0xFFE0E0E0);
             Color half=sh!=null?full.withOpacity(0.22):Colors.white;
             Color bg=isSel?full:half;
@@ -190,13 +188,13 @@ class _S extends State<MainPage>{
       for(int i=0;i<patterns.length;i++) Card(child:ListTile(title:Text(patterns[i].name), subtitle:Text('${patterns[i].codes.length~/7}行'), trailing:Row(mainAxisSize:MainAxisSize.min, children:[ IconButton(icon:Icon(Icons.edit), onPressed:()=>editPattern(Pattern(patterns[i].name, List.from(patterns[i].codes)), i)), IconButton(icon:Icon(Icons.delete), onPressed:(){ setState(()=>patterns.removeAt(i)); save(); }), ]), )),
       FilledButton.icon(onPressed:createPattern, icon:Icon(Icons.add), label:Text('新增 7 x 自定行數')),
       SizedBox(height:8),
-      // 5. 按指定日期自動排班功能
-      FilledButton.icon(style:FilmedButtonStyle(), onPressed:applyPattern, icon:Icon(Icons.play_arrow), label:Text('按指定日期自動排班 (套用排更)')),
+      FilledButton.icon(
+        style: FilledButton.styleFrom(backgroundColor:Color(0xFF6750A4), minimumSize:Size(double.infinity,50)),
+        onPressed:applyPattern,
+        icon:Icon(Icons.play_arrow),
+        label:Text('按指定日期自動排班 (套用排更)'),
+      ),
       SizedBox(height:80),
     ]));
   }
-}
-
-class FilmedButtonStyle{
-  static ButtonStyle call()=>FilledButton.styleFrom(backgroundColor:Color(0xFF6750A4), minimumSize:Size(double.infinity,50));
 }
