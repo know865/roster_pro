@@ -1,18 +1,32 @@
 workflows:
   Default Workflow:
     name: Default Workflow
+    instance_type: mac_mini_m2
+    max_build_duration: 60
     environment:
       flutter: 3.22.2
+      xcode: latest
+      cocoapods: default
       java: 17
     scripts:
-      - name: Fix Android - recreate gradle
+      - name: Fix Android Gradle - THIS MUST RUN
         script: |
+          set -e
+          echo "=== Deleting broken android ==="
           rm -rf android
-          flutter create. --platforms=android --project-name roster_pro --org com.example.rosterpro
+          echo "=== Recreating android with new Gradle ==="
+          flutter create . --platforms=android --project-name roster_pro --org com.example.rosterpro
+          echo "=== Pub get ==="
           flutter pub get
-          echo "SHA1 for Google Console"
+          echo "=== SHA1 for Google Console (if you need Drive) ==="
           keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android | grep SHA1 || true
+          ls -la android/
       - name: Build APK
-        script: flutter build apk --release --no-tree-shake-icons
+        script: |
+          flutter build apk --release --no-tree-shake-icons
     artifacts:
       - build/**/outputs/**/*.apk
+    publishing:
+      email:
+        recipients:
+          - your@email.com
