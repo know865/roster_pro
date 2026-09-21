@@ -183,4 +183,16 @@ class _S extends State<MainPage>{
         subtitle:Text(a.enabled?'已啟用':'已停用'),
         trailing:Row(mainAxisSize:MainAxisSize.min, children:[ IconButton(icon:Icon(Icons.edit), onPressed:()=>editAllowDialog(a)), IconButton(icon:Icon(Icons.delete), onPressed:(){ setState(()=>allowances.remove(a)); save(); }) ]),
       )),
-      Row(children:[ Expanded(child:ElevatedButton(onPressed:()=>editAllowDialog(null), child:Text('新增津貼'))), SizedBox(width:8), Expanded(child:OutlinedButton(onPressed:(){ setState(()=>allowances=[ Allowance('早班津貼','06:00',20,true), Allowance('中班津貼','14:00',0,true), Allowance('夜班津貼
+      Row(children:[ Expanded(child:ElevatedButton(onPressed:()=>editAllowDialog(null), child:Text('新增津貼'))), SizedBox(width:8), Expanded(child:OutlinedButton(onPressed:(){ setState(()=>allowances=[ Allowance('早班津貼','06:00',20,true), Allowance('中班津貼','14:00',0,true), Allowance('夜班津貼','22:00',80,true), Allowance('通宵津貼','23:30',120,true) ]); save(); }, child:Text('重置'))), ]),
+      Divider(),
+      ListTile(title:Text('OT時薪'), trailing:SizedBox(width:100, child:TextField(controller:TextEditingController(text:otR.toString()), decoration:InputDecoration(prefixText:'\$', border:OutlineInputBorder()), onSubmitted:(v){ var vv=double.tryParse(v); if(vv!=null){ setState(()=>otR=vv); save(); } }))),
+      ListTile(title:Text('交通津貼(每日)'), trailing:SizedBox(width:100, child:TextField(controller:TextEditingController(text:transB.toString()), decoration:InputDecoration(prefixText:'\$', border:OutlineInputBorder()), onSubmitted:(v){ var vv=double.tryParse(v); if(vv!=null){ setState(()=>transB=vv); save(); } }))),
+      ListTile(title:Text('格子文字大小 ${fs.toInt()}'), subtitle:Slider(value:fs, min:8, max:20, divisions:12, onChanged:(v){ setState(()=>fs=v); save(); })),
+      Divider(),
+      FilledButton.icon(onPressed:createPattern, icon:Icon(Icons.add), label:Text('新增 7 x 自定行數 模式'), style: FilledButton.styleFrom(minimumSize:Size(double.infinity,50))),
+      SizedBox(height:8),
+      FilledButton.icon(onPressed:applyPattern, icon:Icon(Icons.play_arrow), label:Text('套用模式排更'), style: FilledButton.styleFrom(minimumSize:Size(double.infinity,50))),
+      SizedBox(height:60),
+    ]);
+  }
+}
