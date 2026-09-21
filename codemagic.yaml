@@ -3,7 +3,7 @@ workflows:
     name: Roster Pro V2
     instance_type: mac_mini_m2
     environment:
-      flutter: 3.22.2
+      flutter: 3.19.6
     scripts:
       - name: Create project if missing
         script: |
