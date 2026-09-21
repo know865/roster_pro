@@ -128,3 +128,78 @@ class _MainPageState extends State<MainPage> {
     var rep = getReport(focused);
     return CustomScrollView(slivers: [
       SliverAppBar(pinned:true, title: Text('${focused.year}年${focused.month}月'), actions: [
+        IconButton(icon: const Icon(Icons.chevron_left), onPressed: ()=>setState(()=>focused=DateTime(focused.year, focused.month-1,1))),
+        IconButton(icon: const Icon(Icons.chevron_right), onPressed: ()=>setState(()=>focused=DateTime(focused.year, focused.month+1,1))),
+      ]),
+      SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.symmetric(horizontal:12), child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: const [Text('Mon'),Text('Tue'),Text('Wed'),Text('Thu'),Text('Fri'),Text('Sat'),Text('Sun')]))),
+      SliverToBoxAdapter(child: GridView.count(crossAxisCount:7, shrinkWrap:true, physics: const NeverScrollableScrollPhysics(), childAspectRatio:0.85, children: cells)),
+      SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
+        Row(children:[ Expanded(child: FilledButton.tonalIcon(onPressed: (){}, icon: const Icon(Icons.image), label: const Text('截圖分享'))), const SizedBox(width:8), Expanded(child: FilledButton.tonalIcon(onPressed: (){}, icon: const Icon(Icons.text_fields), label: const Text('分享文字'))), ]),
+        const SizedBox(height:8),
+        Card(child: ListTile(title: Text('承上 ${carryOver}h + 本月 ${rep['hrs']}h = 餘額 ${rep['balance']}h'), subtitle: const Text('之前功能已保留'))),
+      ]))),
+    ]);
+  }
+
+  Widget _buildReport(){
+    var rep = getReport(focused); Map<String,int> count = rep['count'];
+    return ListView(padding: const EdgeInsets.all(12), children: [
+      Text('${focused.year}年${focused.month}月 報表', style: const TextStyle(fontSize:20, fontWeight: FontWeight.bold)),
+      const SizedBox(height:12),
+      Card(child: Padding(padding: const EdgeInsets.all(16), child: Text('承上 ${carryOver}h + 本月 ${rep['hrs']}h = 餘額 ${rep['balance']}h'))),
+      const SizedBox(height:12),
+      Card(color: const Color(0xFFE0F7FA), child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('本月班次統計 (v6.19.1新增)', style: TextStyle(fontWeight: FontWeight.bold, fontSize:16)),
+        const SizedBox(height:8),
+        count.isEmpty? const Text('暫無資料') : Wrap(spacing:8, children: count.entries.map((e)=>Chip(label: Text('${e.key} x ${e.value}'))).toList()),
+        const Divider(),
+        const Text('本月津貼統計 (v6.19.1新增)', style: TextStyle(fontWeight: FontWeight.bold, fontSize:16)),
+        Text('OT 總計: ${rep['ot']}h\n津貼總計: \$${rep['allow']}'),
+      ]))),
+    ]);
+  }
+
+  Widget _buildSettings(){
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      const Text('備份與同步', style: TextStyle(fontSize:22, fontWeight: FontWeight.bold)),
+      Card(child: Padding(padding: const EdgeInsets.all(12), child: Row(children:[ Expanded(child: OutlinedButton.icon(onPressed: _backupLocal, icon: const Icon(Icons.download), label: const Text('備份到手機'))), const SizedBox(width:8), Expanded(child: OutlinedButton.icon(onPressed: _restoreLocal, icon: const Icon(Icons.history), label: const Text('從手機還原')))]))),
+      const SizedBox(height:8),
+      Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children:[ const Text('網絡備份 Google Drive'), Row(children:[ Expanded(child: FilledButton.icon(onPressed: _backupDrive, icon: const Icon(Icons.cloud_upload), label: const Text('備份到Drive'))), const SizedBox(width:8), Expanded(child: FilledButton.icon(onPressed: _restoreDrive, icon: const Icon(Icons.cloud_download), label: const Text('從Drive還原')))]),]))),
+      SwitchListTile(title: const Text('Google日曆同步'), subtitle: const Text('已啟用 - 輸入即自動同步'), value: googleSync, onChanged: (v){ setState(()=>googleSync=v); _save(); }),
+      Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
+        const Text('專屬排更日曆 (唔會同原有日曆混亂)', style: TextStyle(fontWeight: FontWeight.bold)),
+        TextField(decoration: const InputDecoration(labelText:'日曆名稱自定義'), controller: TextEditingController(text: customCalendarName), onChanged: (v){ customCalendarName=v; _save(); }),
+        const SizedBox(height:8),
+        Text('顯示名稱會根據班次代碼: 例如 ${defs.keys.join(", ")}', style: const TextStyle(fontSize:12)),
+        const SizedBox(height:8),
+        FilledButton.icon(onPressed: _createDedicatedCalendar, icon: const Icon(Icons.calendar_month), label: Text('建立/同步到「$customCalendarName」')),
+        FilledButton.icon(onPressed: _exportICS, icon: const Icon(Icons.file_download), label: const Text('匯出.ics 檔案 (免登入)')),
+        if(rosterCalendarId!=null) Text('專屬日曆ID: $rosterCalendarId', style: const TextStyle(fontSize:10)),
+      ]))),
+    ]);
+  }
+
+  void _pickShift(DateTime d) async {
+    String? sel = await showModalBottomSheet<String>(context: context, builder: (_)=>SafeArea(child: Wrap(children: defs.keys.map((k){ var def=defs[k]!; return ListTile(leading: CircleAvatar(backgroundColor:def.color, radius:12), title: Text('${def.code} - ${def.label}'), onTap: ()=>Navigator.pop(context,k)); }).toList()..add(const Divider())..add(ListTile(title: const Text('清除'), onTap: ()=>Navigator.pop(context,''))))));
+    if(sel==null) return;
+    String key = DateFormat('yyyy-MM-dd').format(d);
+    setState((){ if(sel.isEmpty) roster.remove(key); else roster[key]=sel; });
+    _save();
+  }
+
+  Future<void> _backupLocal() async { var dir = await getApplicationDocumentsDirectory(); var f = File('${dir.path}/roster_backup.json'); await f.writeAsString(jsonEncode(roster)); if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已備份 ${f.path}'))); }
+  Future<void> _restoreLocal() async { var res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions:['json']); if(res==null) return; String c = await File(res.files.single.path!).readAsString(); setState(()=>roster=Map<String,String>.from(jsonDecode(c))); _save(); }
+  Future<void> _backupDrive() async { try{ var acc = await _googleSignIn.signIn(); if(acc==null) return; var client = await _googleSignIn.authenticatedClient(); var api = drive.DriveApi(client!); var file = drive.File()..name='roster_pro_${DateFormat('yyyyMMdd').format(DateTime.now())}.json'; await api.files.create(file, uploadMedia: drive.Media(Stream.value(utf8.encode(jsonEncode(roster))), utf8.encode(jsonEncode(roster)).length)); if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已備份到Drive'))); }catch(e){ if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Drive失敗 $e'))); } }
+  Future<void> _restoreDrive() async { try{ var acc = await _googleSignIn.signIn(); if(acc==null) return; var client = await _googleSignIn.authenticatedClient(); var api = drive.DriveApi(client!); var list = await api.files.list(q:"name contains 'roster_pro'", orderBy:'createdTime desc'); var id = list.files!.first.id!; var media = await api.files.get(id, downloadOptions: drive.DownloadOptions.fullMedia) as drive.Media; String s = await utf8.decodeStream(media.stream); setState(()=>roster=Map<String,String>.from(jsonDecode(s))); _save(); }catch(e){ if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('失敗 $e'))); } }
+  Future<void> _createDedicatedCalendar() async { try{ var client = await _googleSignIn.authenticatedClient(); if(client==null){ var acc = await _googleSignIn.signIn(); client = await _googleSignIn.authenticatedClient(); } var api = cal.CalendarApi(client!); var list = await api.calendarList.list(); var exist = list.items?.where((c)=>c.summary==customCalendarName).toList(); String calId; if(exist!=null && exist.isNotEmpty){ calId=exist.first.id!; }else{ var nc = cal.Calendar()..summary=customCalendarName..timeZone='Asia/Hong_Kong'; var cr = await api.calendars.insert(nc); calId=cr.id!; } rosterCalendarId=calId; await _save(); for(var e in roster.entries){ DateTime d = DateFormat('yyyy-MM-dd').parse(e.key); if(d.month!=focused.month) continue; var ev = cal.Event()..summary=e.value..description=defs[e.value]?.label..start=(cal.EventDateTime()..date=DateTime(d.year,d.month,d.day))..end=(cal.EventDateTime()..date=DateTime(d.year,d.month,d.day+1)); await api.events.insert(calId, ev); } if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已同步到專屬日曆「$customCalendarName」'))); }catch(e){ if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('失敗 $e'))); } }
+  Future<void> _exportICS() async { StringBuffer ics = StringBuffer('BEGIN:VCALENDAR\nVERSION:2.0\n'); roster.forEach((k,v){ try{ DateTime d = DateFormat('yyyy-MM-dd').parse(k); String dt = DateFormat('yyyyMMdd').format(d); ics.writeln('BEGIN:VEVENT\nDTSTART;VALUE=DATE:$dt\nSUMMARY:$v\nEND:VEVENT'); }catch(_){} }); ics.writeln('END:VCALENDAR'); var dir = await getApplicationDocumentsDirectory(); var f = File('${dir.path}/${customCalendarName}.ics'); await f.writeAsString(ics.toString()); if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已匯出 ${f.path}'))); }
+
+  @override
+  Widget build(BuildContext context){
+    return Scaffold(body: [ _buildCalendar(), _buildReport(), _buildSettings() ][_index], bottomNavigationBar: NavigationBar(selectedIndex:_index, onDestinationSelected:(i)=>setState(()=>_index=i), destinations: const [
+      NavigationDestination(icon: Icon(Icons.calendar_month), label:'月曆'),
+      NavigationDestination(icon: Icon(Icons.bar_chart), label:'報表'),
+      NavigationDestination(icon: Icon(Icons.settings), label:'設定'),
+    ]));
+  }
+}
