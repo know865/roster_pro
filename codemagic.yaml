@@ -5,10 +5,10 @@ workflows:
       flutter: 3.22.2
       java: 17
     scripts:
-      - name: Safe fix
+      - name: Fix Android
         script: |
-          if [ ! -d "android" ]; then
-            flutter create . --platforms=android --project-name roster_pro --org com.example.rosterpro
+          if [! -d "android" ]; then
+            flutter create. --platforms=android --project-name roster_pro --org com.example.rosterpro
           fi
           flutter pub get
       - name: Build APK
