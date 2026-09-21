@@ -1,32 +1,21 @@
 name: roster_pro
-description: Roster Pro v6.22 - 完整版 周數+模式+報表四卡
+description: Roster Pro v6.22
 publish_to: 'none'
 version: 6.22.0+22
-
 environment:
   sdk: ">=3.2.0 <4.0.0"
-
 dependencies:
   flutter:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
-  table_calendar: ^3.0.9
   intl: ^0.19.0
   shared_preferences: ^2.3.3
   file_picker: ^8.0.0
   path_provider: ^2.1.5
   google_sign_in: ^6.2.2
   googleapis: ^13.2.0
-  googleapis_auth: ^1.6.0
   extension_google_sign_in_as_googleapis_auth: ^2.0.13
   http: ^1.2.2
-  device_calendar: ^4.3.2
-
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-  flutter_lints: ^3.0.0
-
 flutter:
   uses-material-design: true
