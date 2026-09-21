@@ -18,13 +18,12 @@ class ShiftDef{
 class RosterApp extends StatelessWidget{
   const RosterApp({super.key});
   @override Widget build(BuildContext context){
-    return MaterialApp(title:'Roster Pro v6.30',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage());
+    return MaterialApp(title:'Roster Pro v6.33',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage());
   }
 }
 
 const Map<String,String> hkHolidays={
-  '2025-01-01':'元旦','2025-01-29':'年初一','2025-10-07':'中秋翌日',
-  '2026-01-01':'元旦','2026-02-17':'年初一','2026-09-26':'中秋翌日','2026-10-01':'國慶','2026-12-25':'聖誕',
+  '2025-10-01':'國慶','2025-10-07':'中秋翌日','2026-09-26':'中秋翌日','2026-10-01':'國慶','2026-12-25':'聖誕','2026-10-19':'重陽','2026-01-01':'元旦','2026-02-17':'年初一',
 };
 
 class MainPage extends StatefulWidget{const MainPage({super.key}); @override State<MainPage> createState()=>MainPageState();}
@@ -33,7 +32,7 @@ class MainPageState extends State<MainPage>{
 int tab=0; DateTime focused=DateTime.now(); DateTime selectedDay=DateTime.now();
 Map<String,String> roster={}; Map<String,String> rosterNote={};
 Map<String,ShiftDef> defs={
-  '早':ShiftDef('早','早更 07:00-15:30',8,Colors.orange),
+  '早':ShiftDef('早','早更 07:00-15:30',8,Colors.orange,allowance:80),
   '中':ShiftDef('中','中更 14:00-22:00',8,Colors.blue),
   '宵':ShiftDef('宵','宵更 22:00-06:00',8,Colors.purple,allowance:60),
   'O':ShiftDef('O','休',0,Colors.green),
@@ -42,7 +41,8 @@ Map<String,ShiftDef> defs={
 List<List<String>> pattern=[["早","早","中","中","宵","宵","O"],["早","早","早","中","中","O","O"]];
 List<Map<String,dynamic>> savedPatterns=[];
 double carry=0; String customName='我的排更'; TextEditingController nameCtrl=TextEditingController();
-double standardWeeklyHours=44;
+double standardWeeklyHours=44; double overtimeRate=80;
+Map<String,double> extraAllowances={};
 
 @override void initState(){super.initState();nameCtrl.text=customName;load();}
 Future<void> load() async{
@@ -52,14 +52,27 @@ Future<void> load() async{
   var d=sp.getString('defs'); if(d!=null){try{var m=Map<String,dynamic>.from(jsonDecode(d)); defs=m.map((k,v)=>MapEntry(k,ShiftDef.fromJson(v)));}catch(_){}}
   var p=sp.getString('pattern'); if(p!=null){try{var l=jsonDecode(p) as List; pattern=l.map<List<String>>((row)=>(row as List).map<String>((e)=>e.toString()).toList()).toList();}catch(_){}}
   var spats=sp.getString('savedPatterns'); if(spats!=null){try{savedPatterns=(jsonDecode(spats) as List).map<Map<String,dynamic>>((e)=>Map<String,dynamic>.from(e)).toList();}catch(_){}}
-  setState((){carry=sp.getDouble('carry')??0; customName=sp.getString('cName')??'我的排更'; nameCtrl.text=customName; standardWeeklyHours=sp.getDouble('stdWeek')??44;});
+  var ea=sp.getString('extraAllow'); if(ea!=null){try{extraAllowances=Map<String,double>.from(jsonDecode(ea).map((k,v)=>MapEntry(k,(v as num).toDouble())));}catch(_){}}
+  setState((){
+    carry=sp.getDouble('carry')??0;
+    customName=sp.getString('cName')??'我的排更';
+    nameCtrl.text=customName;
+    standardWeeklyHours=sp.getDouble('stdWeek')??44;
+    overtimeRate=sp.getDouble('otRate')??80;
+  });
 }
 Future<void> save() async{
   var sp=await SharedPreferences.getInstance();
-  sp.setString('roster',jsonEncode(roster)); sp.setString('note',jsonEncode(rosterNote));
+  sp.setString('roster',jsonEncode(roster));
+  sp.setString('note',jsonEncode(rosterNote));
   sp.setString('defs',jsonEncode(defs.map((k,v)=>MapEntry(k,v.toJson()))));
-  sp.setString('pattern',jsonEncode(pattern)); sp.setDouble('carry',carry); sp.setString('cName',customName);
-  sp.setString('savedPatterns',jsonEncode(savedPatterns)); sp.setDouble('stdWeek',standardWeeklyHours);
+  sp.setString('pattern',jsonEncode(pattern));
+  sp.setDouble('carry',carry);
+  sp.setString('cName',customName);
+  sp.setString('savedPatterns',jsonEncode(savedPatterns));
+  sp.setDouble('stdWeek',standardWeeklyHours);
+  sp.setDouble('otRate',overtimeRate);
+  sp.setString('extraAllow',jsonEncode(extraAllowances));
 }
 int isoWeek(DateTime d){var jan1=DateTime(d.year,1,1); return 1+((d.difference(jan1).inDays+jan1.weekday-1)/7).floor();}
 
@@ -67,14 +80,10 @@ void quickJumpMonth(){
   int y=focused.year; int m=focused.month;
   showDialog(context:context,builder:(ctx){
     return StatefulBuilder(builder:(ctx2,setD){
-      return AlertDialog(
-        title:const Text('快速查找年月'),
-        content:Column(mainAxisSize:MainAxisSize.min,children:[
-          Row(children:[IconButton(icon:const Icon(Icons.remove),onPressed:()=>setD(()=>y--)),Expanded(child:Text('$y年',textAlign:TextAlign.center,style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold))),IconButton(icon:const Icon(Icons.add),onPressed:()=>setD(()=>y++))]),
-          Wrap(spacing:8,children:List.generate(12,(i){int mon=i+1;return ChoiceChip(label:Text('${mon}月'),selected:mon==m,onSelected:(_)=>setD(()=>m=mon));})),
-        ]),
-        actions:[TextButton(onPressed:()=>Navigator.pop(ctx2),child:const Text('取消')),FilledButton(onPressed:(){setState(()=>focused=DateTime(y,m,1));Navigator.pop(ctx2);},child:const Text('跳轉'))],
-      );
+      return AlertDialog(title:const Text('快速查找年月'),content:Column(mainAxisSize:MainAxisSize.min,children:[
+        Row(children:[IconButton(icon:const Icon(Icons.remove),onPressed:()=>setD(()=>y--)),Expanded(child:Text('$y年',textAlign:TextAlign.center,style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold))),IconButton(icon:const Icon(Icons.add),onPressed:()=>setD(()=>y++))]),
+        Wrap(spacing:8,children:List.generate(12,(i){int mon=i+1;return ChoiceChip(label:Text('${mon}月'),selected:mon==m,onSelected:(_)=>setD(()=>m=mon));})),
+      ]),actions:[TextButton(onPressed:()=>Navigator.pop(ctx2),child:const Text('取消')),FilledButton(onPressed:(){setState(()=>focused=DateTime(y,m,1));Navigator.pop(ctx2);},child:const Text('跳轉'))]);
     });
   });
 }
@@ -87,7 +96,6 @@ Widget calTab(){
   var selDef=roster[selKey]!=null?defs[roster[selKey]]:null;
   return SafeArea(child:Column(children:[
     Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),child:Row(children:[
-      const Icon(Icons.calendar_month,size:22),const SizedBox(width:8),
       InkWell(onTap:quickJumpMonth,child:Row(children:[Text('${focused.year}年${focused.month}月',style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold)),const Icon(Icons.arrow_drop_down)])),
       const Spacer(),
       IconButton(icon:const Icon(Icons.chevron_left),onPressed:(){setState(()=>focused=DateTime(focused.year,focused.month-1,1));}),
@@ -96,25 +104,29 @@ Widget calTab(){
     ])),
     Expanded(child:GridView.builder(padding:const EdgeInsets.all(6),gridDelegate:const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount:7,childAspectRatio:0.75,mainAxisSpacing:6,crossAxisSpacing:6),itemCount:42,itemBuilder:(ctx,idx){
       DateTime day=days[idx]; bool inM=day.month==focused.month; String k=DateFormat('yyyy-MM-dd').format(day);
-      String? code=roster[k]; var def=code!=null?defs[code]:null; bool sel=k==selKey;
-      String w=idx%7==0?'W${isoWeek(day)}':''; String? hol=hkHolidays[k];
+      String? code=roster[k]; var def=code!=null?defs[code]:null; bool sel=k==selKey; String? hol=hkHolidays[k];
+      bool hasNote=rosterNote[k]!=null && rosterNote[k]!.trim().isNotEmpty;
       Color bg=!inM?const Color(0xFFF5F5F0):hol!=null?const Color(0xFFFFEBEE):sel?Colors.white:def!=null?def.color.withOpacity(0.15):const Color(0xFFFFF0D0);
       if(code=='O') bg=const Color(0xFFE0F2E9);
-      return GestureDetector(onTap:(){setState(()=>selectedDay=day);showDetail(day);},child:Container(decoration:BoxDecoration(color:bg,borderRadius:BorderRadius.circular(16),border:sel?Border.all(width:2,color:Colors.deepPurple):hol!=null?Border.all(width:1,color:Colors.red.shade200):null),child:Stack(children:[
-        if(w.isNotEmpty) Positioned(left:6,top:4,child:Text(w,style:const TextStyle(fontSize:8,fontWeight:FontWeight.bold,color:Colors.brown))),
-        if(hol!=null) Positioned(right:4,top:4,child:Container(width:6,height:6,decoration:const BoxDecoration(color:Colors.red,shape:BoxShape.circle))),
+      return GestureDetector(onTap:(){setState(()=>selectedDay=day);showDetail(day);},child:Container(decoration:BoxDecoration(color:bg,borderRadius:BorderRadius.circular(16),border:sel?Border.all(width:2,color:Colors.deepPurple):null),child:Stack(children:[
+        if(hol!=null) Positioned(right:4,top:4,child:Container(width:7,height:7,decoration:const BoxDecoration(color:Colors.red,shape:BoxShape.circle))),
+        if(hasNote) Positioned(right:4,bottom:4,child:Container(width:7,height:7,decoration:const BoxDecoration(color:Colors.blue,shape:BoxShape.circle))),
         Center(child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[
-          Text('${day.day}',style:TextStyle(fontWeight:FontWeight.bold,fontSize:14,color:inM?hol!=null?Colors.red:Colors.black:Colors.grey)),
+          Text('${day.day}',style:TextStyle(fontWeight:FontWeight.bold,color:inM?hol!=null?Colors.red:Colors.black:Colors.grey)),
           if(hol!=null) Text(hol,style:const TextStyle(fontSize:7,color:Colors.red)),
-          if(code!=null) Container(margin:const EdgeInsets.only(top:2),padding:const EdgeInsets.symmetric(horizontal:7,vertical:2),decoration:BoxDecoration(color:def?.color??Colors.orange,borderRadius:BorderRadius.circular(10)),child:Text(code,style:const TextStyle(color:Colors.white,fontSize:11))),
+          if(code!=null) Container(margin:const EdgeInsets.only(top:2),padding:const EdgeInsets.symmetric(horizontal:6,vertical:2),decoration:BoxDecoration(color:def?.color??Colors.orange,borderRadius:BorderRadius.circular(10)),child:Text(code,style:const TextStyle(color:Colors.white,fontSize:11))),
+          if(hasNote) const Text('·記事',style:TextStyle(fontSize:7,color:Colors.blue)),
         ])),
       ])));
     })),
-    Container(padding:const EdgeInsets.fromLTRB(12,8,12,12),decoration:BoxDecoration(color:Colors.white,border:Border(top:BorderSide(color:Colors.grey.shade200))),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-      Row(children:[Expanded(child:Text('${DateFormat('MM/dd EEE').format(selectedDay)} ${hkHolidays[selKey]??''}',style:const TextStyle(fontSize:14,fontWeight:FontWeight.bold))),if(selDef!=null)Container(padding:const EdgeInsets.symmetric(horizontal:8,vertical:3),decoration:BoxDecoration(color:selDef.color,borderRadius:BorderRadius.circular(12)),child:Text(roster[selKey]??'',style:const TextStyle(color:Colors.white,fontWeight:FontWeight.bold)))]),
-      if(selDef!=null) Padding(padding:const EdgeInsets.only(top:4),child:Text('班次:${selDef.label} | 工時:${selDef.hours}h | OT:${selDef.ot}h | 津貼:\$${selDef.allowance.toStringAsFixed(1)} | 記事:${rosterNote[selKey]??'無'}',style:const TextStyle(fontSize:12))),
-      const SizedBox(height:6),
-      SizedBox(width:double.infinity,child:OutlinedButton.icon(onPressed:(){showDetail(selectedDay);},icon:const Icon(Icons.edit,size:16),label:const Text('編輯此日'))),
+    Container(padding:const EdgeInsets.fromLTRB(12,10,12,12),decoration:BoxDecoration(color:Colors.white,border:Border(top:BorderSide(color:Colors.grey.shade200))),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+      Text('${DateFormat('MM/dd EEE').format(selectedDay)} ${hkHolidays[selKey]??''} ${roster[selKey]??'未排班'}',style:const TextStyle(fontSize:15,fontWeight:FontWeight.bold)),
+      if(selDef!=null) Padding(padding:const EdgeInsets.only(top:6),child:Container(padding:const EdgeInsets.all(10),decoration:BoxDecoration(color:Colors.grey.shade100,borderRadius:BorderRadius.circular(10)),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+        Text('班次：${selDef.label} | 工時：${selDef.hours}h | OT：${selDef.ot}h | 津貼：\$${selDef.allowance}'),
+        Text('記事：${rosterNote[selKey]??'無'}',style:const TextStyle(fontSize:13)),
+      ]))),
+      const SizedBox(height:8),
+      SizedBox(width:double.infinity,child:OutlinedButton.icon(onPressed:(){showDetail(selectedDay);},icon:const Icon(Icons.edit),label:const Text('編輯此日'))),
     ])),
   ]));
 }
@@ -122,104 +134,27 @@ Widget calTab(){
 void showDetail(DateTime day){
   String k=DateFormat('yyyy-MM-dd').format(day); String cur=roster[k]??'';
   var nc=TextEditingController(text:rosterNote[k]??'');
-  showModalBottomSheet(context:context,isScrollControlled:true,builder:(ctx){
-    return StatefulBuilder(builder:(ctx2,setM){
-      return Padding(padding:EdgeInsets.only(bottom:MediaQuery.of(ctx2).viewInsets.bottom),child:Padding(padding:const EdgeInsets.all(16),child:Column(mainAxisSize:MainAxisSize.min,children:[
-        Row(children:[Text(DateFormat('yyyy-MM-dd EEE').format(day),style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),const Spacer(),if(hkHolidays[k]!=null)Text(hkHolidays[k]!,style:const TextStyle(color:Colors.red))]),
-        const SizedBox(height:8),
-        Wrap(spacing:8,children:defs.keys.map((c)=>ChoiceChip(label:Text(c),selected:cur==c,onSelected:(_)=>setM(()=>cur=c))).toList()),
-        if(cur.isNotEmpty && defs[cur]!=null) Container(margin:const EdgeInsets.only(top:8),padding:const EdgeInsets.all(8),decoration:BoxDecoration(color:Colors.grey.shade100,borderRadius:BorderRadius.circular(8)),child:Text('工時:${defs[cur]!.hours}h 津貼:\$${defs[cur]!.allowance} OT:${defs[cur]!.ot}h')),
-        TextField(controller:nc,decoration:const InputDecoration(labelText:'記事 超時工作')),
-        const SizedBox(height:12),
-        Row(children:[Expanded(child:OutlinedButton(onPressed:(){setState((){roster.remove(k);rosterNote.remove(k);});save();Navigator.pop(ctx2);},child:const Text('清除'))),const SizedBox(width:8),Expanded(child:FilledButton(onPressed:(){setState((){if(cur!=''){roster[k]=cur;rosterNote[k]=nc.text;}});save();Navigator.pop(ctx2);},child:const Text('儲存')))]),
-      ])));
-    });
-  });
+  showModalBottomSheet(context:context,isScrollControlled:true,builder:(ctx){return StatefulBuilder(builder:(ctx2,setM){return Padding(padding:EdgeInsets.only(bottom:MediaQuery.of(ctx2).viewInsets.bottom),child:Padding(padding:const EdgeInsets.all(16),child:Column(mainAxisSize:MainAxisSize.min,children:[
+    Text(DateFormat('yyyy-MM-dd EEE').format(day),style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),
+    Wrap(spacing:8,children:defs.keys.map((c)=>ChoiceChip(label:Text(c),selected:cur==c,onSelected:(_)=>setM(()=>cur=c))).toList()),
+    TextField(controller:nc,decoration:const InputDecoration(labelText:'記事')),
+    Row(children:[Expanded(child:OutlinedButton(onPressed:(){setState((){roster.remove(k);rosterNote.remove(k);});save();Navigator.pop(ctx2);},child:const Text('清除'))),const SizedBox(width:8),Expanded(child:FilledButton(onPressed:(){setState((){if(cur!=''){roster[k]=cur;rosterNote[k]=nc.text;}});save();Navigator.pop(ctx2);},child:const Text('儲存')))]),
+  ])));});});
 }
 
 Future<void> pickRangeAndApply() async{
-  try{
-    DateTimeRange? picked=await showDateRangePicker(context:context,initialDateRange:DateTimeRange(start:DateTime(focused.year,focused.month,1),end:DateTime(focused.year,focused.month+1,0)),firstDate:DateTime(2023),lastDate:DateTime(2030));
-    if(picked==null) return;
-    List<String> flat=pattern.expand((e)=>e).toList();
-    if(flat.isEmpty) return;
-    setState((){
-      int idx=0;
-      for(DateTime d=picked.start;!d.isAfter(picked.end);d=d.add(const Duration(days:1))){
-        String key=DateFormat('yyyy-MM-dd').format(d);
-        roster[key]=flat[idx % flat.length];
-        idx++;
-      }
-    });
-    save(); setState(()=>tab=0);
-  }catch(e){
-    if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('排班失敗 $e')));
-  }
-}
-
-void saveCurrentPattern(){
-  var c=TextEditingController(text:'模式${savedPatterns.length+1}');
-  showDialog(context:context,builder:(ctx)=>AlertDialog(
-    title:const Text('獨立存儲目前模式'),
-    content:TextField(controller:c,decoration:const InputDecoration(labelText:'模式名稱')),
-    actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('取消')),FilledButton(onPressed:(){setState(()=>savedPatterns.add({'name':c.text,'data':pattern.map((r)=>List<String>.from(r)).toList()}));save();Navigator.pop(ctx);},child:const Text('儲存'))]
-  ));
+  DateTimeRange? p=await showDateRangePicker(context:context,firstDate:DateTime(2023),lastDate:DateTime(2030));
+  if(p==null) return; var flat=pattern.expand((e)=>e).toList();
+  setState((){
+    int i=0; for(DateTime d=p.start;!d.isAfter(p.end);d=d.add(const Duration(days:1))){roster[DateFormat('yyyy-MM-dd').format(d)]=flat[i%flat.length]; i++;}
+  }); save(); setState(()=>tab=0);
 }
 
 Widget patternTab(){
   return SafeArea(child:Column(children:[
-    Padding(padding:const EdgeInsets.all(12),child:Column(children:[
-      Row(children:[const Text('排更模式',style:TextStyle(fontSize:18,fontWeight:FontWeight.bold)),const Spacer(),FilledButton.tonal(onPressed:(){setState(()=>pattern.add(List.filled(7,'O')));save();},child:const Text('加一行'))]),
-      const SizedBox(height:8),
-      Row(children:[
-        Expanded(child:OutlinedButton.icon(onPressed:saveCurrentPattern,icon:const Icon(Icons.bookmark_add),label:const Text('獨立存儲'))),
-        const SizedBox(width:8),
-        Expanded(child:OutlinedButton.icon(onPressed:(){
-          showModalBottomSheet(context:context,builder:(ctx){
-            return SafeArea(child:ListView(children:[
-             ...savedPatterns.asMap().entries.map((e){
-                int idx=e.key; var p=e.value;
-                return ListTile(
-                  title:Text(p['name']),
-                  subtitle:Text((p['data'] as List).map((r)=>(r as List).join(',')).join(' | ')),
-                  trailing:Row(mainAxisSize:MainAxisSize.min,children:[
-                    IconButton(icon:const Icon(Icons.upload),onPressed:(){setState(()=>pattern=(p['data'] as List).map<List<String>>((r)=>(r as List).map<String>((x)=>x.toString()).toList()).toList());save();Navigator.pop(ctx);}),
-                    IconButton(icon:const Icon(Icons.delete),onPressed:(){setState(()=>savedPatterns.removeAt(idx));save();Navigator.pop(ctx);}),
-                  ]),
-                );
-              }),
-              ListTile(title:const Text('關閉'),onTap:()=>Navigator.pop(ctx)),
-            ]));
-          });
-        },icon:const Icon(Icons.folder),label:const Text('已存模式'))),
-      ]),
-    ])),
-    Expanded(child:ListView.builder(itemCount:pattern.length,itemBuilder:(ctx,r){
-      return Padding(padding:const EdgeInsets.symmetric(horizontal:8,vertical:4),child:Row(children:[
-        SizedBox(width:24,child:Text('${r+1}',textAlign:TextAlign.center)),
-        Expanded(child:Row(children: List.generate(7,(c){
-          String code=pattern[r][c];
-          var d=defs[code];
-          return Expanded(child:GestureDetector(
-            onTap:(){
-              showModalBottomSheet(context:context,builder:(ctx2){
-                return SafeArea(child:Column(mainAxisSize:MainAxisSize.min,children:defs.keys.map((k){
-                  var def=defs[k]!;
-                  return ListTile(
-                    leading:CircleAvatar(backgroundColor:def.color,radius:12),
-                    title:Text('$k - ${def.label}'),
-                    onTap:(){setState(()=>pattern[r][c]=k);save();Navigator.pop(ctx2);},
-                  );
-                }).toList()));
-              });
-            },
-            child:Container(margin:const EdgeInsets.all(2),height:40,decoration:BoxDecoration(color:d!=null?d.color.withOpacity(0.25):Colors.white,border:Border.all(color:Colors.grey.shade300),borderRadius:BorderRadius.circular(8)),child:Center(child:Text(code,style:const TextStyle(fontWeight:FontWeight.bold)))),
-          ));
-        }))),
-        IconButton(icon:const Icon(Icons.delete_outline),onPressed:(){setState(()=>pattern.removeAt(r));save();}),
-      ]));
-    })),
-    Padding(padding:const EdgeInsets.all(12),child:SizedBox(width:double.infinity,height:50,child:FilledButton.icon(onPressed:pickRangeAndApply,icon:const Icon(Icons.date_range),label:const Text('選擇日期範圍並自動排班')))),
+    Padding(padding:const EdgeInsets.all(12),child:Row(children:[const Text('排更模式',style:TextStyle(fontWeight:FontWeight.bold,fontSize:18)),const Spacer(),FilledButton.tonal(onPressed:(){setState(()=>pattern.add(List.filled(7,'O')));save();},child:const Text('加一行'))])),
+    Expanded(child:ListView.builder(itemCount:pattern.length,itemBuilder:(ctx,r){return Row(children:[Text(' ${r+1} '),Expanded(child:Row(children:List.generate(7,(c){return Expanded(child:GestureDetector(onTap:(){showModalBottomSheet(context:context,builder:(ctx){return Wrap(children:defs.keys.map((k)=>ListTile(title:Text(k),onTap:(){setState(()=>pattern[r][c]=k);save();Navigator.pop(ctx);})).toList());});},child:Container(margin:const EdgeInsets.all(2),height:36,color:defs[pattern[r][c]]?.color.withOpacity(0.3),child:Center(child:Text(pattern[r][c])))));}))),IconButton(icon:const Icon(Icons.delete),onPressed:(){setState(()=>pattern.removeAt(r));save();})]);})),
+    Padding(padding:const EdgeInsets.all(12),child:SizedBox(width:double.infinity,child:FilledButton(onPressed:pickRangeAndApply,child:const Text('選擇日期範圍並自動排班')))),
   ]));
 }
 
@@ -230,61 +165,114 @@ Widget reportTab(){
     DateTime dt=DateTime(focused.year,focused.month,i); String k=DateFormat('yyyy-MM-dd').format(dt); String? c=roster[k]; if(c==null) continue;
     cnt[c]=(cnt[c]??0)+1; var d=defs[c]; if(d!=null){hrs+=d.hours;allow+=d.allowance;ot+=d.ot;allowByCode[c]=(allowByCode[c]??0)+d.allowance;int w=isoWeek(dt);weeklyHours[w]=(weeklyHours[w]??0)+d.hours;}
   }
+  double extraTotal=extraAllowances.values.fold(0,(a,b)=>a+b);
+  double otAmount=ot * overtimeRate;
+  double totalAllow=allow + extraTotal + otAmount;
   return SafeArea(child:ListView(padding:const EdgeInsets.all(12),children:[
     Text('${focused.year}年${focused.month}月 報表',style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold)),
-    const SizedBox(height:8),
     Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-      const Text('班次資料 詳細統計',style:TextStyle(fontWeight:FontWeight.bold)),
-      const SizedBox(height:6),
-     ...cnt.entries.map((e){var d=defs[e.key]; return Padding(padding:const EdgeInsets.symmetric(vertical:3),child:Row(children:[Container(width:8,height:8,decoration:BoxDecoration(color:d?.color??Colors.grey,shape:BoxShape.circle)),const SizedBox(width:6),Expanded(child:Text('${e.key} ${d?.label??''}')),Text('x${e.value} ${d!=null?'${(d.hours*e.value).toStringAsFixed(1)}h':''}')])) ;}),
-    ]))),
-    Card(color:const Color(0xFFE3F2FD),child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-      const Text('每週工時 與 標準工時差額',style:TextStyle(fontWeight:FontWeight.bold)),
-     ...weeklyHours.entries.map((e){double diff=e.value-standardWeeklyHours; return Padding(padding:const EdgeInsets.symmetric(vertical:4),child:Row(children:[Text('W${e.key}',style:const TextStyle(fontWeight:FontWeight.bold)),const SizedBox(width:12),Expanded(child:Text('${e.value.toStringAsFixed(1)}h')),Text('${diff>=0?'+':''}${diff.toStringAsFixed(1)}h',style:TextStyle(color:diff>0?Colors.red:Colors.green))])) ;}),
-      const Divider(), Text('總工時 ${hrs.toStringAsFixed(1)}h (承上 $carry = ${carry+hrs}h)'),
+      Text('承上 $carry h + 本月 $hrs h = ${carry+hrs}h',style:const TextStyle(fontWeight:FontWeight.bold)),
+      const Divider(),
+      const Text('每週工時統計 (標準工時 & 承上)',style:TextStyle(fontWeight:FontWeight.bold)),
+    ...weeklyHours.entries.map((e){
+        double avgCarry=weeklyHours.isEmpty?0:carry/weeklyHours.length;
+        double adjusted=e.value + avgCarry;
+        double diff=adjusted - standardWeeklyHours;
+        return Padding(padding:const EdgeInsets.symmetric(vertical:3),child:Row(children:[
+          Text('W${e.key}',style:const TextStyle(fontWeight:FontWeight.bold)),
+          const SizedBox(width:8),
+          Text('${e.value.toStringAsFixed(1)}h +承上${avgCarry.toStringAsFixed(1)} = ${adjusted.toStringAsFixed(1)}h'),
+          const Spacer(),
+          Text('${diff>=0?'+':''}${diff.toStringAsFixed(1)}h',style:TextStyle(color:diff>0?Colors.red:Colors.green,fontWeight:FontWeight.bold)),
+        ]));
+      }),
+      const Divider(),
+      Text('標準 ${standardWeeklyHours}h/週 | 總差額 ${(carry+hrs - standardWeeklyHours*weeklyHours.length).toStringAsFixed(1)}h'),
     ]))),
     Card(color:const Color(0xFFE8F5E9),child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
       const Text('津貼類別',style:TextStyle(fontWeight:FontWeight.bold)),
-     ...allowByCode.entries.map((e)=>Padding(padding:const EdgeInsets.symmetric(vertical:2),child:Row(children:[Text('${e.key} 津貼'),const Spacer(),Text('\$${e.value.toStringAsFixed(1)}')]))),
-      const Divider(), Row(children:[const Text('津貼總額'),const Spacer(),Text('\$${allow.toStringAsFixed(1)}')]),
+    ...allowByCode.entries.map((e)=>Row(children:[Text(e.key),const Spacer(),Text('\$${e.value.toStringAsFixed(1)}')])),
+      if(extraAllowances.isNotEmpty) const Divider(),
+    ...extraAllowances.entries.map((e)=>Row(children:[Text('${e.key} (額外)'),const Spacer(),Text('\$${e.value.toStringAsFixed(1)}')])),
+      const Divider(),
+      Row(children:[const Text('班次津貼'),const Spacer(),Text('\$${allow.toStringAsFixed(1)}')]),
+      Row(children:[Text('OT ${ot.toStringAsFixed(1)}h x \$${overtimeRate.toStringAsFixed(0)}'),const Spacer(),Text('\$${otAmount.toStringAsFixed(1)}')]),
+      Row(children:[Text('額外津貼'),const Spacer(),Text('\$${extraTotal.toStringAsFixed(1)}')]),
+      const Divider(),
+      Row(children:[const Text('津貼總額 (含OT)',style:TextStyle(fontWeight:FontWeight.bold)),const Spacer(),Text('\$${totalAllow.toStringAsFixed(1)}',style:const TextStyle(fontWeight:FontWeight.bold))]),
     ]))),
   ]));
 }
 
-Future<void> backupLocalFile() async{var dir=await getApplicationDocumentsDirectory();var f=File('${dir.path}/roster_backup.json');await f.writeAsString(jsonEncode({'roster':roster,'note':rosterNote,'defs':defs.map((k,v)=>MapEntry(k,v.toJson())),'pattern':pattern,'carry':carry,'cName':customName,'savedPatterns':savedPatterns}));if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已備份 ${f.path}')));}
-Future<void> restoreLocalFile() async{var res=await FilePicker.platform.pickFiles(type:FileType.custom,allowedExtensions:['json']);if(res==null)return;try{String c=await File(res.files.single.path!).readAsString();var j=jsonDecode(c);setState((){if(j['roster']!=null)roster=Map<String,String>.from(j['roster']);if(j['note']!=null)rosterNote=Map<String,String>.from(j['note']);if(j['defs']!=null)defs=(j['defs'] as Map).map<String,ShiftDef>((k,v)=>MapEntry(k,ShiftDef.fromJson(Map<String,dynamic>.from(v))));if(j['pattern']!=null)pattern=(j['pattern'] as List).map<List<String>>((r)=>(r as List).map<String>((e)=>e.toString()).toList()).toList();if(j['carry']!=null)carry=(j['carry'] as num).toDouble();if(j['cName']!=null){customName=j['cName'];nameCtrl.text=customName;}if(j['savedPatterns']!=null)savedPatterns=(j['savedPatterns'] as List).map<Map<String,dynamic>>((e)=>Map<String,dynamic>.from(e)).toList();});save();}catch(e){if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('還原失敗 $e')));}}
+void editShiftDialog({ShiftDef? oldDef}){
+  var codeCtrl=TextEditingController(text:oldDef?.code??'');
+  var labelCtrl=TextEditingController(text:oldDef?.label??'');
+  var hoursCtrl=TextEditingController(text:oldDef!=null?oldDef.hours.toString():'8');
+  var allowCtrl=TextEditingController(text:oldDef!=null?oldDef.allowance.toString():'0');
+  var otCtrl=TextEditingController(text:oldDef!=null?oldDef.ot.toString():'0');
+  Color picked=oldDef?.color??Colors.orange;
+  showDialog(context:context,builder:(ctx){return StatefulBuilder(builder:(ctx2,setS){return AlertDialog(title:Text(oldDef==null?'新增班次':'編輯 ${oldDef.code}'),content:Column(mainAxisSize:MainAxisSize.min,children:[
+    TextField(controller:codeCtrl,decoration:const InputDecoration(labelText:'代號')),TextField(controller:labelCtrl,decoration:const InputDecoration(labelText:'名稱')),TextField(controller:hoursCtrl,decoration:const InputDecoration(labelText:'工時'),keyboardType:TextInputType.number),
+    TextField(controller:allowCtrl,decoration:const InputDecoration(labelText:'津貼'),keyboardType:const TextInputType.numberWithOptions(decimal:true)),
+    TextField(controller:otCtrl,decoration:const InputDecoration(labelText:'OT')),
+  ]),actions:[FilledButton(onPressed:(){String code=codeCtrl.text.trim(); if(code.isEmpty) return; setState((){
+    if(oldDef!=null && oldDef.code!=code) defs.remove(oldDef.code);
+    defs[code]=ShiftDef(code,labelCtrl.text.isEmpty?code:labelCtrl.text,double.tryParse(hoursCtrl.text)??8,picked,allowance:double.tryParse(allowCtrl.text)??0,ot:double.tryParse(otCtrl.text)??0);
+  }); save(); Navigator.pop(ctx2);},child:const Text('儲存'))]);});});
+}
 
 Widget settingsTab(){
+  var stdCtrl=TextEditingController(text:standardWeeklyHours.toString());
+  var carryCtrl=TextEditingController(text:carry.toString());
+  var otCtrl=TextEditingController(text:overtimeRate.toString());
   return SafeArea(child:ListView(padding:const EdgeInsets.all(16),children:[
     const Text('自定班次內容編輯和刪除',style:TextStyle(fontSize:18,fontWeight:FontWeight.bold)),
     Card(child:Column(children:[
-     ...defs.entries.map((e){var d=e.value;return ListTile(leading:CircleAvatar(backgroundColor:d.color,radius:14,child:Text(d.code,style:const TextStyle(color:Colors.white,fontSize:11))),title:Text('${d.code} - ${d.label}'),subtitle:Text('${d.hours}h 津貼\$${d.allowance.toStringAsFixed(1)}'),trailing:IconButton(icon:const Icon(Icons.delete),onPressed:(){setState(()=>defs.remove(e.key));save();}));}),
-      ListTile(leading:const Icon(Icons.add),title:const Text('新增班次'),onTap:(){var cc=TextEditingController();showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('新增'),content:TextField(controller:cc),actions:[FilledButton(onPressed:(){setState(()=>defs[cc.text]=ShiftDef(cc.text,cc.text,8,Colors.orange));save();Navigator.pop(ctx);},child:const Text('加'))]));}),
+   ...defs.entries.map((e){var d=e.value;return ListTile(leading:CircleAvatar(backgroundColor:d.color,child:Text(d.code,style:const TextStyle(color:Colors.white,fontSize:11))),title:Text('${d.code} - ${d.label}'),subtitle:Text('${d.hours}h \$${d.allowance} OT:${d.ot}h'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[IconButton(icon:const Icon(Icons.edit),onPressed:()=>editShiftDialog(oldDef:d)),IconButton(icon:const Icon(Icons.delete),onPressed:(){setState(()=>defs.remove(e.key));save();})]));}),
+      ListTile(leading:const Icon(Icons.add),title:const Text('新增班次'),onTap:()=>editShiftDialog()),
     ])),
     const SizedBox(height:16),
-    const Text('自定津貼編輯 (直接輸入)',style:TextStyle(fontSize:18,fontWeight:FontWeight.bold)),
-    Card(child:Column(children:defs.entries.map((e){
-      var d=e.value;
-      return Padding(padding:const EdgeInsets.fromLTRB(12,6,12,6),child:Row(children:[
-        SizedBox(width:50,child:Text(d.code,style:const TextStyle(fontWeight:FontWeight.bold))),
-        Expanded(child:Text(d.label,style:const TextStyle(fontSize:12))),
-        SizedBox(width:120,child:TextFormField(
-          initialValue:d.allowance.toString(),
-          decoration:InputDecoration(labelText:'\$',isDense:true,border:OutlineInputBorder(borderRadius:BorderRadius.circular(8))),
-          keyboardType:const TextInputType.numberWithOptions(decimal:true),
-          onFieldSubmitted:(v){double? val=double.tryParse(v); if(val!=null){setState(()=>d.allowance=val); save();}},
-        )),
-      ]));
-    }).toList())),
-    const SizedBox(height:16),
-    const Text('專屬排更日曆 (可自定名稱)',style:TextStyle(fontSize:18,fontWeight:FontWeight.bold)),
+    const Text('標準工時 & 承上 & 超時金額',style:TextStyle(fontSize:18,fontWeight:FontWeight.bold)),
     Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
-      TextField(controller:nameCtrl,decoration:const InputDecoration(labelText:'日曆名稱 例如 HING')),
-      const SizedBox(height:8),
-      Row(children:[Expanded(child:Text('現時：$customName',style:const TextStyle(fontWeight:FontWeight.bold))),FilledButton(onPressed:(){setState(()=>customName=nameCtrl.text.trim().isEmpty?'我的排更':nameCtrl.text.trim());save();ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已設定為 $customName')));},child:const Text('確認'))]),
+      Row(children:[
+        Expanded(child:TextField(controller:stdCtrl,decoration:const InputDecoration(labelText:'標準工時',suffixText:'h/週',border:OutlineInputBorder()),keyboardType:TextInputType.number,onSubmitted:(v){double? val=double.tryParse(v); if(val!=null){setState(()=>standardWeeklyHours=val); save();}})),
+        const SizedBox(width:8),
+        Expanded(child:TextField(controller:carryCtrl,decoration:const InputDecoration(labelText:'承上餘額',suffixText:'h',border:OutlineInputBorder()),keyboardType:TextInputType.number,onSubmitted:(v){double? val=double.tryParse(v); if(val!=null){setState(()=>carry=val); save();}})),
+      ]),
+      const SizedBox(height:10),
+      TextField(controller:otCtrl,decoration:const InputDecoration(labelText:'超時工作金額 (每小時)',prefixText:'\$ ',suffixText:'/h',border:OutlineInputBorder(),hintText:'例如 80'),keyboardType:const TextInputType.numberWithOptions(decimal:true),onSubmitted:(v){double? val=double.tryParse(v); if(val!=null){setState(()=>overtimeRate=val); save();}}),
+      const SizedBox(height:10),
+      SizedBox(width:double.infinity,child:FilledButton(onPressed:(){
+        double? v1=double.tryParse(stdCtrl.text); double? v2=double.tryParse(carryCtrl.text); double? v3=double.tryParse(otCtrl.text);
+        if(v1!=null) standardWeeklyHours=v1; if(v2!=null) carry=v2; if(v3!=null) overtimeRate=v3;
+        setState((){}); save();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已保存 標準${standardWeeklyHours}h 承上${carry}h OT\$${overtimeRate}/h')));
+      },child:const Text('保存設定'))),
     ]))),
     const SizedBox(height:16),
-    Card(child:ListTile(title:const Text('備份到手機 / 還原'),subtitle:Row(children:[TextButton(onPressed:backupLocalFile,child:const Text('備份')),TextButton(onPressed:restoreLocalFile,child:const Text('還原'))]))),
+    const Text('自定津貼編輯 (直接輸入)',style:TextStyle(fontSize:18,fontWeight:FontWeight.bold)),
+    Card(child:Column(children:defs.entries.map((e){var d=e.value;return Padding(padding:const EdgeInsets.fromLTRB(12,6,12,6),child:Row(children:[
+        SizedBox(width:50,child:Text(d.code,style:const TextStyle(fontWeight:FontWeight.bold))),
+        Expanded(child:Text(d.label,style:const TextStyle(fontSize:12))),
+        SizedBox(width:110,child:TextFormField(initialValue:d.allowance.toString(),decoration:InputDecoration(labelText:'\$',isDense:true,border:OutlineInputBorder(borderRadius:BorderRadius.circular(8))),keyboardType:const TextInputType.numberWithOptions(decimal:true),onFieldSubmitted:(v){double? val=double.tryParse(v); if(val!=null){setState(()=>d.allowance=val); save();}})),
+      ]));}).toList())),
+    const SizedBox(height:16),
+    const Text('新增津貼類別',style:TextStyle(fontSize:18,fontWeight:FontWeight.bold)),
+    Card(child:Column(children:[
+   ...extraAllowances.entries.map((e){return ListTile(title:Text(e.key),subtitle:Text('\$${e.value.toStringAsFixed(1)}'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[
+        IconButton(icon:const Icon(Icons.edit,size:18),onPressed:(){
+          var nCtrl=TextEditingController(text:e.key); var vCtrl=TextEditingController(text:e.value.toString());
+          showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('編輯津貼類別'),content:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:nCtrl,decoration:const InputDecoration(labelText:'名稱')),TextField(controller:vCtrl,decoration:const InputDecoration(labelText:'金額'),keyboardType:const TextInputType.numberWithOptions(decimal:true))]),actions:[FilledButton(onPressed:(){String newName=nCtrl.text.trim(); double? val=double.tryParse(vCtrl.text); if(newName.isEmpty||val==null) return; setState((){if(newName!=e.key) extraAllowances.remove(e.key); extraAllowances[newName]=val;}); save(); Navigator.pop(ctx);},child:const Text('儲存'))]));
+        }),
+        IconButton(icon:const Icon(Icons.delete,size:18),onPressed:(){setState(()=>extraAllowances.remove(e.key)); save();}),
+      ]));}),
+      ListTile(leading:const Icon(Icons.add),title:const Text('新增津貼類別'),onTap:(){
+        var nCtrl=TextEditingController(); var vCtrl=TextEditingController(text:'0');
+        showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('新增津貼類別'),content:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:nCtrl,decoration:const InputDecoration(labelText:'名稱')),TextField(controller:vCtrl,decoration:const InputDecoration(labelText:'金額'),keyboardType:const TextInputType.numberWithOptions(decimal:true))]),actions:[FilledButton(onPressed:(){String name=nCtrl.text.trim(); double? val=double.tryParse(vCtrl.text); if(name.isEmpty||val==null) return; setState(()=>extraAllowances[name]=val); save(); Navigator.pop(ctx);},child:const Text('新增'))]));
+      }),
+    ])),
+    const SizedBox(height:16),
+    Card(child:Padding(padding:const EdgeInsets.all(12),child:Row(children:[Expanded(child:TextField(controller:nameCtrl,decoration:const InputDecoration(labelText:'日曆名稱'))),const SizedBox(width:8),FilledButton(onPressed:(){setState(()=>customName=nameCtrl.text.trim().isEmpty?'我的排更':nameCtrl.text.trim()); save();},child:const Text('確認'))]))),
   ]));
 }
 
