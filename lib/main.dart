@@ -50,15 +50,15 @@ class _S extends State<MainPage>{
 
   void pickYM(){
     int y=focused.year,m=focused.month;
-    TextEditingController yearC=TextEditingController(text:y.toString());
+    TextEditingController yearC=TextEditingController(text: y.toString());
     showDialog(context: context, builder: (ctx)=>StatefulBuilder(builder: (ctx,setM){
       return AlertDialog(
-        title: Text('選擇年月 無限遠',style:TextStyle(fontSize:22,fontWeight:FontWeight.w900)),
+        title: Text('選擇年月',style:TextStyle(fontSize:22,fontWeight:FontWeight.w900)),
         content: SizedBox(width:340,height:400, child: Column(children:[
           Row(children:[
             IconButton(onPressed:(){ setM((){ y-=10; yearC.text=y.toString(); }); }, icon:Icon(Icons.fast_rewind)),
             IconButton(onPressed:(){ setM((){ y-=1; yearC.text=y.toString(); }); }, icon:Icon(Icons.remove)),
-            Expanded(child: TextField(controller:yearC, textAlign:TextAlign.center, keyboardType:TextInputType.number, style:TextStyle(fontSize:20,fontWeight:FontWeight.bold), decoration:InputDecoration(labelText:'年份無限', border:OutlineInputBorder()), onChanged:(v){ int? yy=int.tryParse(v); if(yy!=null) setM((){ y=yy; }); })),
+            Expanded(child: TextField(controller: yearC, textAlign:TextAlign.center, keyboardType:TextInputType.number, style:TextStyle(fontSize:20,fontWeight:FontWeight.bold), decoration:InputDecoration(labelText:'年份無限', border:OutlineInputBorder()), onChanged:(v){ int? yy=int.tryParse(v); if(yy!=null) setM((){ y=yy; }); })),
             IconButton(onPressed:(){ setM((){ y+=1; yearC.text=y.toString(); }); }, icon:Icon(Icons.add)),
             IconButton(onPressed:(){ setM((){ y+=10; yearC.text=y.toString(); }); }, icon:Icon(Icons.fast_forward)),
           ]),
@@ -72,4 +72,134 @@ class _S extends State<MainPage>{
     }));
   }
 
-  void editCell(DateTime d){ var noteC=TextEditingController(text: notes[k(d)]??''); var exC=TextEditingController(text
+  void editCell(DateTime d){
+    TextEditingController noteC=TextEditingController(text: notes[k(d)]?? '');
+    TextEditingController exC=TextEditingController(text: (extra[k(d)]?? 0).toString());
+    String cur=roster[k(d)]?? '';
+    showModalBottomSheet(context: context, isScrollControlled:true, builder:(ctx)=>StatefulBuilder(builder:(ctx,setM){
+      return Padding(padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom,left:16,right:16,top:16), child:Column(mainAxisSize:MainAxisSize.min, children:[
+        Text(DateFormat('yyyy-MM-dd EEEE').format(d),style:TextStyle(fontWeight:FontWeight.bold,fontSize:18)),
+        SizedBox(height:10),
+        Wrap(spacing:6, children:[ for(var s in shifts) ChoiceChip(label:Text(s.code), selected:cur==s.code, onSelected:(v){ setM((){ cur=v?s.code:''; }); }) ]),
+        SizedBox(height:10),
+        TextField(controller: noteC, decoration:InputDecoration(labelText:'記事',border:OutlineInputBorder())),
+        SizedBox(height:8),
+        TextField(controller: exC, decoration:InputDecoration(labelText:'額外OT小時',border:OutlineInputBorder()),keyboardType:TextInputType.numberWithOptions(decimal:true)),
+        SizedBox(height:10),
+        FilledButton(onPressed:(){
+          setState((){
+            if(cur=='') roster.remove(k(d)); else roster[k(d)]=cur;
+            if(noteC.text=='') notes.remove(k(d)); else notes[k(d)]=noteC.text;
+            var vv=double.tryParse(exC.text);
+            if(vv==null||vv==0) extra.remove(k(d)); else extra[k(d)]=vv;
+            save();
+          });
+          Navigator.pop(ctx);
+        },child:Text('保存')),
+        SizedBox(height:20)
+      ]));
+    }));
+  }
+
+  void editShifts(){
+    TextEditingController codeC=TextEditingController();
+    TextEditingController nameC=TextEditingController();
+    TextEditingController hC=TextEditingController(text:'8');
+    TextEditingController bC=TextEditingController(text:'0');
+    Color pickC=Colors.orange;
+    showDialog(context: context, builder: (ctx)=>StatefulBuilder(builder: (ctx,setM){
+      return AlertDialog(title:Text('新增自定班次'), content:Column(mainAxisSize:MainAxisSize.min, children:[
+        TextField(controller: codeC, decoration:InputDecoration(labelText:'代號')),
+        TextField(controller: nameC, decoration:InputDecoration(labelText:'名稱')),
+        Row(children:[ Expanded(child: TextField(controller: hC, keyboardType:TextInputType.number, decoration:InputDecoration(labelText:'時數'))), SizedBox(width:10), Expanded(child: TextField(controller: bC, keyboardType:TextInputType.number, decoration:InputDecoration(labelText:'津貼 \$'))) ]),
+        SizedBox(height:10),
+        Wrap(spacing:6, children:[ for(var c in [Colors.orange, Colors.blue, Colors.indigo, Colors.purple, Colors.green, Colors.brown, Colors.red, Colors.teal]) GestureDetector(onTap:(){ setM(()=>pickC=c); }, child:CircleAvatar(backgroundColor:c, radius:18, child: pickC==c?Icon(Icons.check,color:Colors.white):null)) ])
+      ]), actions:[ TextButton(onPressed:()=>Navigator.pop(ctx),child:Text('取消')), FilledButton(onPressed:(){ if(codeC.text=='') return; setState(()=>shifts.add(Shift(codeC.text, nameC.text==''?codeC.text:nameC.text, '', '', pickC.value, double.tryParse(hC.text)??8, double.tryParse(bC.text)??0, true))); save(); Navigator.pop(ctx); },child:Text('新增'))]);
+    }));
+  }
+
+  void createPattern(){ TextEditingController nameC=TextEditingController(text:'自定${patterns.length+1}'); TextEditingController rowC=TextEditingController(text:'22'); showDialog(context: context, builder: (ctx)=>AlertDialog(title:Text('創造模式 7 x 自定行數'), content:Column(mainAxisSize:MainAxisSize.min, children:[ TextField(controller: nameC, decoration:InputDecoration(labelText:'名稱')), SizedBox(height:10), TextField(controller: rowC, decoration:InputDecoration(labelText:'行數 1-100', border:OutlineInputBorder()), keyboardType:TextInputType.number), ]), actions:[ TextButton(onPressed:()=>Navigator.pop(ctx),child:Text('取消')), FilledButton(onPressed:(){ int rows=int.tryParse(rowC.text)??22; if(rows<1) rows=1; if(rows>100) rows=100; Navigator.pop(ctx); openPatternEditor(RosterPattern(nameC.text, List.filled(rows*7, shifts.first.code))); },child:Text('下一步')) ])); }
+  void openPatternEditor(RosterPattern pat){ showDialog(context: context, builder: (ctx)=>StatefulBuilder(builder: (ctx,setM){ return AlertDialog(title:Text('${pat.name} ${pat.codes.length~/7}行'), content:SizedBox(width:double.maxFinite,height:460, child:GridView.builder(gridDelegate:SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount:7, childAspectRatio:0.85), itemCount:pat.codes.length, itemBuilder:(c,i){ String code=pat.codes[i]; Shift s=getS(code); return GestureDetector(onTap:(){ showModalBottomSheet(context:ctx, builder:(b)=>Container(padding:EdgeInsets.all(16), child:Wrap(spacing:8, children:[ for(var ss in shifts) ChoiceChip(label:Text(ss.code), selected:ss.code==code, onSelected:(v){ setM((){ pat.codes[i]=ss.code; }); Navigator.pop(b); }) ]))); }, child:Container(margin:EdgeInsets.all(2), decoration:BoxDecoration(color:s.color, borderRadius:BorderRadius.circular(6)), child:Center(child:Column(mainAxisAlignment:MainAxisAlignment.center, children:[ Text('${i+1}',style:TextStyle(color:Colors.white,fontSize:8)), Text(code,style:TextStyle(color:Colors.white,fontWeight:FontWeight.bold,fontSize:11)) ])))); })), actions:[ TextButton(onPressed:()=>Navigator.pop(ctx),child:Text('取消')), FilledButton(onPressed:(){ setState(()=>patterns.add(pat)); save(); Navigator.pop(ctx); },child:Text('保存')) ]); })); }
+  void applyPattern(){ if(patterns.isEmpty){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('請先創造模式'))); return; } RosterPattern sel=patterns.first; DateTime sDate=DateTime(focused.year,focused.month,1); DateTime eDate=DateTime(focused.year,focused.month+1,0); showDialog(context: context, builder: (ctx)=>StatefulBuilder(builder: (ctx,setM){ return AlertDialog(title:Text('套用模式'), content:Column(mainAxisSize:MainAxisSize.min, children:[ DropdownButton<RosterPattern>(value:sel,isExpanded:true, items:[for(var p in patterns) DropdownMenuItem(value:p, child:Text('${p.name} (${p.codes.length~/7}行)'))], onChanged:(v){ if(v!=null) setM((){ sel=v; }); }), ListTile(title:Text('開始 ${DateFormat('yyyy-MM-dd').format(sDate)}'), onTap:()async{ DateTime? d=await showDatePicker(context:ctx,firstDate:DateTime(1900),lastDate:DateTime(2100),initialDate:sDate); if(d!=null) setM((){ sDate=d; }); }), ListTile(title:Text('結束 ${DateFormat('yyyy-MM-dd').format(eDate)}'), onTap:()async{ DateTime? d=await showDatePicker(context:ctx,firstDate:DateTime(1900),lastDate:DateTime(2100),initialDate:eDate); if(d!=null) setM((){ eDate=d; }); }), ]), actions:[ TextButton(onPressed:()=>Navigator.pop(ctx),child:Text('取消')), FilledButton(onPressed:(){ setState((){ int idx=0; for(DateTime d=sDate;!d.isAfter(eDate); d=d.add(Duration(days:1))){ roster[k(d)]=sel.codes[idx%sel.codes.length]; idx++; } save(); }); Navigator.pop(ctx); },child:Text('開始排更')) ]); })); }
+  List<DateTime> daysInMonth(DateTime mon){ var first=DateTime(mon.year,mon.month,1); int off=first.weekday-1; var start=first.subtract(Duration(days:off)); return List.generate(42,(i)=>start.add(Duration(days:i))); }
+
+  @override Widget build(BuildContext context){
+    return Scaffold(body: [buildCal(), buildReport(), buildSetting()][tab], bottomNavigationBar: NavigationBar(selectedIndex:tab,onDestinationSelected:(i)=>setState(()=>tab=i),destinations:[ NavigationDestination(icon:Icon(Icons.calendar_month),label:'月曆'), NavigationDestination(icon:Icon(Icons.bar_chart),label:'報表'), NavigationDestination(icon:Icon(Icons.settings),label:'設定') ]));
+  }
+
+  Widget buildCal(){
+    var days=daysInMonth(focused); Shift? sel=roster.containsKey(k(selected))?getS(roster[k(selected)]!):null;
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(icon:Icon(Icons.today), onPressed:goToday),
+        title: InkWell(onTap:pickYM, child: Row(mainAxisSize:MainAxisSize.min, children:[ Text('${focused.year}年${focused.month}月',style:TextStyle(fontSize:22,fontWeight:FontWeight.w900)), Icon(Icons.arrow_drop_down) ])),
+        actions:[ IconButton(icon:Icon(Icons.grid_view), onPressed:createPattern), IconButton(icon:Icon(Icons.playlist_play), onPressed:applyPattern), IconButton(icon:Icon(Icons.share), onPressed:(){ var sb=StringBuffer(); roster.forEach((kk,v){ var d=DateTime.parse(kk); if(d.year==focused.year&&d.month==focused.month) sb.writeln('$kk,$v'); }); showDialog(context:context,builder:(c)=>AlertDialog(content:SingleChildScrollView(child:SelectableText(sb.toString())),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:Text('關閉'))])); }) ],
+      ),
+      body: Column(children:[
+        Row(children:[ for(var w in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']) Expanded(child:Center(child:Text(w,style:TextStyle(fontWeight:FontWeight.bold)))) ]),
+        Expanded(flex:3, child: GestureDetector(
+          onHorizontalDragEnd:(d){ if(d.primaryVelocity!=null){ if(d.primaryVelocity! < -300) changeMonth(1); if(d.primaryVelocity! > 300) changeMonth(-1); } },
+          onVerticalDragEnd:(d){ if(d.primaryVelocity!=null){ if(d.primaryVelocity! < -300) changeMonth(1); if(d.primaryVelocity! > 300) changeMonth(-1); } },
+          child: GridView.builder(padding:EdgeInsets.all(4), physics:NeverScrollableScrollPhysics(), gridDelegate:SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount:7, childAspectRatio:0.88, crossAxisSpacing:4, mainAxisSpacing:4), itemCount:42, itemBuilder:(c,i){
+            DateTime day=days[i]; bool out=day.month!=focused.month; String key=k(day); String? code=roster[key]; Shift? sh=code!=null?getS(code):null; bool isToday=k(day)==k(DateTime.now()); bool isSel=k(day)==k(selected); bool isMon=day.weekday==1;
+            if(out) return Container(child:Center(child:Text(day.day.toString(),style:TextStyle(color:Colors.grey.shade400))));
+            double dayAllowance=0; if(sh!=null){ dayAllowance=sh.b + (sh.work?transB:0) + (extra[key]!=null? extra[key]!*otR : 0); }
+            return GestureDetector(onTap:()=>setState(()=>selected=day), onLongPress:()=>editCell(day),
+              child:Container(decoration:BoxDecoration(color:sh!=null?sh.color:Color(0xFFF0F0F0), borderRadius:BorderRadius.circular(10), border:isToday?Border.all(color:Colors.amber,width:3):isSel?Border.all(color:Colors.indigo,width:2.5):null),
+                child:Stack(children:[
+                  if(isMon) Positioned(top:2,left:2,child:Container(padding:EdgeInsets.symmetric(horizontal:3,vertical:1),decoration:BoxDecoration(color:Colors.black54,borderRadius:BorderRadius.circular(3)),child:Text('W${isoWeek(day)}',style:TextStyle(color:Colors.white,fontSize:7)))),
+                  Center(child:Column(mainAxisAlignment:MainAxisAlignment.center, children:[
+                    Text(day.day.toString(),style:TextStyle(fontSize:fs+3,fontWeight:FontWeight.bold,color:sh!=null?Colors.white:Colors.black87)),
+                    if(sh!=null) Text(sh.code,style:TextStyle(fontSize:fs,color:Colors.white)),
+                    if(sh!=null && dayAllowance>0) Text('\$${dayAllowance.toStringAsFixed(0)}',style:TextStyle(fontSize:8,color:Colors.white,fontWeight:FontWeight.bold)),
+                    if(extra.containsKey(key)) Text('+${extra[key]}h',style:TextStyle(fontSize:8,color:Colors.yellowAccent)),
+                  ]))
+                ])
+              ));
+          }),
+        )),
+        Divider(height:1),
+        Expanded(flex:2, child: Container(color:Colors.white, padding:EdgeInsets.all(16), child:ListView(children:[
+          Row(children:[ Container(padding:EdgeInsets.symmetric(horizontal:14,vertical:8),decoration:BoxDecoration(color:sel?.color??Colors.grey.shade300,borderRadius:BorderRadius.circular(24)),child:Text('${DateFormat('MM/dd EEEE').format(selected)} ${roster[k(selected)]??'未排'}',style:TextStyle(fontSize:18,fontWeight:FontWeight.bold,color:sel!=null?Colors.white:Colors.black87))), Spacer(), FilledButton.icon(onPressed:()=>editCell(selected),icon:Icon(Icons.edit,size:16),label:Text('編輯')) ]),
+          if(sel!=null) Card(child:ListTile(title:Text('${sel.name} ${sel.start}-${sel.end} ${sel.h}h'), subtitle:Text('津貼 \$${sel.b} + 交通 \$${sel.work?transB:0} ${extra[k(selected)]!=null?'+ OT ${extra[k(selected)]}h':''}'), trailing:Text('\$${(sel.b + (sel.work?transB:0) + (extra[k(selected)]!=null?extra[k(selected)]!*otR:0)).toStringAsFixed(0)}',style:TextStyle(fontWeight:FontWeight.bold)))),
+          if(notes[k(selected)]!=null) Card(color:Colors.amber.shade50, child:ListTile(title:Text(notes[k(selected)]!)))
+        ]))),
+      ]),
+    );
+  }
+
+  Widget buildReport(){
+    DateTime mon=focused; double totH=0,totOT=0,totTrans=0,totB=0,totOTPay=0; int cWork=0;
+    roster.forEach((kk,v){ var d=DateTime.parse(kk); if(d.year!=mon.year||d.month!=mon.month) return; var s=getS(v); double ex=extra[kk]??0; totH+=s.h+ex; if(s.work){ cWork++; totTrans+=transB; } totB+=s.b; if(s.code=='OT'||ex>0){ double oh=(s.code=='OT'?s.h:0)+ex; totOT+=oh; totOTPay+=oh*otR; } });
+    double all=totTrans+totB+totOTPay;
+    return Scaffold(appBar:AppBar(title:Text('${mon.year}年${mon.month}月 報表',style:TextStyle(fontSize:20,fontWeight:FontWeight.w900))), body:ListView(padding:EdgeInsets.all(16), children:[
+      Card(child:ListTile(title:Text('總工時 ${totH}h 返工 $cWork日'))),
+      Card(child:ListTile(title:Text('交通津貼'), subtitle:Text('$cWork日 x \$$transB'), trailing:Text('\$${totTrans.toStringAsFixed(0)}'))),
+      Card(child:ListTile(title:Text('班次津貼總和'), trailing:Text('\$${totB.toStringAsFixed(0)}'))),
+      Card(color:Colors.orange.shade50, child:ListTile(title:Text('OT ${totOT}h x \$$otR'), trailing:Text('\$${totOTPay.toStringAsFixed(0)}'))),
+      Card(color:Colors.indigo.shade50, child:ListTile(title:Text('津貼總額'), trailing:Text('\$${all.toStringAsFixed(0)}',style:TextStyle(fontSize:22,fontWeight:FontWeight.bold)))),
+    ]));
+  }
+
+  Widget moneyInput(String label, double value, Function(double) onSave){
+    return Card(child: ListTile(title:Text(label), trailing:SizedBox(width:130, child:TextFormField(initialValue:value.toString(), keyboardType:TextInputType.numberWithOptions(decimal:true), decoration:InputDecoration(prefixText:'\$', border:OutlineInputBorder(), isDense:true), onFieldSubmitted:(v){ double? vv=double.tryParse(v); if(vv!=null){ onSave(vv); save(); setState((){}); } })), subtitle:Text('輸入後按Enter')));
+  }
+
+  Widget buildSetting(){
+    return Scaffold(appBar:AppBar(title:Text('設定')), body:ListView(padding:EdgeInsets.all(16), children:[
+      Text('自定班次',style:TextStyle(fontWeight:FontWeight.bold,fontSize:18)),
+      for(var s in shifts) Card(child: ListTile(leading:CircleAvatar(backgroundColor:s.color, child:Text(s.code,style:TextStyle(color:Colors.white,fontSize:12))), title:Text('${s.code} - ${s.name} ${s.h}h \$${s.b}'), subtitle:Text(s.work?'有交通':'無交通'), trailing:Row(mainAxisSize:MainAxisSize.min, children:[ IconButton(icon:Icon(Icons.edit,size:18), onPressed:(){ TextEditingController bC=TextEditingController(text:s.b.toString()); TextEditingController hC=TextEditingController(text:s.h.toString()); showDialog(context:context, builder:(c)=>AlertDialog(title:Text('編輯 ${s.code}'), content:Column(mainAxisSize:MainAxisSize.min, children:[ TextField(controller: hC, decoration:InputDecoration(labelText:'時數')), TextField(controller: bC, decoration:InputDecoration(labelText:'津貼 \$')) ]), actions:[ TextButton(onPressed:()=>Navigator.pop(c),child:Text('取消')), FilledButton(onPressed:(){ setState((){ s.h=double.tryParse(hC.text)??s.h; s.b=double.tryParse(bC.text)??s.b; }); save(); Navigator.pop(c); },child:Text('保存')) ])); }), IconButton(icon:Icon(Icons.delete,size:18), onPressed:(){ setState(()=>shifts.remove(s)); save(); }) ]))),
+      FilledButton.icon(onPressed:editShifts, icon:Icon(Icons.add), label:Text('新增自定班次')),
+      Divider(),
+      Text('津貼設定',style:TextStyle(fontWeight:FontWeight.bold,fontSize:18)),
+      moneyInput('OT時薪', otR, (v)=>otR=v),
+      moneyInput('交通津貼(每日)', transB, (v)=>transB=v),
+      Divider(),
+      Text('格子文字大小 ${fs.toInt()}'), Slider(value:fs,min:8,max:20,divisions:12,label:fs.toInt().toString(),onChanged:(v){ setState(()=>fs=v); save(); }),
+      Divider(),
+      for(var p in patterns) Card(child: ListTile(title:Text(p.name), subtitle:Text('${p.codes.length~/7}行 x 7日'), trailing:IconButton(icon:Icon(Icons.delete), onPressed:(){ setState(()=>patterns.remove(p)); save(); }))),
+      FilledButton.icon(onPressed:createPattern, icon:Icon(Icons.add), label:Text('新增 7 x 自定行數 模式')),
+      FilledButton.icon(onPressed:applyPattern, icon:Icon(Icons.play_arrow), label:Text('套用模式排更')),
+    ]));
+  }
+}
