@@ -1,7 +1,7 @@
 name: roster_pro
-description: Roster Pro v6.29 all fixed
+description: Roster Pro v6.33
 publish_to: 'none'
-version: 6.29.0+29
+version: 6.33.0+33
 environment:
   sdk: ">=3.2.0 <4.0.0"
 dependencies:
