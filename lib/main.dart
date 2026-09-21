@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:googleapis/calendar/v3.dart' as calendar;
@@ -34,7 +35,7 @@ class _S extends State<MainPage>{
   DateTime focused=DateTime.now(), selected=DateTime.now(), reportMonth=DateTime.now();
   double otR=100, transB=20, fs=12;
   double weeklyStandard=42, prevBalance=0;
-  final double cellH=72;
+  final double cellH=74;
   bool showAllShifts=false, showHolidays=true, googleCalEnabled=false;
   int googleCalMode=0;
   String lastBackup='從未備份', lastDriveBackup='未備份到Drive';
@@ -54,7 +55,12 @@ class _S extends State<MainPage>{
     ];
     allowances=[ Allowance('早班津貼','06:00',20,true),Allowance('中班津貼','14:00',0,true),Allowance('夜班津貼','22:00',80,true),Allowance('通宵津貼','23:30',120,true), ];
   }
-  Map<String,String> hkHolidays={'2026-09-22':'秋分','2026-09-25':'中秋翌日','2026-10-01':'國慶','2026-01-01':'元旦'};
+  // 1. 假期資料補全 2026 香港
+  Map<String,String> hkHolidays={
+    '2026-01-01':'元旦','2026-02-17':'年初一','2026-02-18':'年初二','2026-02-19':'年初三',
+    '2026-04-03':'清明','2026-05-01':'勞動節','2026-05-24':'佛誕','2026-06-19':'端午',
+    '2026-07-01':'特區成立','2026-09-22':'秋分','2026-09-25':'中秋翌日','2026-10-01':'國慶','2026-10-19':'重陽','2026-12-25':'聖誕'
+  };
   String k(DateTime d)=>DateFormat('yyyy-MM-dd').format(d);
   int isoWeek(DateTime d){ var thu=d.add(Duration(days:4-d.weekday)); var jan1=DateTime(thu.year,1,1); return (thu.difference(jan1).inDays/7).floor()+1; }
   Shift getS(String c){ for(var s in shifts) if(s.code==c) return s; return Shift('','','','',0xFF9E9E9E,0,false); }
@@ -67,19 +73,34 @@ class _S extends State<MainPage>{
   String exportAllJson(){ Map all={'roster':roster,'notes':notes,'extra':extra,'shifts':shifts.map((e)=>e.toJson()).toList(),'allowances':allowances.map((e)=>e.toJson()).toList(),'patterns':patterns.map((e)=>e.toJson()).toList(),'otR':otR,'transB':transB,'fs':fs,'weeklyStandard':weeklyStandard,'prevBalance':prevBalance}; return jsonEncode(all); }
   void importAllJson(String js){ try{ var d=jsonDecode(js); setState((){ roster=(d['roster'] as Map).map((kk,v)=>MapEntry(kk.toString(),v.toString())); notes=(d['notes'] as Map).map((kk,v)=>MapEntry(kk.toString(),v.toString())); extra=(d['extra'] as Map).map((kk,v)=>MapEntry(kk.toString(),(v as num).toDouble())); shifts=(d['shifts'] as List).map((e)=>Shift.fromJson(e)).toList(); allowances=(d['allowances'] as List).map((e)=>Allowance.fromJson(e)).toList(); patterns=(d['patterns'] as List).map((e)=>Pattern.fromJson(e)).toList(); weeklyStandard=(d['weeklyStandard']??42 as num).toDouble(); prevBalance=(d['prevBalance']??0 as num).toDouble(); }); save(); autoSyncCalendar(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('還原成功'))); }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('失敗:$e'))); } }
 
-  Future<void> doLocalBackup() async{ try{ String jsonStr=exportAllJson(); String fname='shift_backup_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.json'; try{ var dir=await getApplicationDocumentsDirectory(); await File('${dir.path}/$fname').writeAsString(jsonStr); }catch(_){} try{ Directory dl=Directory('/storage/emulated/0/Download'); if(await dl.exists()) await File('${dl.path}/$fname').writeAsString(jsonStr); }catch(_){} setState(()=>lastBackup='${DateFormat('MM/dd HH:mm').format(DateTime.now())} $fname'); save(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('備份成功 $fname'))); }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('失敗:$e'))); } }
+  Future<void> doLocalBackup() async{ try{ String jsonStr=exportAllJson(); String fname='shift_backup_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.json'; try{ var dir=await getApplicationDocumentsDirectory(); await File('${dir.path}/$fname').writeAsString(jsonStr); }catch(_){} try{ var d=await getDownloadsDirectory(); if(d!=null) await File('${d.path}/$fname').writeAsString(jsonStr); }catch(_){} try{ Directory dl=Directory('/storage/emulated/0/Download'); if(await dl.exists()) await File('${dl.path}/$fname').writeAsString(jsonStr); }catch(_){} setState(()=>lastBackup='${DateFormat('MM/dd HH:mm').format(DateTime.now())} $fname'); save(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('備份成功 $fname'))); }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('失敗:$e'))); } }
+
   Future<void> doLocalRestore() async{
     try{
       Map<String, File> unique={};
-      try{ var d=await getApplicationDocumentsDirectory(); for(var f in d.listSync()){ if(f is File && f.path.endsWith('.json') && f.path.contains('shift_backup')){ var name=f.path.split('/').last; if(!unique.containsKey(name) || f.statSync().modified.isAfter(unique[name]!.statSync().modified)) unique[name]=f; } } }catch(_){}
-      try{ Directory dl=Directory('/storage/emulated/0/Download'); if(await dl.exists()){ for(var f in dl.listSync()){ if(f is File && f.path.endsWith('.json') && f.path.contains('shift_backup')){ var name=f.path.split('/').last; if(!unique.containsKey(name) || f.statSync().modified.isAfter(unique[name]!.statSync().modified)) unique[name]=f; } } } }catch(_){}
-      if(unique.isEmpty){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('未找到舊備份'))); return; }
-      var list=unique.values.toList()..sort((a,b)=>b.statSync().modified.compareTo(a.statSync().modified));
-      showDialog(context:context, builder:(ctx)=>AlertDialog(title:Text('從手機還原 (共${list.length}個)'), content:SizedBox(width:400, height:400, child:ListView(children:[ for(var f in list) ListTile(dense:true, title:Text(f.path.split('/').last), subtitle:Text(DateFormat('yyyy-MM-dd HH:mm').format(f.statSync().modified)), onTap:()async{ String js=await f.readAsString(); importAllJson(js); Navigator.pop(ctx); }) ])), actions:[TextButton(onPressed:()=>Navigator.pop(ctx), child:Text('取消'))]));
-    }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('失敗:$e'))); }
+      try{ var d=await getApplicationDocumentsDirectory(); for(var f in d.listSync()){ if(f is File && f.path.endsWith('.json')){ var name=f.path.split('/').last; if(name.contains('shift_backup')) unique[name]=f; } } }catch(_){}
+      try{ var d=await getDownloadsDirectory(); if(d!=null) for(var f in d.listSync()){ if(f is File && f.path.endsWith('.json') && f.path.contains('shift_backup')) unique[f.path.split('/').last]=f; } }catch(_){}
+      try{ Directory dl=Directory('/storage/emulated/0/Download'); if(await dl.exists()){ for(var f in dl.listSync()){ if(f is File && f.path.endsWith('.json') && f.path.contains('shift_backup')) unique[f.path.split('/').last]=f; } } }catch(_){}
+
+      if(unique.isNotEmpty){
+        var list=unique.values.toList()..sort((a,b)=>b.statSync().modified.compareTo(a.statSync().modified));
+        showDialog(context:context, builder:(ctx)=>AlertDialog(title:Text('從手機還原 (搵到${list.length}個)'), content:SizedBox(width:400, height:400, child:ListView(children:[ for(var f in list) ListTile(title:Text(f.path.split('/').last), subtitle:Text(DateFormat('MM/dd HH:mm').format(f.statSync().modified)), onTap:()async{ String js=await f.readAsString(); importAllJson(js); Navigator.pop(ctx); }) ])), actions:[TextButton(onPressed:()=>Navigator.pop(ctx), child:Text('取消')), TextButton(onPressed:()async{ Navigator.pop(ctx); await pickFileManually(); }, child:Text('手動揀檔'))]));
+        return;
+      }
+      await pickFileManually();
+    }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('失敗:$e'))); await pickFileManually(); }
   }
-  Future<void> doDriveBackup() async{ try{ final acc=await _gs.signIn(); if(acc==null) return; final auth=await _gs.authenticatedClient(); final driveApi=drive.DriveApi(auth!); String jsonStr=exportAllJson(); final media=drive.Media(Stream.value(utf8.encode(jsonStr)), utf8.encode(jsonStr).length); var file=drive.File()..name='roster_backup_${DateFormat('yyyyMMdd').format(DateTime.now())}.json'..parents=['appDataFolder']; var list=await driveApi.files.list(spaces:'appDataFolder', q:"name contains 'roster_backup'"); for(var f in list.files??[]){ try{ await driveApi.files.delete(f.id!); }catch(_){} } await driveApi.files.create(file, uploadMedia:media); setState(()=>lastDriveBackup='${DateFormat('MM/dd HH:mm').format(DateTime.now())} 已備份'); save(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Drive備份成功'))); }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('失敗:$e'))); } }
-  Future<void> doDriveRestore() async{ try{ final acc=await _gs.signIn(); if(acc==null) return; final auth=await _gs.authenticatedClient(); final driveApi=drive.DriveApi(auth!); var list=await driveApi.files.list(spaces:'appDataFolder', q:"name contains 'roster_backup'", orderBy:'modifiedTime desc'); if(list.files==null||list.files!.isEmpty){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Drive無備份'))); return; } var f=list.files!.first; var media=await driveApi.files.get(f.id!, downloadOptions:drive.DownloadOptions.fullMedia) as drive.Media; List<int> bytes=[]; await for(var chunk in media.stream){ bytes.addAll(chunk); } importAllJson(utf8.decode(bytes)); }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('失敗:$e'))); } }
+  Future<void> pickFileManually() async{
+    try{
+      var res=await FilePicker.platform.pickFiles(type:FileType.custom, allowedExtensions:['json']);
+      if(res==null || res.files.first.path==null) return;
+      String js=await File(res.files.first.path!).readAsString();
+      importAllJson(js);
+    }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('揀檔失敗:$e'))); }
+  }
+
+  Future<void> doDriveBackup() async{ try{ final acc=await _gs.signIn(); if(acc==null) return; final auth=await _gs.authenticatedClient(); final driveApi=drive.DriveApi(auth!); String jsonStr=exportAllJson(); final media=drive.Media(Stream.value(utf8.encode(jsonStr)), utf8.encode(jsonStr).length); var file=drive.File()..name='roster_backup_${DateFormat('yyyyMMdd').format(DateTime.now())}.json'..parents=['appDataFolder']; var list=await driveApi.files.list(spaces:'appDataFolder', q:"name contains 'roster_backup'"); for(var f in list.files??[]){ try{ await driveApi.files.delete(f.id!); }catch(_){} } await driveApi.files.create(file, uploadMedia:media); setState(()=>lastDriveBackup='${DateFormat('MM/dd HH:mm').format(DateTime.now())} 已備份'); save(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Drive備份成功'))); }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('登入失敗:$e'))); } }
+  Future<void> doDriveRestore() async{ try{ final acc=await _gs.signIn(); if(acc==null) return; final auth=await _gs.authenticatedClient(); final driveApi=drive.DriveApi(auth!); var list=await driveApi.files.list(spaces:'appDataFolder', q:"name contains 'roster_backup'", orderBy:'modifiedTime desc'); if(list.files==null||list.files!.isEmpty){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Drive無備份'))); return; } var f=list.files!.first; var media=await driveApi.files.get(f.id!, downloadOptions:drive.DownloadOptions.fullMedia) as drive.Media; List<int> bytes=[]; await for(var chunk in media.stream){ bytes.addAll(chunk); } importAllJson(utf8.decode(bytes)); }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('登入失敗:$e'))); } }
 
   Future<void> pickGoogleAccountAndCalendars() async{
     try{
@@ -93,8 +114,13 @@ class _S extends State<MainPage>{
         selectedCalendarId=calList.first.id; selectedCalendarName=calList.first.summary;
       }
       save();
-      showDialog(context:context, builder:(ctx)=>AlertDialog(title:Text('已登入: $currentGoogleEmail'), content:SizedBox(width:350, height:400, child:ListView(children:[ Text('選擇要同步的日曆：',style:TextStyle(fontWeight:FontWeight.bold)), for(var c in calList) RadioListTile<String>(title:Text(c.summary??''), subtitle:Text(c.id??'', style:TextStyle(fontSize:10)), value:c.id!, groupValue:selectedCalendarId, onChanged:(v){ setState((){ selectedCalendarId=v; selectedCalendarName=c.summary; }); save(); Navigator.pop(ctx); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已選日曆: ${c.summary}'))); }) ])), actions:[TextButton(onPressed:()=>Navigator.pop(ctx), child:Text('關閉')), TextButton(onPressed:()async{ await _gs.signOut(); setState((){ currentGoogleEmail=null; selectedCalendarId=null; selectedCalendarName=null; }); save(); Navigator.pop(ctx); }, child:Text('登出切換帳號'))]));
-    }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('登入失敗:$e'))); }
+      showDialog(context:context, builder:(ctx)=>AlertDialog(title:Text('已登入: $currentGoogleEmail'), content:SizedBox(width:350, height:400, child:ListView(children:[ Text('選擇要同步的日曆：',style:TextStyle(fontWeight:FontWeight.bold)), for(var c in calList) RadioListTile<String>(title:Text(c.summary??''), subtitle:Text(c.id??'', style:TextStyle(fontSize:10)), value:c.id!, groupValue:selectedCalendarId, onChanged:(v){ setState((){ selectedCalendarId=v; selectedCalendarName=c.summary; }); save(); Navigator.pop(ctx); }) ])), actions:[TextButton(onPressed:()=>Navigator.pop(ctx), child:Text('關閉')), TextButton(onPressed:()async{ await _gs.signOut(); setState((){ currentGoogleEmail=null; selectedCalendarId=null; selectedCalendarName=null; }); save(); Navigator.pop(ctx); }, child:Text('登出切換帳號'))]));
+    }catch(e){
+      // 3. 友好提示
+      String msg=e.toString();
+      if(msg.contains('10:')) msg='錯誤10：Codemagic嘅SHA1未加入Firebase / Google Cloud。\n請去 Firebase Console > Project Settings > 加入 SHA1 指紋 (去 Codemagic > Team > Google Play / SHA1 抄)';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('登入失敗:$msg'), duration:Duration(seconds:5)));
+    }
   }
   Future<void> autoSyncCalendar() async{
     if(!googleCalEnabled || selectedCalendarId==null) return;
@@ -108,10 +134,10 @@ class _S extends State<MainPage>{
         var sDate = DateTime(d.year, d.month, d.day);
         var eDate = sDate.add(Duration(days:1));
         var event = calendar.Event()
-         ..summary='[Roster] ${sh.code} ${sh.name}'
-         ..description='排班 ${k(d)} ${sh.start}-${sh.end} 津貼\$${allowFor(sh).toStringAsFixed(0)}'
-         ..start=(calendar.EventDateTime()..date=sDate)
-         ..end=(calendar.EventDateTime()..date=eDate);
+        ..summary='[Roster] ${sh.code} ${sh.name}'
+        ..description='排班 ${k(d)} ${sh.start}-${sh.end} 津貼\$${allowFor(sh).toStringAsFixed(0)}'
+        ..start=(calendar.EventDateTime()..date=sDate)
+        ..end=(calendar.EventDateTime()..date=eDate);
         try{ await calApi.events.insert(event, selectedCalendarId!); }catch(_){}
       }
     }catch(_){}
@@ -146,6 +172,7 @@ class _S extends State<MainPage>{
         for(int r=0;r<6;r++) Padding(padding:EdgeInsets.only(bottom:4), child:Row(children:[
           for(int c=0;c<7;c++) Builder(builder:(_){
             int idx=r*7+c; DateTime day=days[idx]; bool out=day.month!=focused.month; String dk=k(day); bool isHol=showHolidays&&hkHolidays.containsKey(dk); bool hasNote=notes[dk]!=null&&notes[dk]!=''; bool isToday=k(day)==k(DateTime.now()); bool isSel=dk==k(selected);
+            String holName = hkHolidays[dk]?? '';
             if(out) return Expanded(child:Container(height:cellH, margin:EdgeInsets.symmetric(horizontal:2), decoration:BoxDecoration(color:Color(0xFFF5F5F5), borderRadius:BorderRadius.circular(12)), child:Center(child:Text(day.day.toString(),style:TextStyle(color:Colors.black26)))));
             String? code=roster[dk]; Shift? sh=code!=null?getS(code):null;
             Color full=sh?.color??Color(0xFFE0E0E0);
@@ -155,18 +182,20 @@ class _S extends State<MainPage>{
             if(isSel && sh==null) bg=Color(0xFFB39DDB);
             return Expanded(child:GestureDetector(onTap:(){ setState(()=>selected=day); }, onLongPress:()=>editCell(day), child:Container(height:cellH, margin:EdgeInsets.symmetric(horizontal:2), decoration:BoxDecoration(color:bg, borderRadius:BorderRadius.circular(12), border:Border.all(color:isToday?Colors.black:isSel?full:Color(0xFFE0E0E0), width:isToday?2:isSel?1.6:0.8)), child:Stack(children:[
               if(day.weekday==1) Positioned(left:5, top:2, child:Text('W${isoWeek(day)}',style:TextStyle(fontSize:7,color:Colors.black38))),
-              if(isHol) Positioned(right:4, top:3, child:Container(width:6,height:6, decoration:BoxDecoration(color:Colors.red, shape:BoxShape.circle))),
-              if(hasNote) Positioned(right:4, top:isHol?10:3, child:Container(width:7,height:7, decoration:BoxDecoration(color:Colors.blue, shape:BoxShape.circle, border:Border.all(color:Colors.white,width:1)))),
+              // 紅點 + 假期名一齊出
+              if(isHol) Positioned(right:4, top:3, child:Row(children:[ Container(width:6,height:6, decoration:BoxDecoration(color:Colors.red, shape:BoxShape.circle)),])),
+              if(hasNote) Positioned(right:4, top:isHol?12:3, child:Container(width:7,height:7, decoration:BoxDecoration(color:Colors.blue, shape:BoxShape.circle, border:Border.all(color:Colors.white,width:1)))),
               Center(child:Column(mainAxisAlignment:MainAxisAlignment.center, children:[
                 Text(day.day.toString(),style:TextStyle(fontWeight:FontWeight.bold,fontSize:fs, color:txtColor)),
-                if(sh!=null) Container(margin:EdgeInsets.only(top:3), padding:EdgeInsets.symmetric(horizontal:7,vertical:2), decoration:BoxDecoration(color:isSel?Colors.white.withOpacity(0.95):full, borderRadius:BorderRadius.circular(10)), child:Text(sh.code,style:TextStyle(fontSize:10,color:isSel?full:Colors.white,fontWeight:FontWeight.bold))),
+                if(sh!=null) Container(margin:EdgeInsets.only(top:2), padding:EdgeInsets.symmetric(horizontal:6,vertical:1), decoration:BoxDecoration(color:isSel?Colors.white.withOpacity(0.95):full, borderRadius:BorderRadius.circular(10)), child:Text(sh.code,style:TextStyle(fontSize:9,color:isSel?full:Colors.white,fontWeight:FontWeight.bold))),
+                if(isHol) Padding(padding:EdgeInsets.only(top:2), child:Text(holName, style:TextStyle(fontSize:8, color:Colors.red, fontWeight:FontWeight.bold))),
               ])),
             ]))));
           })
         ]))
       ])),
       Expanded(child:Container(width:double.infinity, color:Color(0xFFFAFAFA), padding:EdgeInsets.all(12), child:SingleChildScrollView(child:Column(crossAxisAlignment:CrossAxisAlignment.start, children:[
-        Builder(builder:(_){ String selCode=roster[selKey]??''; Shift? selShift=roster[selKey]!=null?getS(roster[selKey]!):null; String noteStr=notes[selKey]??''; return Column(crossAxisAlignment:CrossAxisAlignment.start, children:[ Row(children:[ Expanded(child:Text('${DateFormat('MM/dd EEEE').format(selected)} ${selCode==''?'未排':selCode}',style:TextStyle(fontWeight:FontWeight.bold,fontSize:16))), FilledButton.icon(onPressed:()=>editCell(selected), icon:Icon(Icons.edit,size:16), label:Text('編輯')), ]), if(selShift!=null) Text('${selShift.name} ${selShift.start}-${selShift.end}',style:TextStyle(fontSize:12,color:Colors.black54)), if(noteStr!='') Container(margin:EdgeInsets.only(top:8), padding:EdgeInsets.all(12), width:double.infinity, decoration:BoxDecoration(color:Colors.white, borderRadius:BorderRadius.circular(12), border:Border.all(color:Colors.blueAccent)), child:Text(noteStr)), ]); }),
+        Builder(builder:(_){ String selCode=roster[selKey]??''; Shift? selShift=roster[selKey]!=null?getS(roster[selKey]!):null; String noteStr=notes[selKey]??''; String hol = hkHolidays[selKey]?? ''; return Column(crossAxisAlignment:CrossAxisAlignment.start, children:[ Row(children:[ Expanded(child:Text('${DateFormat('MM/dd EEEE').format(selected)} ${hol==''?'':' $hol'} ${selCode==''?'未排':selCode}',style:TextStyle(fontWeight:FontWeight.bold,fontSize:15))), FilledButton.icon(onPressed:()=>editCell(selected), icon:Icon(Icons.edit,size:16), label:Text('編輯')), ]), if(selShift!=null) Text('${selShift.name} ${selShift.start}-${selShift.end}',style:TextStyle(fontSize:12,color:Colors.black54)), if(noteStr!='') Container(margin:EdgeInsets.only(top:8), padding:EdgeInsets.all(12), width:double.infinity, decoration:BoxDecoration(color:Colors.white, borderRadius:BorderRadius.circular(12), border:Border.all(color:Colors.blueAccent)), child:Text(noteStr)), ]); }),
       ])))),
     ]));
   }
@@ -209,6 +238,7 @@ class _S extends State<MainPage>{
       Card(child:Column(children:[
         ListTile(title:Text('每週標準工時'), trailing:SizedBox(width:100, child:TextField(controller:TextEditingController(text:weeklyStandard.toString()), keyboardType:TextInputType.number, decoration:InputDecoration(suffixText:'h', border:OutlineInputBorder(), isDense:true), onSubmitted:(v){ var vv=double.tryParse(v); if(vv!=null){ setState(()=>weeklyStandard=vv); save(); } }))),
         ListTile(title:Text('承上餘額'), trailing:SizedBox(width:100, child:TextField(controller:TextEditingController(text:prevBalance.toString()), keyboardType:TextInputType.numberWithOptions(signed:true), decoration:InputDecoration(suffixText:'h', border:OutlineInputBorder(), isDense:true), onSubmitted:(v){ var vv=double.tryParse(v); if(vv!=null){ setState(()=>prevBalance=vv); save(); } }))),
+        SwitchListTile(title:Text('在日曆顯示公眾假期'), value:showHolidays, onChanged:(v){ setState(()=>showHolidays=v); save(); }),
       ])),
       Divider(),
       Row(children:[ Text('津貼設定',style:TextStyle(fontWeight:FontWeight.bold,fontSize:18)), Spacer(), IconButton(icon:Icon(Icons.add), onPressed:()=>editAllowDialog(null)) ]),
@@ -220,7 +250,7 @@ class _S extends State<MainPage>{
       ])),
       Divider(),
       Row(children:[ Text('自定班次 (可選顏色)',style:TextStyle(fontWeight:FontWeight.bold,fontSize:18)), Spacer(), TextButton(onPressed:(){ setState(()=>showAllShifts=!showAllShifts); }, child:Text(showAllShifts?'收起':'顯示全部 ${shifts.length}個')) ]),
-      for(var s in displayShifts) Card(child:ListTile(leading:CircleAvatar(backgroundColor:s.color, child:Text(s.code,style:TextStyle(color:Colors.white,fontSize:12))), title:Text('${s.code} - ${s.name} ${s.h}h'), subtitle:Text('點擊編輯可改色'), trailing:Row(mainAxisSize:MainAxisSize.min, children:[ IconButton(icon:Icon(Icons.edit), onPressed:()=>editShiftDialog(s)), IconButton(icon:Icon(Icons.delete), onPressed:(){ setState(()=>shifts.remove(s)); save(); }) ]), )),
+      for(var s in displayShifts) Card(child:ListTile(leading:CircleAvatar(backgroundColor:s.color, child:Text(s.code,style:TextStyle(color:Colors.white,fontSize:12))), title:Text('${s.code} - ${s.name} ${s.h}h'), trailing:Row(mainAxisSize:MainAxisSize.min, children:[ IconButton(icon:Icon(Icons.edit), onPressed:()=>editShiftDialog(s)), IconButton(icon:Icon(Icons.delete), onPressed:(){ setState(()=>shifts.remove(s)); save(); }) ]), )),
       FilledButton.icon(onPressed:()=>editShiftDialog(null), icon:Icon(Icons.add), label:Text('新增自定班次')),
       Divider(),
       Text('輪班模式',style:TextStyle(fontWeight:FontWeight.bold,fontSize:18)),
