@@ -25,7 +25,6 @@ class Allowance{
   static Allowance fromJson(Map m)=>Allowance(m['name'],m['start'],(m['amount'] as num).toDouble(),m['enabled']);
   int get mins{ try{var p=start.split(':'); return int.parse(p[0])*60+int.parse(p[1]);}catch(_){return 0;}}
 }
-
 class Pattern{ String name; List<String> codes; Pattern(this.name,this.codes); Map toJson()=>{'name':name,'codes':codes}; static Pattern fromJson(Map m)=>Pattern(m['name'],List<String>.from(m['codes'])); }
 
 class MainPage extends StatefulWidget{ @override State<MainPage> createState()=>_S(); }
@@ -61,25 +60,22 @@ class _S extends State<MainPage>{
   Shift getS(String c){ for(var s in shifts) if(s.code==c) return s; return Shift('','','','',0xFF9E9E9E,0,false); }
   int pMins(String t){ try{var p=t.split(':'); return int.parse(p[0])*60+int.parse(p[1]);}catch(_){return -1;}}
   double allowFor(Shift s){ if(!s.work||s.start=='') return 0; int sm=pMins(s.start); if(sm<0) return 0; Allowance? best; int bd=10000; for(var a in allowances){ if(!a.enabled) continue; int d=sm-a.mins; if(d<0) d+=1440; if(d<bd&&d<720){ bd=d; best=a; } } return best==null?0:best.amount; }
-
   void save() async{ var p=await SharedPreferences.getInstance(); p.setString('roster',jsonEncode(roster)); p.setString('notes',jsonEncode(notes)); p.setString('extra',jsonEncode(extra)); p.setString('shifts',jsonEncode(shifts.map((e)=>e.toJson()).toList())); p.setString('allowances',jsonEncode(allowances.map((e)=>e.toJson()).toList())); p.setString('patterns',jsonEncode(patterns.map((e)=>e.toJson()).toList())); p.setDouble('otR',otR); p.setDouble('transB',transB); p.setDouble('fs',fs); p.setDouble('weeklyStandard',weeklyStandard); p.setDouble('prevBalance',prevBalance); p.setBool('showHolidays',showHolidays); p.setBool('googleCalEnabled',googleCalEnabled); p.setInt('googleCalMode',googleCalMode); p.setString('lastBackup',lastBackup); p.setString('lastDriveBackup',lastDriveBackup); p.setString('googleEmail',currentGoogleEmail??''); p.setString('calendarId',selectedCalendarId??''); p.setString('calendarName',selectedCalendarName??''); }
-  void load() async{ var p=await SharedPreferences.getInstance(); var r=p.getString('roster'); if(r!=null){ var d=jsonDecode(r); roster=(d as Map).map((kk,v)=>MapEntry(kk.toString(),v.toString())); } var n=p.getString('notes'); if(n!=null){ var d=jsonDecode(n); notes=(d as Map).map((kk,v)=>MapEntry(kk.toString(),v.toString())); } var ex=p.getString('extra'); if(ex!=null){ var d=jsonDecode(ex); extra=(d as Map).map((kk,v)=>MapEntry(kk.toString(),(v as num).toDouble())); } var sh=p.getString('shifts'); if(sh!=null){ var d=jsonDecode(sh) as List; shifts=d.map((e)=>Shift.fromJson(e)).toList(); } var al=p.getString('allowances'); if(al!=null){ var d=jsonDecode(al) as List; allowances=d.map((e)=>Allowance.fromJson(e)).toList(); } var pat=p.getString('patterns'); if(pat!=null){ var d=jsonDecode(pat) as List; patterns=d.map((e)=>Pattern.fromJson(e)).toList(); } setState((){ otR=p.getDouble('otR')??100; transB=p.getDouble('transB')??20; fs=p.getDouble('fs')??12; weeklyStandard=p.getDouble('weeklyStandard')??42; prevBalance=p.getDouble('prevBalance')??0; showHolidays=p.getBool('showHolidays')??true; googleCalEnabled=p.getBool('googleCalEnabled')??false; googleCalMode=p.getInt('googleCalMode')??0; lastBackup=p.getString('lastBackup')??'從未備份'; lastDriveBackup=p.getString('lastDriveBackup')??'未備份到Drive'; currentGoogleEmail=p.getString('googleEmail'); selectedCalendarId=p.getString('calendarId'); selectedCalendarName=p.getString('calendarName'); }); }
+  void load() async{ var p=await SharedPreferences.getInstance(); var r=p.getString('roster'); if(r!=null){ var d=jsonDecode(r); roster=(d as Map).map((kk,v)=>MapEntry(kk.toString(),v.toString())); } var n=p.getString('notes'); if(n!=null){ var d=jsonDecode(n); notes=(d as Map).map((kk,v)=>MapEntry(kk.toString(),v.toString())); } var ex=p.getString('extra'); if(ex!=null){ var d=jsonDecode(ex); extra=(d as Map).map((kk,v)=>MapEntry(kk.toString(),(v as num).toDouble())); } var sh=p.getString('shifts'); if(sh!=null){ var d=jsonDecode(sh) as List; shifts=d.map((e)=>Shift.fromJson(e)).toList(); } var al=p.getString('allowances'); if(al!=null){ var d=jsonDecode(al) as List; allowances=d.map((e)=>Allowance.fromJson(e)).toList(); } var pat=p.getString('patterns'); if(pat!=null){ var d=jsonDecode(pat) as List; patterns=d.map((e)=>Pattern.fromJson(e)).toList(); } setState((){ otR=p.getDouble('otR')??100; transB=p.getDouble('transB')??20; fs=p.getDouble('fs')??12; weeklyStandard=p.getDouble('weeklyStandard')??42; prevBalance=p.getDouble('prevBalance')??0; showHolidays=p.getBool('showHolidays')??true; googleCalEnabled=p.getBool('googleCalEnabled')??false; googleCalMode=p.getInt('googleCalMode')??0; lastBackup=p.getString('lastBackup')??'從未備份'; lastDriveBackup=p.getString('lastDriveBackup')??'未備份到Drive'; currentGoogleEmail=p.getString('googleEmail'); if(currentGoogleEmail=='') currentGoogleEmail=null; selectedCalendarId=p.getString('calendarId'); if(selectedCalendarId=='') selectedCalendarId=null; selectedCalendarName=p.getString('calendarName'); }); }
   @override void initState(){ super.initState(); load(); }
   List<DateTime> days42(DateTime mon){ var first=DateTime(mon.year,mon.month,1); int off=first.weekday-1; var start=first.subtract(Duration(days:off)); return List.generate(42,(i)=>start.add(Duration(days:i))); }
   String exportAllJson(){ Map all={'roster':roster,'notes':notes,'extra':extra,'shifts':shifts.map((e)=>e.toJson()).toList(),'allowances':allowances.map((e)=>e.toJson()).toList(),'patterns':patterns.map((e)=>e.toJson()).toList(),'otR':otR,'transB':transB,'fs':fs,'weeklyStandard':weeklyStandard,'prevBalance':prevBalance}; return jsonEncode(all); }
   void importAllJson(String js){ try{ var d=jsonDecode(js); setState((){ roster=(d['roster'] as Map).map((kk,v)=>MapEntry(kk.toString(),v.toString())); notes=(d['notes'] as Map).map((kk,v)=>MapEntry(kk.toString(),v.toString())); extra=(d['extra'] as Map).map((kk,v)=>MapEntry(kk.toString(),(v as num).toDouble())); shifts=(d['shifts'] as List).map((e)=>Shift.fromJson(e)).toList(); allowances=(d['allowances'] as List).map((e)=>Allowance.fromJson(e)).toList(); patterns=(d['patterns'] as List).map((e)=>Pattern.fromJson(e)).toList(); weeklyStandard=(d['weeklyStandard']??42 as num).toDouble(); prevBalance=(d['prevBalance']??0 as num).toDouble(); }); save(); autoSyncCalendar(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('還原成功'))); }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('失敗:$e'))); } }
 
-  Future<void> doLocalBackup() async{
-    try{ String jsonStr=exportAllJson(); String fname='shift_backup_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.json'; try{ var dir=await getApplicationDocumentsDirectory(); await File('${dir.path}/$fname').writeAsString(jsonStr); }catch(_){} try{ Directory dl=Directory('/storage/emulated/0/Download'); if(await dl.exists()) await File('${dl.path}/$fname').writeAsString(jsonStr); }catch(_){} setState(()=>lastBackup='${DateFormat('MM/dd HH:mm').format(DateTime.now())} $fname'); save(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('備份成功 $fname'))); }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('失敗:$e'))); }
-  }
+  Future<void> doLocalBackup() async{ try{ String jsonStr=exportAllJson(); String fname='shift_backup_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.json'; try{ var dir=await getApplicationDocumentsDirectory(); await File('${dir.path}/$fname').writeAsString(jsonStr); }catch(_){} try{ Directory dl=Directory('/storage/emulated/0/Download'); if(await dl.exists()) await File('${dl.path}/$fname').writeAsString(jsonStr); }catch(_){} setState(()=>lastBackup='${DateFormat('MM/dd HH:mm').format(DateTime.now())} $fname'); save(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('備份成功 $fname'))); }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('失敗:$e'))); } }
   Future<void> doLocalRestore() async{
     try{
       Map<String, File> unique={};
       try{ var d=await getApplicationDocumentsDirectory(); for(var f in d.listSync()){ if(f is File && f.path.endsWith('.json') && f.path.contains('shift_backup')){ var name=f.path.split('/').last; if(!unique.containsKey(name) || f.statSync().modified.isAfter(unique[name]!.statSync().modified)) unique[name]=f; } } }catch(_){}
       try{ Directory dl=Directory('/storage/emulated/0/Download'); if(await dl.exists()){ for(var f in dl.listSync()){ if(f is File && f.path.endsWith('.json') && f.path.contains('shift_backup')){ var name=f.path.split('/').last; if(!unique.containsKey(name) || f.statSync().modified.isAfter(unique[name]!.statSync().modified)) unique[name]=f; } } } }catch(_){}
-      if(unique.isEmpty){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('未找到舊備份，請檢查 Download / 文件'))); return; }
+      if(unique.isEmpty){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('未找到舊備份'))); return; }
       var list=unique.values.toList()..sort((a,b)=>b.statSync().modified.compareTo(a.statSync().modified));
-      showDialog(context:context, builder:(ctx)=>AlertDialog(title:Text('從手機還原 (共${list.length}個，舊檔全部顯示)'), content:SizedBox(width:400, height:400, child:ListView(children:[ for(var f in list) ListTile(dense:true, title:Text(f.path.split('/').last), subtitle:Text('${f.path}\n${DateFormat('yyyy-MM-dd HH:mm').format(f.statSync().modified)}'), isThreeLine:true, onTap:()async{ String js=await f.readAsString(); importAllJson(js); Navigator.pop(ctx); }) ])), actions:[TextButton(onPressed:()=>Navigator.pop(ctx), child:Text('取消'))]));
+      showDialog(context:context, builder:(ctx)=>AlertDialog(title:Text('從手機還原 (共${list.length}個)'), content:SizedBox(width:400, height:400, child:ListView(children:[ for(var f in list) ListTile(dense:true, title:Text(f.path.split('/').last), subtitle:Text(DateFormat('yyyy-MM-dd HH:mm').format(f.statSync().modified)), onTap:()async{ String js=await f.readAsString(); importAllJson(js); Navigator.pop(ctx); }) ])), actions:[TextButton(onPressed:()=>Navigator.pop(ctx), child:Text('取消'))]));
     }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('失敗:$e'))); }
   }
   Future<void> doDriveBackup() async{ try{ final acc=await _gs.signIn(); if(acc==null) return; final auth=await _gs.authenticatedClient(); final driveApi=drive.DriveApi(auth!); String jsonStr=exportAllJson(); final media=drive.Media(Stream.value(utf8.encode(jsonStr)), utf8.encode(jsonStr).length); var file=drive.File()..name='roster_backup_${DateFormat('yyyyMMdd').format(DateTime.now())}.json'..parents=['appDataFolder']; var list=await driveApi.files.list(spaces:'appDataFolder', q:"name contains 'roster_backup'"); for(var f in list.files??[]){ try{ await driveApi.files.delete(f.id!); }catch(_){} } await driveApi.files.create(file, uploadMedia:media); setState(()=>lastDriveBackup='${DateFormat('MM/dd HH:mm').format(DateTime.now())} 已備份'); save(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Drive備份成功'))); }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('失敗:$e'))); } }
@@ -97,7 +93,7 @@ class _S extends State<MainPage>{
         selectedCalendarId=calList.first.id; selectedCalendarName=calList.first.summary;
       }
       save();
-      showDialog(context:context, builder:(ctx)=>AlertDialog(title:Text('已登入: $currentGoogleEmail'), content:SizedBox(width:350, height:350, child:ListView(children:[ Text('選擇要同步的日曆：',style:TextStyle(fontWeight:FontWeight.bold)), for(var c in calList) RadioListTile<String>(title:Text(c.summary??''), subtitle:Text(c.id??''), value:c.id!, groupValue:selectedCalendarId, onChanged:(v){ setState((){ selectedCalendarId=v; selectedCalendarName=c.summary; }); save(); Navigator.pop(ctx); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已選日曆: ${c.summary}'))); }) ])), actions:[TextButton(onPressed:()=>Navigator.pop(ctx), child:Text('關閉'))]));
+      showDialog(context:context, builder:(ctx)=>AlertDialog(title:Text('已登入: $currentGoogleEmail'), content:SizedBox(width:350, height:400, child:ListView(children:[ Text('選擇要同步的日曆：',style:TextStyle(fontWeight:FontWeight.bold)), for(var c in calList) RadioListTile<String>(title:Text(c.summary??''), subtitle:Text(c.id??'', style:TextStyle(fontSize:10)), value:c.id!, groupValue:selectedCalendarId, onChanged:(v){ setState((){ selectedCalendarId=v; selectedCalendarName=c.summary; }); save(); Navigator.pop(ctx); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已選日曆: ${c.summary}'))); }) ])), actions:[TextButton(onPressed:()=>Navigator.pop(ctx), child:Text('關閉')), TextButton(onPressed:()async{ await _gs.signOut(); setState((){ currentGoogleEmail=null; selectedCalendarId=null; selectedCalendarName=null; }); save(); Navigator.pop(ctx); }, child:Text('登出切換帳號'))]));
     }catch(e){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('登入失敗:$e'))); }
   }
   Future<void> autoSyncCalendar() async{
@@ -105,17 +101,18 @@ class _S extends State<MainPage>{
     try{
       var auth=await _gs.authenticatedClient(); if(auth==null) return;
       var calApi=calendar.CalendarApi(auth);
-      // 簡易：只同步當月
       for(var entry in roster.entries){
-        DateTime? d=DateTime.tryParse(entry.key); if(d==null) continue; if(d.month!=focused.month) continue;
+        DateTime? d=DateTime.tryParse(entry.key); if(d==null) continue;
+        if(d.year!=focused.year || d.month!=focused.month) continue;
         var sh=getS(entry.value);
-        var ev=calendar.Event()
-         ..summary='[${sh.code}] ${sh.name}'
-         ..description='${sh.start}-${sh.end} 津貼\$${allowFor(sh).toStringAsFixed(0)}'
-         ..start=calendar.EventDateTime(date:calendar.EventDateTime().date = null, dateTime: DateTime(d.year,d.month,d.day, 8))
-         ..end=calendar.EventDateTime(dateTime: DateTime(d.year,d.month,d.day, 16));
-        // 為避免重複，先用 private extendedProperty 可自行擴充，呢度直接插入
-        try{ await calApi.events.insert(calendar.Event()..summary='[RosterPro] ${sh.code} ${k(d)}'..start=calendar.EventDateTime(date:DateFormat('yyyy-MM-dd').format(d))..end=calendar.EventDateTime(date:DateFormat('yyyy-MM-dd').format(d)), selectedCalendarId!); }catch(_){}
+        var sDate = DateTime(d.year, d.month, d.day);
+        var eDate = sDate.add(Duration(days:1));
+        var event = calendar.Event()
+         ..summary='[Roster] ${sh.code} ${sh.name}'
+         ..description='排班 ${k(d)} ${sh.start}-${sh.end} 津貼\$${allowFor(sh).toStringAsFixed(0)}'
+         ..start=(calendar.EventDateTime()..date=sDate)
+         ..end=(calendar.EventDateTime()..date=eDate);
+        try{ await calApi.events.insert(event, selectedCalendarId!); }catch(_){}
       }
     }catch(_){}
   }
@@ -192,7 +189,7 @@ class _S extends State<MainPage>{
       Text('備份與同步',style:TextStyle(fontWeight:FontWeight.bold,fontSize:18)),
       Card(color:Color(0xFFE8F5E9), child:Column(children:[
         ListTile(title:Text('本地備份'), subtitle:Text('上次: $lastBackup')),
-        Padding(padding:EdgeInsets.symmetric(horizontal:12), child:Row(children:[ Expanded(child:OutlinedButton.icon(onPressed:doLocalBackup, icon:Icon(Icons.save_alt), label:Text('備份到手機'))), SizedBox(width:8), Expanded(child:OutlinedButton.icon(onPressed:doLocalRestore, icon:Icon(Icons.restore), label:Text('從手機還原 (顯示全部舊檔)')),)])),
+        Padding(padding:EdgeInsets.symmetric(horizontal:12), child:Row(children:[ Expanded(child:OutlinedButton.icon(onPressed:doLocalBackup, icon:Icon(Icons.save_alt), label:Text('備份到手機'))), SizedBox(width:8), Expanded(child:OutlinedButton.icon(onPressed:doLocalRestore, icon:Icon(Icons.restore), label:Text('從手機還原')),)])),
         Divider(),
         ListTile(title:Text('網絡備份 Google Drive'), subtitle:Text('上次: $lastDriveBackup')),
         Padding(padding:EdgeInsets.symmetric(horizontal:12), child:Row(children:[ Expanded(child:ElevatedButton.icon(onPressed:doDriveBackup, icon:Icon(Icons.cloud_upload), label:Text('備份到Drive'))), SizedBox(width:8), Expanded(child:ElevatedButton.icon(onPressed:doDriveRestore, icon:Icon(Icons.cloud_download), label:Text('從Drive還原'))), ])),
@@ -203,7 +200,7 @@ class _S extends State<MainPage>{
         if(googleCalEnabled) Padding(padding:EdgeInsets.symmetric(horizontal:16), child:Column(children:[
           RadioListTile<int>(title:Text('單向 App→Google',style:TextStyle(fontSize:13)), value:0, groupValue:googleCalMode, onChanged:(v){ setState(()=>googleCalMode=v!); save(); }),
           RadioListTile<int>(title:Text('雙向 Google↔App',style:TextStyle(fontSize:13)), value:1, groupValue:googleCalMode, onChanged:(v){ setState(()=>googleCalMode=v!); save(); }),
-          FilledButton.tonal(onPressed:(){ autoSyncCalendar(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已觸發同步到 ${selectedCalendarName??selectedCalendarId}'))); }, child:Text('立即同步當月到 ${selectedCalendarName??'日曆'}')),
+          FilledButton.tonal(onPressed:(){ autoSyncCalendar(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已同步到 ${selectedCalendarName??selectedCalendarId}'))); }, child:Text('立即同步當月')),
           SizedBox(height:8),
         ])),
       ])),
@@ -214,7 +211,6 @@ class _S extends State<MainPage>{
         ListTile(title:Text('承上餘額'), trailing:SizedBox(width:100, child:TextField(controller:TextEditingController(text:prevBalance.toString()), keyboardType:TextInputType.numberWithOptions(signed:true), decoration:InputDecoration(suffixText:'h', border:OutlineInputBorder(), isDense:true), onSubmitted:(v){ var vv=double.tryParse(v); if(vv!=null){ setState(()=>prevBalance=vv); save(); } }))),
       ])),
       Divider(),
-      // 2. 津貼設定 返嚟喇
       Row(children:[ Text('津貼設定',style:TextStyle(fontWeight:FontWeight.bold,fontSize:18)), Spacer(), IconButton(icon:Icon(Icons.add), onPressed:()=>editAllowDialog(null)) ]),
       Card(color:Color(0xFFFFF8E1), child:Column(children:[
         ListTile(title:Text('OT時薪'), trailing:SizedBox(width:100, child:TextField(controller:TextEditingController(text:otR.toString()), keyboardType:TextInputType.number, decoration:InputDecoration(prefixText:'\$', border:OutlineInputBorder(), isDense:true), onSubmitted:(v){ var vv=double.tryParse(v); if(vv!=null){ setState(()=>otR=vv); save(); } }))),
