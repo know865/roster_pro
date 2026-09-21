@@ -5,8 +5,9 @@ workflows:
       flutter: 3.22.2
       java: 17
     scripts:
-      - name: Fix Android
+      - name: Fix Android - recreate gradle
         script: |
+          echo "Fixing Gradle"
           rm -rf android
           flutter create. --platforms=android --project-name roster_pro --org com.example.rosterpro
           flutter pub get
