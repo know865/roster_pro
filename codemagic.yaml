@@ -1,18 +1,18 @@
 workflows:
-  roster-pro-v2:
+  Roster Pro V2:
     name: Roster Pro V2
     instance_type: mac_mini_m2
+    max_build_duration: 60
     environment:
-      flutter: 3.19.6
+      flutter: 3.22.2
+      xcode: latest
+      cocoapods: default
     scripts:
-      - name: Create project if missing
-        script: |
-          if [ ! -d "android" ]; then
-            flutter create . --project-name roster_pro --platforms=android
-          fi
       - name: Get packages
-        script: flutter pub get
+        script: |
+          flutter packages pub get
       - name: Build APK
-        script: flutter build apk --release
+        script: |
+          flutter build apk --release
     artifacts:
       - build/app/outputs/flutter-apk/*.apk
