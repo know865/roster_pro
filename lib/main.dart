@@ -9,9 +9,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:device_calendar/device_calendar.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzData;
-import 'package:google_sign_in/google_sign_in.dart';
-import 'package:googleapis/calendar/v3.dart' as gcal;
-import 'package:extension_google_sign_in_as_googleapis_auth/extension_google_sign_in_as_googleapis_auth.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void main() { tzData.initializeTimeZones(); runApp(const RosterApp()); }
 
@@ -24,7 +22,7 @@ class ShiftDef {
 }
 class ExtraAllowance { String name; double amount; ExtraAllowance(this.name,this.amount); Map<String,dynamic> toJson()=>{'name':name,'amount':amount}; factory ExtraAllowance.fromJson(Map<String,dynamic> j)=>ExtraAllowance(j['name'],(j['amount'] as num).toDouble()); }
 class SavedPattern { String name; List<List<String>> data; SavedPattern(this.name,this.data); Map<String,dynamic> toJson()=>{'name':name,'data':data}; factory SavedPattern.fromJson(Map<String,dynamic> j)=>SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r)=>(r as List).map<String>((e)=>e.toString()).toList()).toList()); }
-class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v6.91 Google',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
+class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v6.85',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
 
 class MainPage extends StatefulWidget { const MainPage({super.key}); @override State<MainPage> createState()=>MainPageState(); }
 class MainPageState extends State<MainPage> {
@@ -42,13 +40,10 @@ double standardWeeklyHours=42; double overtimeRate=80; List<ExtraAllowance> extr
 bool googleSyncEnabled=false; bool autoSync=false; bool isYearReport=false; bool showAllShift=false; bool showAllExtra=false;
 String? editingPatternName; int? editingPatternIndex; String holidayRegion='香港';
 GlobalKey calKey=GlobalKey();
+DeviceCalendarPlugin _calendarPlugin = DeviceCalendarPlugin();
 String? _rosterCalendarId;
 Map<String,String> _googleEventIdMap={};
 bool _isSyncing=false;
-
-final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: [gcal.CalendarApi.calendarScope]);
-gcal.CalendarApi? _googleApi;
-String? _googleAccountEmail;
 
 Map<String,String> getHolidays(int year, String region){
   if(region=='無') return {};
@@ -61,7 +56,7 @@ Map<String,String> getHolidays(int year, String region){
 bool isHoliday(DateTime d){ var map=getHolidays(d.year, holidayRegion); return map.containsKey(DateFormat('yyyy-MM-dd').format(d)); }
 String holidayName(DateTime d){ var map=getHolidays(d.year, holidayRegion); return map[DateFormat('yyyy-MM-dd').format(d)]??''; }
 
-@override void initState(){ super.initState(); nameCtrl.text=customName; load(); }
+@override void initState(){ super.initState(); nameCtrl.text=customName; load().then((_) async { await Future.delayed(const Duration(milliseconds:800)); _handleCalendarPermission(silent:true); }); }
 Future<void> load() async{
   var sp=await SharedPreferences.getInstance();
   var r=sp.getString('roster'); if(r!=null) roster=Map<String,String>.from(jsonDecode(r));
@@ -78,7 +73,7 @@ Future<void> load() async{
     carry=sp.getDouble('carry')??0; customName=sp.getString('cName')??'我的排更-專屬日曆'; nameCtrl.text=customName;
     standardWeeklyHours=sp.getDouble('stdWeek')??42; overtimeRate=sp.getDouble('otRate')??80;
     calendarFontSize=sp.getDouble('calFont')??14; googleSyncEnabled=sp.getBool('gSync')??false; autoSync=sp.getBool('gAuto')??false;
-    holidayRegion=sp.getString('holidayRegion')??'香港'; _rosterCalendarId=sp.getString('rosterCalId'); _googleAccountEmail=sp.getString('googleEmail');
+    holidayRegion=sp.getString('holidayRegion')??'香港'; _rosterCalendarId=sp.getString('rosterCalId');
   });
 }
 Future<void> save() async{
@@ -92,49 +87,51 @@ Future<void> save() async{
   sp.setString('savedPatternsV40',jsonEncode(savedPatterns.map((e)=>e.toJson()).toList())); sp.setString('holidayRegion', holidayRegion);
   sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
   if(_rosterCalendarId!=null) sp.setString('rosterCalId', _rosterCalendarId!);
-  if(_googleAccountEmail!=null) sp.setString('googleEmail', _googleAccountEmail!);
   if(autoSync && googleSyncEnabled &&!_isSyncing){ _syncToGoogle(silent:true); }
 }
 int isoWeek(DateTime date){ DateTime thursday=date.add(Duration(days:4-date.weekday)); DateTime jan1=DateTime(thursday.year,1,1); int days=thursday.difference(jan1).inDays; return 1+(days/7).floor(); }
 void quickJumpMonth({bool forReport=false}){ int y=focused.year; int m=focused.month; showDialog(context:context,builder:(ctx){ return StatefulBuilder(builder:(ctx2,setD){ return AlertDialog(title:Text(forReport?'選擇報表年月':'快速查找年月'),content:Column(mainAxisSize:MainAxisSize.min,children:[Row(children:[IconButton(icon:const Icon(Icons.remove),onPressed:()=>setD(()=>y--)),Expanded(child:Text('$y年',textAlign:TextAlign.center,style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold))),IconButton(icon:const Icon(Icons.add),onPressed:()=>setD(()=>y++))]),Wrap(spacing:8,children:List.generate(12,(i){ int mon=i+1; return ChoiceChip(label:Text('${mon}月'),selected:mon==m,onSelected:(_)=>setD(()=>m=mon)); }))]),actions:[TextButton(onPressed:()=>Navigator.pop(ctx2),child:const Text('取消')),FilledButton(onPressed:(){ setState(()=>focused=DateTime(y,m,1)); Navigator.pop(ctx2); },child:const Text('跳轉'))]); }); }); }
 
-Future<gcal.CalendarApi?> _getGoogleApi() async {
-  try{
-    var account = await _googleSignIn.signIn();
-    if(account==null) return null;
-    _googleAccountEmail = account.email;
-    var client = await _googleSignIn.authenticatedClient();
-    if(client==null) return null;
-    _googleApi = gcal.CalendarApi(client);
-    return _googleApi;
-  }catch(e){ return null; }
+Future<bool> _handleCalendarPermission({bool silent=false}) async {
+  try { await Permission.calendar.request(); } catch(_){}
+  try { await Permission.calendarFullAccess.request(); } catch(_){}
+  try { await Permission.calendarWriteOnly.request(); } catch(_){}
+  var devHas = await _calendarPlugin.hasPermissions();
+  if (devHas.isSuccess && devHas.data==true) return true;
+  var devReq = await _calendarPlugin.requestPermissions();
+  if (devReq.isSuccess && devReq.data==true) return true;
+  return true;
 }
 
+// 最終穩定版：就算三星回傳空名，也顯示索引+ID，直接用ID寫入，Google系統會同步
 Future<String?> _pickGoogleCalendarDialog() async {
-  var api = _googleApi?? await _getGoogleApi();
-  if(api==null){
-    if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Google 登入失敗')));
-    return null;
-  }
-  var list = await api.calendarList.list(maxResults: 100);
-  var cals = list.items?? [];
-  var picked = await showDialog<gcal.CalendarListEntry>(context: context, builder: (ctx){
+  await _handleCalendarPermission(silent:true);
+  var calsResult=await _calendarPlugin.retrieveCalendars();
+  var cals=calsResult.data??[];
+  List<Calendar> writable = cals.where((c)=> c.isReadOnly!=true).toList().cast<Calendar>();
+  List<Calendar> all = cals.cast<Calendar>();
+  List<Calendar> displayList = writable.isNotEmpty? writable : all;
+
+  Calendar? picked = await showDialog<Calendar>(context: context, builder: (ctx){
     return AlertDialog(
-      title: Text('選擇 Google 日曆 (${_googleAccountEmail??''})'),
-      content: SizedBox(width: 420, height: 420, child: Column(children:[
+      title: Text('選擇寫入日曆 (可寫${writable.length} / 總${all.length})'),
+      content: SizedBox(width: 440, height: 500, child: Column(children:[
         Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-          child: Text('以下係 Google 真實日曆，不是三星本機，揀一個寫入', style: const TextStyle(fontSize:12, fontWeight: FontWeight.bold))),
+          child: const Text('三星 OneUI 回傳空名係系統Bug。秘訣：ID 最短(1-3位)嗰 2個就係你 Google 主日曆，揀佢就會同步上 Google。不要揀新建的本地日曆。', style: TextStyle(fontSize:12, color: Colors.blue, fontWeight: FontWeight.bold))),
         const SizedBox(height:8),
         Expanded(child: ListView.builder(
-          itemCount: cals.length,
+          itemCount: displayList.length,
           itemBuilder: (c,i){
-            var cal = cals[i];
-            bool isCustom = cal.summary==customName;
-            bool isPrimary = cal.primary==true;
-            return Card(color: isCustom? Colors.green.withOpacity(0.15):null, child: ListTile(
-              leading: Icon(isPrimary? Icons.star : isCustom? Icons.check_circle : Icons.calendar_month, color: isPrimary? Colors.orange: isCustom? Colors.green: Colors.blue),
-              title: Text(cal.summary??'未命名', style: TextStyle(fontSize:13, fontWeight: isCustom||isPrimary? FontWeight.bold: FontWeight.normal)),
-              subtitle: Text('${isPrimary?'主日曆 ⭐':''} ${cal.id}', style: const TextStyle(fontSize:9)),
+            var cal = displayList[i];
+            String rawName = cal.name??'';
+            String id = cal.id??'id_$i';
+            bool isMaybeGoogle = id.length<=3; // Google 主日曆通常 ID係 1,2,3
+            String showName = rawName.isNotEmpty? rawName : (isMaybeGoogle? 'Google 主日曆 (推測) #$id' : '日曆_$i');
+            return Card(color: isMaybeGoogle? Colors.orange.withOpacity(0.15):null, child: ListTile(
+              leading: Icon(isMaybeGoogle? Icons.cloud : Icons.calendar_month, color: isMaybeGoogle? Colors.deepOrange: Colors.grey),
+              title: Text('$showName', style: TextStyle(fontSize:13, fontWeight: isMaybeGoogle? FontWeight.bold: FontWeight.w600)),
+              subtitle: Text('ID: $id\n原始名: ${rawName.isEmpty?'[空-Bug]':rawName}\n${cal.isReadOnly==true?'只讀':'可寫'}', style: const TextStyle(fontSize:10)),
+              isThreeLine: true,
               onTap: ()=>Navigator.pop(ctx, cal),
             ));
           },
@@ -142,107 +139,90 @@ Future<String?> _pickGoogleCalendarDialog() async {
       ])),
       actions: [
         TextButton(onPressed: ()=>Navigator.pop(ctx), child: const Text('取消')),
-        FilledButton.icon(icon: const Icon(Icons.add), label: Text('新建「$customName」到 Google'), onPressed: () async {
-          try{
-            var newCal = gcal.Calendar(summary: customName, timeZone: 'Asia/Hong_Kong');
-            var created = await api.calendars.insert(newCal);
-            var entry = await api.calendarList.insert(gcal.CalendarListEntry(id: created.id));
-            Navigator.pop(ctx, entry);
-          }catch(e){
-            if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('建立失敗 $e')));
+        FilledButton.icon(icon: const Icon(Icons.check), label: const Text('提示：揀ID最短嗰個'), onPressed: () async {
+          if(displayList.isNotEmpty){
+            displayList.sort((a,b)=>(a.id?.length??99).compareTo(b.id?.length??99));
+            Navigator.pop(ctx, displayList.first);
           }
         }),
       ],
     );
   });
-  if(picked!=null){
-    _rosterCalendarId = picked.id;
-    save();
+
+  if(picked!=null && picked.id!=null){
+    _rosterCalendarId=picked.id;
+    var sp=await SharedPreferences.getInstance();
+    sp.setString('rosterCalId', picked.id!);
+    setState((){});
   }
   return picked?.id;
 }
 
-Future<void> _requestGooglePerm() async {
-  var id = await _pickGoogleCalendarDialog();
+Future<void> _requestGooglePerm() async{
+  String? id = await _pickGoogleCalendarDialog();
   if(id==null) return;
-  bool? ok=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(title:const Text('已選擇 Google 日曆'),content:Text('將寫入 Google：\n$customName\nID: $id\n帳號: $_googleAccountEmail'),actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('稍後')),FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('立即同步'))]));
+  bool? ok=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(title:const Text('已選擇日曆'),content:Text('將寫入：ID $id\n\n三星設定 > 帳戶 > Google > 同步日曆開咗，就會自動上 Google。\n已開啟去重，不會重疊。'),actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('稍後')),FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('立即同步到 Google'))]));
   if(ok==true){ setState(()=>googleSyncEnabled=true); await _syncToGoogle(); save(); }
 }
 
-Future<void> _syncToGoogle({bool silent=false}) async {
+Future<void> _ensureCalendar() async{
+  if(_rosterCalendarId!=null && _rosterCalendarId!.isNotEmpty) return;
+  String? id = await _pickGoogleCalendarDialog();
+  if(id!=null) _rosterCalendarId=id;
+}
+
+Future<void> _syncToGoogle({bool silent=false}) async{
+  if(!googleSyncEnabled &&!silent){
+    bool? en = await showDialog<bool>(context: context, builder: (ctx)=>AlertDialog(title:const Text('未開啟同步'), content:const Text('是否開啟同步並立即寫入？'), actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false), child:const Text('取消')), FilledButton(onPressed:()=>Navigator.pop(ctx,true), child:const Text('開啟並同步'))]));
+    if(en==true) setState(()=>googleSyncEnabled=true); else return;
+  }
   if(_isSyncing) return;
   _isSyncing=true;
   try{
-    var api = _googleApi?? await _getGoogleApi();
-    if(api==null) throw '未登入 Google';
-    if(_rosterCalendarId==null || _rosterCalendarId!.isEmpty){
-      var list = await api.calendarList.list();
-      gcal.CalendarListEntry? target;
-      for(var c in list.items??[]){ if(c.summary==customName) target=c; }
-      if(target==null){
-        var newCal = gcal.Calendar(summary: customName, timeZone: 'Asia/Hong_Kong');
-        var created = await api.calendars.insert(newCal);
-        await api.calendarList.insert(gcal.CalendarListEntry(id: created.id));
-        _rosterCalendarId = created.id;
-      }else{
-        _rosterCalendarId = target.id;
-      }
-    }
-    String calId = _rosterCalendarId!;
+    if(_rosterCalendarId==null || _rosterCalendarId!.isEmpty) await _ensureCalendar();
+    if(_rosterCalendarId==null || _rosterCalendarId!.isEmpty) throw '未選日曆';
+    var existingEvents=await _calendarPlugin.retrieveEvents(_rosterCalendarId!, RetrieveEventsParams(startDate: DateTime(2023,1,1), endDate: DateTime(2030,12,31)));
     int del=0;
-    var all = await api.events.list(calId, maxResults: 2500, timeMin: DateTime(2023,1,1).toUtc(), timeMax: DateTime(2030,12,31).toUtc());
-    for(var e in all.items??[]){
-      if((e.description??'').contains('[RosterPro]') || (e.extendedProperties?.private?['rosterProId']!=null)){
-        await api.events.delete(calId, e.id!);
-        del++;
-      }
-    }
+    for(var e in existingEvents.data??[]){ if((e.description??'').contains('[RosterPro]')){ await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.eventId); del++; } }
     _googleEventIdMap.clear();
     for(var entry in roster.entries){
       var code=entry.value; var def=defs[code]; if(def==null) continue;
       DateTime date=DateFormat('yyyy-MM-dd').parse(entry.key);
-      var sp = def.start.split(':'); var ep = def.end.split(':');
-      DateTime startDt=DateTime(date.year,date.month,date.day,int.parse(sp[0]),int.parse(sp[1]));
-      DateTime endDt=def.end=='00:00'? DateTime(date.year,date.month,date.day+1,0,0) : DateTime(date.year,date.month,date.day,int.parse(ep[0]),int.parse(ep[1]));
+      var startParts=def.start.split(':'); var endParts=def.end.split(':');
+      DateTime startDt=DateTime(date.year,date.month,date.day,int.parse(startParts[0]),int.parse(startParts[1]));
+      DateTime endDt=def.end=='00:00'? DateTime(date.year,date.month,date.day+1,0,0) : DateTime(date.year,date.month,date.day,int.parse(endParts[0]),int.parse(endParts[1]));
       if(endDt.isBefore(startDt)) endDt=endDt.add(const Duration(days:1));
+      String title = '$code ${def.start}-${def.end}';
       String note = rosterNote[entry.key]??'';
-      var ev = gcal.Event(
-        summary: '$code ${def.start}-${def.end}',
-        description: '[RosterPro]${entry.key}|$customName\n排更: $code\n時間: ${def.start}-${def.end} ${def.hours}h\n記事: $note\n日期: ${entry.key}${isHoliday(date)?'\n假期: ${holidayName(date)}':''}',
-        extendedProperties: gcal.EventExtendedProperties(private: {'rosterProId': entry.key, 'app': 'RosterPro'}),
-        start: gcal.EventDateTime(dateTime: startDt, timeZone: 'Asia/Hong_Kong'),
-        end: gcal.EventDateTime(dateTime: endDt, timeZone: 'Asia/Hong_Kong'),
-      );
-      var res = await api.events.insert(ev, calId);
-      if(res.id!=null) _googleEventIdMap[entry.key]=res.id!;
+      String desc = '[RosterPro]${entry.key}|$customName\n排更: $code\n時間: ${def.start}-${def.end} ${def.hours}h\n記事: $note\n日期: ${entry.key}${isHoliday(date)?'\n假期: ${holidayName(date)}':''}';
+      var ev=Event(_rosterCalendarId!, title:title, description:desc, start:tz.TZDateTime.from(startDt, tz.local), end:tz.TZDateTime.from(endDt, tz.local));
+      var res=await _calendarPlugin.createOrUpdateEvent(ev);
+      if(res!=null && res.isSuccess && res.data!=null) _googleEventIdMap[entry.key]=res.data!;
     }
-    save();
-    if(!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已寫入 Google [$customName] ${roster.length}項，刪舊${del}項\n$_googleAccountEmail')));
-  }catch(e){
-    if(!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('同步失敗 $e')));
-  }finally{ _isSyncing=false; }
+    var sp=await SharedPreferences.getInstance(); sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
+    if(!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已寫入 ID $_rosterCalendarId ${roster.length}項，刪舊${del}項，去重完成。三星開咗Google同步就會上Google。')));
+  }catch(e){ if(!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('同步失敗 $e'))); }
+  finally { _isSyncing=false; }
 }
 
 Future<void> clearRosterByRange() async{
   DateTimeRange? range=await showDateRangePicker(context:context, firstDate: DateTime(2023), lastDate: DateTime(2030), helpText: '選擇要清除的排更範圍');
   if(range==null) return;
   int count=0;
-  var api = _googleApi?? await _getGoogleApi();
   for(DateTime d=range.start;!d.isAfter(range.end); d=d.add(const Duration(days:1))){
     String k=DateFormat('yyyy-MM-dd').format(d);
     if(roster.containsKey(k)){
       count++;
       roster.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k);
-      if(api!=null && _rosterCalendarId!=null && _googleEventIdMap.containsKey(k)){
-        try{ await api.events.delete(_rosterCalendarId!, _googleEventIdMap[k]!); }catch(_){}
+      if(_googleEventIdMap.containsKey(k) && _rosterCalendarId!=null){
+        try{ await _calendarPlugin.deleteEvent(_rosterCalendarId!, _googleEventIdMap[k]); }catch(_){}
         _googleEventIdMap.remove(k);
       }
     }
   }
   await save(); setState((){});
-  if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已清除 $count 天')));
+  if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已清除 $count 天排更，記事保留')));
 }
-
 Future<void> shareScreenshotDialog() async{ _exportShareImage(); }
 Future<void> _exportShareImage() async{
   try{
@@ -260,15 +240,15 @@ Future<void> _exportShareImage() async{
     final pic=recorder.endRecording(); final img=await pic.toImage(width.toInt(), (y+10).toInt()); final byte=await img.toByteData(format: ui.ImageByteFormat.png); final png=byte!.buffer.asUint8List();
     Directory baseDir=Directory('/storage/emulated/0/Pictures/Roster'); if(!await baseDir.exists()){ await baseDir.create(recursive:true); }
     String path='${baseDir.path}/roster_month_${focused.year}_${focused.month}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.jpg'; File f=File(path); await f.writeAsBytes(png);
-    if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已保存 $path')));
+    if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('整月截圖已保存 $path')));
   }catch(e){ if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('截圖失敗 $e'))); }
 }
 Future<void> backupAnywhere() async{
   String? dir=await FilePicker.platform.getDirectoryPath(dialogTitle:'選擇備份位置'); if(dir==null) return;
   String fileName='roster_pro_full_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.json';
-  var backup = {'version':'6.91_google','exportTime':DateTime.now().toIso8601String(),'roster':roster,'note':rosterNote,'roOt':rosterOt,'roEx':rosterExtra,'roExH':rosterExtraHrs,'defs':defs.map((k,v)=>MapEntry(k,v.toJson())),'pattern':pattern,'carry':carry,'cName':customName,'stdWeek':standardWeeklyHours,'otRate':overtimeRate,'extraNewV36':extraAllowances.map((e)=>e.toJson()).toList(),'calFont':calendarFontSize,'savedPatterns':savedPatterns.map((e)=>e.toJson()).toList(),'holidayRegion':holidayRegion,'rosterCalId':_rosterCalendarId,'googleEventIdMap':_googleEventIdMap,'gSync':googleSyncEnabled,'gAuto':autoSync,'googleEmail':_googleAccountEmail};
+  var backup = {'version':'6.85_final','exportTime':DateTime.now().toIso8601String(),'roster':roster,'note':rosterNote,'roOt':rosterOt,'roEx':rosterExtra,'roExH':rosterExtraHrs,'defs':defs.map((k,v)=>MapEntry(k,v.toJson())),'pattern':pattern,'carry':carry,'cName':customName,'stdWeek':standardWeeklyHours,'otRate':overtimeRate,'extraNewV36':extraAllowances.map((e)=>e.toJson()).toList(),'calFont':calendarFontSize,'savedPatterns':savedPatterns.map((e)=>e.toJson()).toList(),'holidayRegion':holidayRegion,'rosterCalId':_rosterCalendarId,'googleEventIdMap':_googleEventIdMap,'gSync':googleSyncEnabled,'gAuto':autoSync,};
   var f=File('$dir/$fileName'); await f.writeAsString(jsonEncode(backup));
-  if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('備份 $dir/$fileName')));
+  if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('全部備份 $dir/$fileName')));
 }
 Future<void> restoreLocalFile() async{
   var res=await FilePicker.platform.pickFiles(type:FileType.custom,allowedExtensions:['json']); if(res==null) return;
@@ -284,7 +264,7 @@ Future<void> restoreLocalFile() async{
       if(j['extraNewV36']!=null) extraAllowances=(j['extraNewV36'] as List).map((e)=>ExtraAllowance.fromJson(Map<String,dynamic>.from(e as Map))).toList();
       if(j['calFont']!=null) calendarFontSize=(j['calFont'] as num).toDouble(); if(j['savedPatterns']!=null) savedPatterns=(j['savedPatterns'] as List).map((e)=>SavedPattern.fromJson(Map<String,dynamic>.from(e as Map))).toList();
       if(j['holidayRegion']!=null) holidayRegion=j['holidayRegion']; if(j['rosterCalId']!=null) _rosterCalendarId=j['rosterCalId'];
-      if(j['googleEventIdMap']!=null) _googleEventIdMap=Map<String,String>.from(j['googleEventIdMap']); if(j['gSync']!=null) googleSyncEnabled=j['gSync']; if(j['gAuto']!=null) autoSync=j['gAuto']; if(j['googleEmail']!=null) _googleAccountEmail=j['googleEmail'];
+      if(j['googleEventIdMap']!=null) _googleEventIdMap=Map<String,String>.from(j['googleEventIdMap']); if(j['gSync']!=null) googleSyncEnabled=j['gSync']; if(j['gAuto']!=null) autoSync=j['gAuto'];
     }); save(); if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('還原成功'))); }catch(e){ if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('還原失敗 $e'))); }
 }
 Future<void> exportReport() async{ StringBuffer sb=StringBuffer(); if(!isYearReport){ int dim=DateTime(focused.year,focused.month+1,0).day; double hrs=0,ot=0; double allow=0; Map<String,int> shiftCount={}; for(int i=1;i<=dim;i++){ DateTime dt=DateTime(focused.year,focused.month,i); String k=DateFormat('yyyy-MM-dd').format(dt); String? c=roster[k]; if(c==null) continue; var d=defs[c]; if(d!=null){ hrs+=d.hours; shiftCount[c]=(shiftCount[c]??0)+1; if(d.hasAllowance) allow+=d.allowance; } ot+=(rosterOt[k]??d?.ot??0); allow+=(rosterExtra[k]??0); hrs+=(rosterExtraHrs[k]??0); } sb.writeln('${focused.year}年${focused.month}月 報表'); shiftCount.forEach((k,v)=>sb.writeln('$k $v次')); sb.writeln('總工時 $hrs OT $ot 津貼 \$${allow+ot*overtimeRate}'); }else{ sb.writeln('${focused.year}年 全年統計'); for(int mon=1;mon<=12;mon++){ int dim=DateTime(focused.year,mon+1,0).day; double hrs=0; Map<String,int> sc={}; for(int d=1;d<=dim;d++){ DateTime dt=DateTime(focused.year,mon,d); String k=DateFormat('yyyy-MM-dd').format(dt); String? c=roster[k]; if(c==null) continue; var def=defs[c]; if(def!=null){ hrs+=def.hours; sc[c]=(sc[c]??0)+1; } } sb.writeln('$mon月 ${hrs}h $sc'); } } String? path=await FilePicker.platform.saveFile(dialogTitle:'匯出報表',fileName:'report_${isYearReport?'year_${focused.year}':'${focused.year}_${focused.month}'}.csv',type:FileType.custom,allowedExtensions:['csv','txt']); if(path!=null){ await File(path).writeAsString(sb.toString()); if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已匯出 $path'))); } }
@@ -304,7 +284,7 @@ Widget calTab(){
 }
 void showDetail(DateTime day){
   String k=DateFormat('yyyy-MM-dd').format(day); String cur=roster[k]??''; var nc=TextEditingController(text:rosterNote[k]??''); var otc=TextEditingController(text:(rosterOt[k]??0).toString()); var exCtrl=TextEditingController(text:(rosterExtra[k]??0).toString()); var exHCtrl=TextEditingController(text:(rosterExtraHrs[k]??0).toString());
-  showModalBottomSheet(context:context,isScrollControlled:true,builder:(ctx){ return StatefulBuilder(builder:(ctx2,setM){ return Padding(padding:EdgeInsets.only(bottom:MediaQuery.of(ctx2).viewInsets.bottom),child:Padding(padding:const EdgeInsets.all(16),child:Column(mainAxisSize:MainAxisSize.min,children:[Text('${DateFormat('yyyy-MM-dd EEE').format(day)}${isHoliday(day)?' [${holidayName(day)}]':''}',style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),Wrap(spacing:8,children:defs.keys.map((c)=>ChoiceChip(label:Text(c),selected:cur==c,onSelected:(_)=>setM(()=>cur=c))).toList()),TextField(controller:nc,decoration:const InputDecoration(labelText:'記事 (會同步到Google)')),Row(children:[Expanded(child:TextField(controller:otc,decoration:const InputDecoration(labelText:'OT時數'),keyboardType:TextInputType.number)),const SizedBox(width:8),Expanded(child:TextField(controller:exHCtrl,decoration:const InputDecoration(labelText:'額外工時'),keyboardType:TextInputType.number)),]),TextField(controller:exCtrl,decoration:const InputDecoration(labelText:'額外津貼 \$'),keyboardType:TextInputType.number),const SizedBox(height:12),Row(children:[Expanded(child:OutlinedButton(onPressed:() async { setState((){ roster.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); }); var api = _googleApi?? await _getGoogleApi(); if(api!=null && _rosterCalendarId!=null && _googleEventIdMap.containsKey(k)){ try{ await api.events.delete(_rosterCalendarId!, _googleEventIdMap[k]!); }catch(_){} _googleEventIdMap.remove(k); } save(); Navigator.pop(ctx2); },child:const Text('清除班次(保留記事)',style:TextStyle(color: Colors.orange)),)),const SizedBox(width:8),Expanded(child:FilledButton(onPressed:(){ double? otVal=double.tryParse(otc.text); double? exVal=double.tryParse(exCtrl.text); double? exHVal=double.tryParse(exHCtrl.text); setState((){ if(cur.isNotEmpty) roster[k]=cur; if(nc.text.isNotEmpty) rosterNote[k]=nc.text; else rosterNote.remove(k); if(otVal!=null) rosterOt[k]=otVal; if(exVal!=null && exVal!=0) rosterExtra[k]=exVal; else rosterExtra.remove(k); if(exHVal!=null && exHVal!=0) rosterExtraHrs[k]=exHVal; else rosterExtraHrs.remove(k); }); save(); Navigator.pop(ctx2); },child:const Text('儲存'))),]),]))); }); }); }
+  showModalBottomSheet(context:context,isScrollControlled:true,builder:(ctx){ return StatefulBuilder(builder:(ctx2,setM){ return Padding(padding:EdgeInsets.only(bottom:MediaQuery.of(ctx2).viewInsets.bottom),child:Padding(padding:const EdgeInsets.all(16),child:Column(mainAxisSize:MainAxisSize.min,children:[Text('${DateFormat('yyyy-MM-dd EEE').format(day)}${isHoliday(day)?' [${holidayName(day)}]':''}',style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),Wrap(spacing:8,children:defs.keys.map((c)=>ChoiceChip(label:Text(c),selected:cur==c,onSelected:(_)=>setM(()=>cur=c))).toList()),TextField(controller:nc,decoration:const InputDecoration(labelText:'記事 (會同步到Google)')),Row(children:[Expanded(child:TextField(controller:otc,decoration:const InputDecoration(labelText:'OT時數'),keyboardType:TextInputType.number)),const SizedBox(width:8),Expanded(child:TextField(controller:exHCtrl,decoration:const InputDecoration(labelText:'額外工時'),keyboardType:TextInputType.number)),]),TextField(controller:exCtrl,decoration:const InputDecoration(labelText:'額外津貼 \$'),keyboardType:TextInputType.number),const SizedBox(height:12),Row(children:[Expanded(child:OutlinedButton(onPressed:() async { setState((){ roster.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); }); if(_googleEventIdMap.containsKey(k) && _rosterCalendarId!=null){ try{ await _calendarPlugin.deleteEvent(_rosterCalendarId!, _googleEventIdMap[k]); }catch(_){} _googleEventIdMap.remove(k); } save(); Navigator.pop(ctx2); },child:const Text('清除班次(保留記事)',style:TextStyle(color: Colors.orange)),)),const SizedBox(width:8),Expanded(child:FilledButton(onPressed:(){ double? otVal=double.tryParse(otc.text); double? exVal=double.tryParse(exCtrl.text); double? exHVal=double.tryParse(exHCtrl.text); setState((){ if(cur.isNotEmpty) roster[k]=cur; if(nc.text.isNotEmpty) rosterNote[k]=nc.text; else rosterNote.remove(k); if(otVal!=null) rosterOt[k]=otVal; if(exVal!=null && exVal!=0) rosterExtra[k]=exVal; else rosterExtra.remove(k); if(exHVal!=null && exHVal!=0) rosterExtraHrs[k]=exHVal; else rosterExtraHrs.remove(k); }); save(); Navigator.pop(ctx2); },child:const Text('儲存'))),]),]))); }); }); }
 Future<void> pickRangeAndApply() async{ List<List<String>> chosenPattern = pattern; if(savedPatterns.isNotEmpty){ int? selected = await showDialog<int>(context:context,builder:(ctx){ return AlertDialog(title:const Text('選擇排更模式'),content:SizedBox(width:300,child:ListView(shrinkWrap:true,children:[ListTile(title:const Text('當前版面'),subtitle:Text('${pattern.length}行'),leading:const Icon(Icons.edit),onTap:()=>Navigator.pop(ctx,-1)),const Divider(),...savedPatterns.asMap().entries.map((en)=>ListTile(title:Text(en.value.name),subtitle:Text('${en.value.data.length}行'),leading:const Icon(Icons.folder),onTap:()=>Navigator.pop(ctx,en.key))),],)),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('取消'))]); }); if(selected==null) return; if(selected==-1){ chosenPattern = pattern; } else { chosenPattern = savedPatterns[selected].data.map((r)=>List<String>.from(r)).toList(); } } DateTimeRange? p=await showDateRangePicker(context:context,firstDate:DateTime(2023),lastDate:DateTime(2030)); if(p==null) return; var flat=chosenPattern.expand((e)=>e).toList(); setState((){ int i=0; for(DateTime d=p.start;!d.isAfter(p.end);d=d.add(const Duration(days:1))){ roster[DateFormat('yyyy-MM-dd').format(d)]=flat[i%flat.length]; i++; } }); save(); setState(()=>tab=0); }
 Widget patternTab(){ return SafeArea(child:Column(children:[Padding(padding:const EdgeInsets.all(12),child:SingleChildScrollView(scrollDirection:Axis.horizontal,child:Row(children:[const Text('排更模式',style:TextStyle(fontWeight:FontWeight.bold)),const SizedBox(width:8),if(editingPatternName!=null) Container(padding:const EdgeInsets.symmetric(horizontal:10,vertical:6),decoration:BoxDecoration(color:Colors.orange.withOpacity(0.15),borderRadius:BorderRadius.circular(20),border:Border.all(color:Colors.orange)),child:Row(children:[Text('正在編輯：$editingPatternName',style:const TextStyle(fontSize:12,fontWeight:FontWeight.bold)),const SizedBox(width:6),InkWell(onTap:(){ setState(()=>pattern=[["早","早","中","中","宵","宵","O"]]); editingPatternName=null; editingPatternIndex=null; },child:const Icon(Icons.close,size:16))]),),const SizedBox(width:8),FilledButton.tonalIcon(icon:const Icon(Icons.folder),label:Text('已存模式${savedPatterns.isEmpty?'': '(${savedPatterns.length})'}'),onPressed:(){ if(savedPatterns.isEmpty){ ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('未有已存模式'))); return; } showModalBottomSheet(context:context,builder:(ctx)=>SafeArea(child:ListView(children:[const ListTile(title:Text('已存排班模式',style:TextStyle(fontWeight:FontWeight.bold))),...savedPatterns.asMap().entries.map((en)=>ListTile(title:Text(en.value.name),subtitle:Text('${en.value.data.length}行'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[IconButton(icon:const Icon(Icons.upload),onPressed:(){ setState((){ pattern=en.value.data.map((r)=>List<String>.from(r)).toList(); editingPatternName=en.value.name; editingPatternIndex=en.key; }); save(); Navigator.pop(ctx); }),IconButton(icon:const Icon(Icons.delete),onPressed:(){ setState(()=>savedPatterns.removeAt(en.key)); save(); Navigator.pop(ctx); }),]))),]))); }),const SizedBox(width:8),if(editingPatternName!=null) FilledButton.icon(icon:const Icon(Icons.save),label:Text('保存同名'),onPressed:(){ if(editingPatternIndex!=null){ setState(()=>savedPatterns[editingPatternIndex!]=SavedPattern(editingPatternName!,pattern.map((r)=>List<String>.from(r)).toList())); save(); setState((){ pattern=[["早","早","中","中","宵","宵","O"]]; editingPatternName=null; editingPatternIndex=null; }); } }),const SizedBox(width:8),FilledButton.tonalIcon(icon:const Icon(Icons.save_as),label:const Text('另存'),onPressed:(){ var ctrl=TextEditingController(text:editingPatternName??'模式_${DateFormat('MMdd').format(DateTime.now())}'); showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('另存排更模式'),content:TextField(controller:ctrl,decoration:const InputDecoration(labelText:'模式名稱 (不能同名)')),actions:[FilledButton(onPressed:(){ String n=ctrl.text.trim(); if(n.isEmpty) return; if(savedPatterns.any((e)=>e.name==n)){ ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('名稱 $n 已存在'))); return; } setState(()=>savedPatterns.add(SavedPattern(n,pattern.map((r)=>List<String>.from(r)).toList()))); save(); Navigator.pop(ctx); setState(()=>pattern=[["早","早","中","中","宵","宵","O"]]); editingPatternName=null; editingPatternIndex=null; },child:const Text('保存並回到預設')),])); }),const SizedBox(width:8),FilledButton.tonal(onPressed:(){ setState(()=>pattern.add(List.filled(7,'O'))); save(); },child:const Text('加一行')),]))),Expanded(child:ListView.builder(itemCount:pattern.length,itemBuilder:(ctx,r){ return Row(children:[Container(width:32,alignment:Alignment.centerRight,child:Text('${r+1}',style:const TextStyle(fontWeight:FontWeight.bold))),const SizedBox(width:4),Expanded(child:Row(children:List.generate(7,(c){ return Expanded(child:GestureDetector(onTap:(){ showModalBottomSheet(context:context,builder:(ctx){ return Wrap(children:defs.keys.map((k)=>ListTile(title:Text(k),onTap:(){ setState(()=>pattern[r][c]=k); save(); Navigator.pop(ctx); })).toList()); }); },child:Container(margin:const EdgeInsets.all(2),height:36,color:defs[pattern[r][c]]?.color.withOpacity(0.3),child:Center(child:Text(pattern[r][c]))))); }))),IconButton(icon:const Icon(Icons.delete),onPressed:(){ setState(()=>pattern.removeAt(r)); save(); }),]); })),Padding(padding:const EdgeInsets.all(12),child:SizedBox(width:double.infinity,child:FilledButton(onPressed:pickRangeAndApply,child:const Text('選擇日期範圍並自動排班')))),])); }
 Widget reportTab(){
@@ -325,31 +305,33 @@ Widget reportTab(){
 void editShiftDialog({ShiftDef? oldDef}){ var codeCtrl=TextEditingController(text:oldDef?.code??''); var labelCtrl=TextEditingController(text:oldDef?.label??''); var hoursCtrl=TextEditingController(text:oldDef?.hours.toString()??'8'); var otCtrl=TextEditingController(text:oldDef?.ot.toString()??'0'); var startCtrl=TextEditingController(text:oldDef?.start??'07:00'); var endCtrl=TextEditingController(text:oldDef?.end??'15:30'); var allowCtrl=TextEditingController(text:oldDef?.allowance.toString()??'0'); bool hasAllow=oldDef?.hasAllowance??false; Color picked=oldDef?.color??Colors.orange; String oldKey=oldDef?.code??''; List<Color> palette=[Colors.orange,Colors.blue,Colors.purple,Colors.green,Colors.red,Colors.teal,Colors.brown,Colors.pink,Colors.indigo,Colors.amber,Colors.cyan,Colors.lime,Colors.deepOrange,Colors.lightBlue,Colors.deepPurple,Colors.blueGrey]; showDialog(context:context,builder:(ctx){ return StatefulBuilder(builder:(ctx2,setS){ return AlertDialog(title:Text(oldDef==null?'新增班次':'編輯 ${oldDef.code}'),content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[TextField(controller:codeCtrl,decoration:const InputDecoration(labelText:'代號')),TextField(controller:labelCtrl,decoration:const InputDecoration(labelText:'名稱')),Row(children:[Expanded(child:TextField(controller:startCtrl,decoration:const InputDecoration(labelText:'開始 HH:mm'))),const SizedBox(width:8),Expanded(child:TextField(controller:endCtrl,decoration:const InputDecoration(labelText:'結束 HH:mm')))]),Row(children:[Expanded(child:TextField(controller:hoursCtrl,decoration:const InputDecoration(labelText:'工時'))),Expanded(child:TextField(controller:otCtrl,decoration:const InputDecoration(labelText:'OT')))]),const SizedBox(height:12),Row(children:[Checkbox(value:hasAllow,onChanged:(v)=>setS(()=>hasAllow=v??false)),const Text('有津貼核實',style:TextStyle(fontWeight:FontWeight.bold))]),if(hasAllow) TextField(controller:allowCtrl,decoration:const InputDecoration(labelText:'津貼金額 \$',prefixText:'\$ ',border:OutlineInputBorder()),keyboardType:TextInputType.number),const SizedBox(height:12), const Text('自定班次顏色',style:TextStyle(fontWeight:FontWeight.bold)), const SizedBox(height:8),Wrap(spacing:8,runSpacing:8,children:palette.map((c)=>GestureDetector(onTap:()=>setS(()=>picked=c),child:Container(width:36,height:36,decoration:BoxDecoration(color:c,shape:BoxShape.circle,border:picked==c?Border.all(width:3,color:Colors.black):null),child:picked==c?const Icon(Icons.check,color:Colors.white,size:18):null))).toList()),])),actions:[TextButton(onPressed:()=>Navigator.pop(ctx2),child:const Text('取消')),FilledButton(onPressed:(){ String newCode=codeCtrl.text.trim(); if(newCode.isEmpty) return; double hrs=double.tryParse(hoursCtrl.text)??8; try{ var s=DateFormat('HH:mm').parse(startCtrl.text); var e=DateFormat('HH:mm').parse(endCtrl.text); var diff=e.difference(s).inMinutes/60.0; if(diff<0) diff+=24; hrs=diff; }catch(_){} double allowVal=double.tryParse(allowCtrl.text)??0; setState((){ if(oldKey.isNotEmpty && oldKey!=newCode){ defs.remove(oldKey); roster.forEach((k,v){ if(v==oldKey) roster[k]=newCode; }); for(int i=0;i<pattern.length;i++){ for(int j=0;j<pattern[i].length;j++){ if(pattern[i][j]==oldKey) pattern[i][j]=newCode; } } } defs[newCode]=ShiftDef(newCode,labelCtrl.text.isEmpty?newCode:labelCtrl.text,hrs,picked,ot:double.tryParse(otCtrl.text)??0,start:startCtrl.text,end:endCtrl.text,hasAllowance:hasAllow,allowance:hasAllow?allowVal:0); }); save(); Navigator.pop(ctx2); },child:const Text('儲存'))]); }); }); }
 Widget settingsTab(){
   var stdCtrl=TextEditingController(text:standardWeeklyHours.toString()); var carryCtrl=TextEditingController(text:carry.toString()); var otRateCtrl=TextEditingController(text:overtimeRate.toString());
-  List<MapEntry<String,ShiftDef>> shiftList=defs.entries.toList(); List<MapEntry<String,ShiftDef>> shiftShow=showAllShift? shiftList : shiftList.take(5).toList();
-  List<ExtraAllowance> allowShow = showAllExtra? extraAllowances : extraAllowances.take(5).toList();
+  List<MapEntry<String,ShiftDef>> shiftList=defs.entries.toList(); List<MapEntry<String,ShiftDef>> shiftShow=showAllShift? shiftList : shiftList.take(5).toList(); List<ExtraAllowance> allowShow=showAllExtra? extraAllowances : extraAllowances.take(5).toList();
   return SafeArea(child:ListView(padding:const EdgeInsets.all(16),children:[
     const Text('排更日曆自定名稱',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
-    Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[TextField(controller:nameCtrl,decoration:const InputDecoration(labelText:'日曆名稱',border:OutlineInputBorder())),const SizedBox(height:8),SizedBox(width:double.infinity,child:FilledButton(onPressed:(){ setState(()=>customName=nameCtrl.text.trim().isEmpty?'我的排更':nameCtrl.text.trim()); save(); },child:const Text('保存日曆名稱')))]))),
+    Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[TextField(controller:nameCtrl,decoration:const InputDecoration(labelText:'日曆名稱',border:OutlineInputBorder())),const SizedBox(height:8),SizedBox(width:double.infinity,child:FilledButton(onPressed:(){ setState(()=>customName=nameCtrl.text.trim().isEmpty?'我的排更':nameCtrl.text.trim()); save(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('日曆名已改為 $customName'))); },child:const Text('保存日曆名稱')))]))),
     const SizedBox(height:16), const Text('自定班次',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
     Card(child:Column(children:[...shiftShow.map((e){ var d=e.value; return ListTile(leading:CircleAvatar(backgroundColor:d.color,child:Text(d.code,style:const TextStyle(color:Colors.white,fontSize:10))),title:Text('${d.code} - ${d.label} ${d.start}-${d.end} ${d.hasAllowance?'[有津貼\$${d.allowance}]':''}'),subtitle:Text('${d.hours.toStringAsFixed(1)}h | ${d.detailTime}'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[IconButton(icon:const Icon(Icons.edit),onPressed:()=>editShiftDialog(oldDef:d)),IconButton(icon:const Icon(Icons.delete),onPressed:(){ setState(()=>defs.remove(e.key)); save(); })])); }),if(shiftList.length>5) TextButton(onPressed:(){ setState(()=>showAllShift=!showAllShift); },child:Text(showAllShift?'收起':'顯示全部 ${shiftList.length}項')),ListTile(leading:const Icon(Icons.add),title:const Text('新增班次'),onTap:()=>editShiftDialog()),])),
     const SizedBox(height:16), const Text('公眾假期地區',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
-    Card(child:Padding(padding:const EdgeInsets.all(12),child:DropdownButtonFormField<String>(value:holidayRegion,decoration:const InputDecoration(labelText:'地區',border:OutlineInputBorder()),items:['無','香港','中國內地','台灣','美國'].map((r)=>DropdownMenuItem(value:r,child:Text(r))).toList(),onChanged:(v){ setState(()=>holidayRegion=v!); save(); }))),
-    const SizedBox(height:16), const Text('Google 日曆同步 - 真正寫入 Google',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold, color: Colors.blue)),
-    Card(color: const Color(0xFFE3F2FD), child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
-      ListTile(leading: const Icon(Icons.account_circle, color: Colors.blue), title: Text(_googleAccountEmail??'未登入 Google'), subtitle: Text(_rosterCalendarId??'未選日曆'), trailing: IconButton(icon: const Icon(Icons.logout), onPressed: () async { await _googleSignIn.signOut(); setState((){ _googleAccountEmail=null; _rosterCalendarId=null; googleSyncEnabled=false; }); save(); })),
-      SwitchListTile(title:const Text('啟用 Google 同步'),value:googleSyncEnabled,onChanged:(v) async { if(v){ await _requestGooglePerm(); }else{ setState(()=>googleSyncEnabled=false); save(); } }),
+    Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[DropdownButtonFormField<String>(value:holidayRegion,decoration:const InputDecoration(labelText:'地區',border:OutlineInputBorder()),items:['無','香港','中國內地','台灣','美國'].map((r)=>DropdownMenuItem(value:r,child:Text(r))).toList(),onChanged:(v){ setState(()=>holidayRegion=v!); save(); }),]))),
+    const SizedBox(height:16), const Text('日曆同步 - v6.85 最終版 (經系統同步上Google)',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
+    Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
+      SwitchListTile(title:const Text('啟用日曆同步'),subtitle:Text(googleSyncEnabled?'已授權':'未授權'),value:googleSyncEnabled,onChanged:(v) async { if(v){ await _requestGooglePerm(); }else{ setState(()=>googleSyncEnabled=false); save(); } }),
       SwitchListTile(title:const Text('自動同步(去重)'),value:autoSync,onChanged:googleSyncEnabled? (v){ setState(()=>autoSync=v); save(); }:null),
-      Row(children:[Expanded(child:OutlinedButton.icon(onPressed: ()=>_syncToGoogle(),icon:const Icon(Icons.cloud_upload),label:const Text('手動同步到 Google'))),const SizedBox(width:8),Expanded(child:OutlinedButton.icon(onPressed:(){ setState(()=>googleSyncEnabled=false); save(); },icon:const Icon(Icons.link_off),label:const Text('取消')))]),
+      Row(children:[Expanded(child:OutlinedButton.icon(onPressed:googleSyncEnabled? ()=>_syncToGoogle():null,icon:const Icon(Icons.sync),label:const Text('手動同步去重'))),const SizedBox(width:8),Expanded(child:OutlinedButton.icon(onPressed:(){ setState(()=>googleSyncEnabled=false); save(); },icon:const Icon(Icons.link_off),label:const Text('取消')))]),
+      Text('當前ID: ${_rosterCalendarId??'未選'} (ID最短=Google)',style:const TextStyle(fontSize:10,color:Colors.grey)),
       const SizedBox(height:8),
-      SizedBox(width: double.infinity, child: FilledButton.icon(icon:const Icon(Icons.login), label:const Text('登入 Google 並選擇日曆'), onPressed: _requestGooglePerm)),
+      SizedBox(width: double.infinity, child: OutlinedButton.icon(icon:const Icon(Icons.list), label:const Text('選擇日曆 (ID最短=Google)'), onPressed: () async { String? id=await _pickGoogleCalendarDialog(); if(id!=null){ setState(()=>_rosterCalendarId=id); save(); }})),
+      SizedBox(width: double.infinity, child: FilledButton.icon(icon:const Icon(Icons.cloud), label:const Text('前往手機設定開Google同步'), onPressed: () async { await openAppSettings(); })),
     ]))),
     const SizedBox(height:16),
-    const Text('清除排更 - 按日期範圍',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold,color: Colors.red)),
-    Card(color: const Color(0xFFFFEBEE), child: Padding(padding:const EdgeInsets.all(12), child: SizedBox(width: double.infinity, child: FilledButton.icon(icon:const Icon(Icons.delete_sweep), style: FilledButton.styleFrom(backgroundColor: Colors.red), label:const Text('按日期範圍清除'), onPressed: clearRosterByRange)))),
+    const Text('清除排更 - 按日期範圍 (保留記事)',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold,color: Colors.red)),
+    Card(color: const Color(0xFFFFEBEE), child: Padding(padding:const EdgeInsets.all(12), child: Column(children:[const Text('只清除班次，記事保留', style: TextStyle(fontSize:12)),const SizedBox(height:8),SizedBox(width: double.infinity, child: FilledButton.icon(icon:const Icon(Icons.delete_sweep), style: FilledButton.styleFrom(backgroundColor: Colors.red), label:const Text('按日期範圍清除'), onPressed: clearRosterByRange)),]))),
     const SizedBox(height:16), const Text('標準工時 & 承上 & 超時金額',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
     Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[Row(children:[Expanded(child:TextField(controller:stdCtrl,decoration:const InputDecoration(labelText:'標準工時',suffixText:'h/週',border:OutlineInputBorder()))),const SizedBox(width:8),Expanded(child:TextField(controller:carryCtrl,decoration:const InputDecoration(labelText:'承上餘額',border:OutlineInputBorder())))]),const SizedBox(height:10), TextField(controller:otRateCtrl,decoration:const InputDecoration(labelText:'超時金額 /h',prefixText:'\$ ',border:OutlineInputBorder())),const SizedBox(height:10), SizedBox(width:double.infinity,child:FilledButton(onPressed:(){ double? v1=double.tryParse(stdCtrl.text); double? v2=double.tryParse(carryCtrl.text); double? v3=double.tryParse(otRateCtrl.text); if(v1!=null) standardWeeklyHours=v1; if(v2!=null) carry=v2; if(v3!=null) overtimeRate=v3; setState((){}); save(); },child:const Text('保存設定'))),]))),
+    const SizedBox(height:16), const Text('日曆文字大小',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
+    Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[Row(children:[const Text('小'),Expanded(child:Slider(value:calendarFontSize,min:8,max:20,divisions:12,onChanged:(v){ setState(()=>calendarFontSize=v); })),const Text('大')]), FilledButton.tonal(onPressed:(){ save(); },child:const Text('保存文字大小'))]))),
     const SizedBox(height:16), const Text('額外津貼',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
-    Card(child:Column(children:[...allowShow.map((e){ int idx=extraAllowances.indexOf(e); return ListTile(title:Text(e.name),subtitle:Text('\$${e.amount}'),trailing:IconButton(icon:const Icon(Icons.delete,size:18,color:Colors.red),onPressed:(){ setState(()=>extraAllowances.removeAt(idx)); save(); })); }), ListTile(leading:const Icon(Icons.add),title:const Text('新增額外津貼'),onTap:(){ var nCtrl=TextEditingController(); var vCtrl=TextEditingController(text:'0'); showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('新增額外津貼'),content:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:nCtrl,decoration:const InputDecoration(labelText:'名稱')), TextField(controller:vCtrl,decoration:const InputDecoration(labelText:'金額'),keyboardType:TextInputType.number),]),actions:[FilledButton(onPressed:(){ String name=nCtrl.text.trim(); double? val=double.tryParse(vCtrl.text); if(name.isEmpty||val==null) return; setState(()=>extraAllowances.add(ExtraAllowance(name,val))); save(); Navigator.pop(ctx); },child:const Text('新增'))])); }),])),
+    Card(child:Column(children:[...allowShow.map((e){ int idx=extraAllowances.indexOf(e); return ListTile(title:Text(e.name),subtitle:Text('\$${e.amount}'),trailing:IconButton(icon:const Icon(Icons.delete,size:18,color:Colors.red),onPressed:(){ setState(()=>extraAllowances.removeAt(idx)); save(); })); }),ListTile(leading:const Icon(Icons.add),title:const Text('新增額外津貼'),onTap:(){ var nCtrl=TextEditingController(); var vCtrl=TextEditingController(text:'0'); showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('新增額外津貼'),content:Column(mainAxisSize:MainAxisSize.min,children:[TextField(controller:nCtrl,decoration:const InputDecoration(labelText:'名稱')), TextField(controller:vCtrl,decoration:const InputDecoration(labelText:'金額'),keyboardType:TextInputType.number),]),actions:[FilledButton(onPressed:(){ String name=nCtrl.text.trim(); double? val=double.tryParse(vCtrl.text); if(name.isEmpty||val==null) return; setState(()=>extraAllowances.add(ExtraAllowance(name,val))); save(); Navigator.pop(ctx); },child:const Text('新增'))])); }),])),
     const SizedBox(height:16), const Text('全部備份與還原',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
     Card(child:Padding(padding:const EdgeInsets.all(12),child:Row(children:[Expanded(child:OutlinedButton.icon(onPressed:backupAnywhere,icon:const Icon(Icons.backup),label:const Text('全部備份'))),const SizedBox(width:8),Expanded(child:OutlinedButton.icon(onPressed:restoreLocalFile,icon:const Icon(Icons.restore),label:const Text('全部還原')))]))),
   ]));
