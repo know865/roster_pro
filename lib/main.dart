@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
@@ -22,7 +23,7 @@ class ShiftDef {
 }
 class ExtraAllowance { String name; double amount; ExtraAllowance(this.name,this.amount); Map<String,dynamic> toJson()=>{'name':name,'amount':amount}; factory ExtraAllowance.fromJson(Map<String,dynamic> j)=>ExtraAllowance(j['name'],(j['amount'] as num).toDouble()); }
 class SavedPattern { String name; List<List<String>> data; SavedPattern(this.name,this.data); Map<String,dynamic> toJson()=>{'name':name,'data':data}; factory SavedPattern.fromJson(Map<String,dynamic> j)=>SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r)=>(r as List).map<String>((e)=>e.toString()).toList()).toList()); }
-class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v6.85',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
+class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v6.86',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
 
 class MainPage extends StatefulWidget { const MainPage({super.key}); @override State<MainPage> createState()=>MainPageState(); }
 class MainPageState extends State<MainPage> {
@@ -41,7 +42,10 @@ bool googleSyncEnabled=false; bool autoSync=false; bool isYearReport=false; bool
 String? editingPatternName; int? editingPatternIndex; String holidayRegion='香港';
 GlobalKey calKey=GlobalKey();
 DeviceCalendarPlugin _calendarPlugin = DeviceCalendarPlugin();
+static const _realChannel = MethodChannel('com.roster/calendar_real');
 String? _rosterCalendarId;
+String _rosterCalendarName='未選';
+String _rosterAccountName='';
 Map<String,String> _googleEventIdMap={};
 bool _isSyncing=false;
 
@@ -74,6 +78,7 @@ Future<void> load() async{
     standardWeeklyHours=sp.getDouble('stdWeek')??42; overtimeRate=sp.getDouble('otRate')??80;
     calendarFontSize=sp.getDouble('calFont')??14; googleSyncEnabled=sp.getBool('gSync')??false; autoSync=sp.getBool('gAuto')??false;
     holidayRegion=sp.getString('holidayRegion')??'香港'; _rosterCalendarId=sp.getString('rosterCalId');
+    _rosterCalendarName=sp.getString('rosterCalName')??'未選'; _rosterAccountName=sp.getString('rosterAccName')??'';
   });
 }
 Future<void> save() async{
@@ -87,6 +92,7 @@ Future<void> save() async{
   sp.setString('savedPatternsV40',jsonEncode(savedPatterns.map((e)=>e.toJson()).toList())); sp.setString('holidayRegion', holidayRegion);
   sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
   if(_rosterCalendarId!=null) sp.setString('rosterCalId', _rosterCalendarId!);
+  sp.setString('rosterCalName', _rosterCalendarName); sp.setString('rosterAccName', _rosterAccountName);
   if(autoSync && googleSyncEnabled &&!_isSyncing){ _syncToGoogle(silent:true); }
 }
 int isoWeek(DateTime date){ DateTime thursday=date.add(Duration(days:4-date.weekday)); DateTime jan1=DateTime(thursday.year,1,1); int days=thursday.difference(jan1).inDays; return 1+(days/7).floor(); }
@@ -103,72 +109,79 @@ Future<bool> _handleCalendarPermission({bool silent=false}) async {
   return true;
 }
 
-// 最終穩定版：就算三星回傳空名，也顯示索引+ID，直接用ID寫入，Google系統會同步
+// v6.86 核心：用原生 Channel 攞真實日曆
+Future<List<Map<String,dynamic>>> _getRealCalendars() async {
+  try {
+    var res = await _realChannel.invokeMethod('getCalendars');
+    return (res as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList();
+  } catch(e){
+    if(!mounted) return [];
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('原生讀取失敗 $e 請確認已用新 codemagic.yaml 重建')));
+    return [];
+  }
+}
+
 Future<String?> _pickGoogleCalendarDialog() async {
   await _handleCalendarPermission(silent:true);
-  var calsResult=await _calendarPlugin.retrieveCalendars();
-  var cals=calsResult.data??[];
-  List<Calendar> writable = cals.where((c)=> c.isReadOnly!=true).toList().cast<Calendar>();
-  List<Calendar> all = cals.cast<Calendar>();
-  List<Calendar> displayList = writable.isNotEmpty? writable : all;
+  var cals = await _getRealCalendars();
+  if(cals.isEmpty) return null;
+  var googleCals = cals.where((c)=>c['isGoogle']==true).toList();
+  var otherCals = cals.where((c)=>c['isGoogle']!=true).toList();
+  googleCals.sort((a,b)=>(a['id'] as String).length.compareTo((b['id'] as String).length));
 
-  Calendar? picked = await showDialog<Calendar>(context: context, builder: (ctx){
+  var pickedMap = await showDialog<Map<String,dynamic>>(context: context, builder: (ctx){
     return AlertDialog(
-      title: Text('選擇寫入日曆 (可寫${writable.length} / 總${all.length})'),
-      content: SizedBox(width: 440, height: 500, child: Column(children:[
-        Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-          child: const Text('三星 OneUI 回傳空名係系統Bug。秘訣：ID 最短(1-3位)嗰 2個就係你 Google 主日曆，揀佢就會同步上 Google。不要揀新建的本地日曆。', style: TextStyle(fontSize:12, color: Colors.blue, fontWeight: FontWeight.bold))),
-        const SizedBox(height:8),
-        Expanded(child: ListView.builder(
-          itemCount: displayList.length,
-          itemBuilder: (c,i){
-            var cal = displayList[i];
-            String rawName = cal.name??'';
-            String id = cal.id??'id_$i';
-            bool isMaybeGoogle = id.length<=3; // Google 主日曆通常 ID係 1,2,3
-            String showName = rawName.isNotEmpty? rawName : (isMaybeGoogle? 'Google 主日曆 (推測) #$id' : '日曆_$i');
-            return Card(color: isMaybeGoogle? Colors.orange.withOpacity(0.15):null, child: ListTile(
-              leading: Icon(isMaybeGoogle? Icons.cloud : Icons.calendar_month, color: isMaybeGoogle? Colors.deepOrange: Colors.grey),
-              title: Text('$showName', style: TextStyle(fontSize:13, fontWeight: isMaybeGoogle? FontWeight.bold: FontWeight.w600)),
-              subtitle: Text('ID: $id\n原始名: ${rawName.isEmpty?'[空-Bug]':rawName}\n${cal.isReadOnly==true?'只讀':'可寫'}', style: const TextStyle(fontSize:10)),
-              isThreeLine: true,
-              onTap: ()=>Navigator.pop(ctx, cal),
-            ));
-          },
-        )),
+      title: Text('選擇寫入日曆 真ID版 (${cals.length})'),
+      content: SizedBox(width: 460, height: 560, child: ListView(children:[
+        Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.green.withOpacity(0.12), borderRadius: BorderRadius.circular(8)),
+          child: const Text('綠色=Google帳號 會上 calendar.google.com\n灰色=三星本機 唔會上Google\n一定要揀綠色，ID通常 1~5 就係主日曆', style: TextStyle(fontSize:12, fontWeight: FontWeight.bold, color: Colors.green))),
+        const SizedBox(height:10),
+        const Text('--- Google 日曆 (可同步) ---', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+       ...googleCals.map((cal)=>Card(color: Colors.green.withOpacity(0.15), child: ListTile(
+          leading: const Icon(Icons.cloud_done, color: Colors.green),
+          title: Text('${cal['displayName']}', style: const TextStyle(fontSize:14, fontWeight: FontWeight.bold)),
+          subtitle: Text('ID: ${cal['id']} ★真ID\n帳號: ${cal['accountName']}\n類型: ${cal['accountType']}\nOWNER: ${cal['owner']}', style: const TextStyle(fontSize:10)),
+          isThreeLine: true,
+          onTap: ()=>Navigator.pop(ctx, cal),
+        ))),
+        const Divider(),
+        const Text('--- 本機/三星 (不會上Google) ---', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+       ...otherCals.map((cal)=>Card(child: ListTile(
+          leading: const Icon(Icons.phone_android, color: Colors.grey),
+          title: Text('${cal['displayName'].toString().isEmpty?'[無名]':cal['displayName']}', style: const TextStyle(fontSize:13)),
+          subtitle: Text('ID: ${cal['id']} 帳號: ${cal['accountName']}', style: const TextStyle(fontSize:10)),
+          onTap: ()=>Navigator.pop(ctx, cal),
+        ))),
       ])),
-      actions: [
-        TextButton(onPressed: ()=>Navigator.pop(ctx), child: const Text('取消')),
-        FilledButton.icon(icon: const Icon(Icons.check), label: const Text('提示：揀ID最短嗰個'), onPressed: () async {
-          if(displayList.isNotEmpty){
-            displayList.sort((a,b)=>(a.id?.length??99).compareTo(b.id?.length??99));
-            Navigator.pop(ctx, displayList.first);
-          }
-        }),
-      ],
+      actions: [TextButton(onPressed: ()=>Navigator.pop(ctx), child: const Text('取消'))],
     );
   });
 
-  if(picked!=null && picked.id!=null){
-    _rosterCalendarId=picked.id;
+  if(pickedMap!=null && pickedMap['id']!=null){
+    _rosterCalendarId = pickedMap['id'].toString();
+    _rosterCalendarName = pickedMap['displayName'].toString();
+    _rosterAccountName = pickedMap['accountName'].toString();
     var sp=await SharedPreferences.getInstance();
-    sp.setString('rosterCalId', picked.id!);
+    sp.setString('rosterCalId', _rosterCalendarId!);
+    sp.setString('rosterCalName', _rosterCalendarName);
+    sp.setString('rosterAccName', _rosterAccountName);
     setState((){});
+    if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已選 $_rosterCalendarName ID:$_rosterCalendarId 帳號:$_rosterAccountName')));
+    return _rosterCalendarId;
   }
-  return picked?.id;
+  return null;
 }
 
 Future<void> _requestGooglePerm() async{
   String? id = await _pickGoogleCalendarDialog();
   if(id==null) return;
-  bool? ok=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(title:const Text('已選擇日曆'),content:Text('將寫入：ID $id\n\n三星設定 > 帳戶 > Google > 同步日曆開咗，就會自動上 Google。\n已開啟去重，不會重疊。'),actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('稍後')),FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('立即同步到 Google'))]));
+  bool? ok=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(title:const Text('已選擇真 Google 日曆'),content:Text('將寫入：$_rosterCalendarName\nID: $id\n帳號: $_rosterAccountName\n\n三星：設定 > 帳戶 > Google > 同步日曆 開咗，就會自動上 Google。\n已開啟去重，不會重疊。'),actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('稍後')),FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('立即同步到 Google'))]));
   if(ok==true){ setState(()=>googleSyncEnabled=true); await _syncToGoogle(); save(); }
 }
 
 Future<void> _ensureCalendar() async{
   if(_rosterCalendarId!=null && _rosterCalendarId!.isNotEmpty) return;
-  String? id = await _pickGoogleCalendarDialog();
-  if(id!=null) _rosterCalendarId=id;
+  await _pickGoogleCalendarDialog();
 }
 
 Future<void> _syncToGoogle({bool silent=false}) async{
@@ -180,7 +193,7 @@ Future<void> _syncToGoogle({bool silent=false}) async{
   _isSyncing=true;
   try{
     if(_rosterCalendarId==null || _rosterCalendarId!.isEmpty) await _ensureCalendar();
-    if(_rosterCalendarId==null || _rosterCalendarId!.isEmpty) throw '未選日曆';
+    if(_rosterCalendarId==null || _rosterCalendarId!.isEmpty) throw '未選真 Google 日曆';
     var existingEvents=await _calendarPlugin.retrieveEvents(_rosterCalendarId!, RetrieveEventsParams(startDate: DateTime(2023,1,1), endDate: DateTime(2030,12,31)));
     int del=0;
     for(var e in existingEvents.data??[]){ if((e.description??'').contains('[RosterPro]')){ await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.eventId); del++; } }
@@ -200,7 +213,7 @@ Future<void> _syncToGoogle({bool silent=false}) async{
       if(res!=null && res.isSuccess && res.data!=null) _googleEventIdMap[entry.key]=res.data!;
     }
     var sp=await SharedPreferences.getInstance(); sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
-    if(!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已寫入 ID $_rosterCalendarId ${roster.length}項，刪舊${del}項，去重完成。三星開咗Google同步就會上Google。')));
+    if(!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已寫入 $_rosterCalendarName ID $_rosterCalendarId ${roster.length}項，刪舊${del}項')));
   }catch(e){ if(!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('同步失敗 $e'))); }
   finally { _isSyncing=false; }
 }
@@ -246,7 +259,7 @@ Future<void> _exportShareImage() async{
 Future<void> backupAnywhere() async{
   String? dir=await FilePicker.platform.getDirectoryPath(dialogTitle:'選擇備份位置'); if(dir==null) return;
   String fileName='roster_pro_full_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.json';
-  var backup = {'version':'6.85_final','exportTime':DateTime.now().toIso8601String(),'roster':roster,'note':rosterNote,'roOt':rosterOt,'roEx':rosterExtra,'roExH':rosterExtraHrs,'defs':defs.map((k,v)=>MapEntry(k,v.toJson())),'pattern':pattern,'carry':carry,'cName':customName,'stdWeek':standardWeeklyHours,'otRate':overtimeRate,'extraNewV36':extraAllowances.map((e)=>e.toJson()).toList(),'calFont':calendarFontSize,'savedPatterns':savedPatterns.map((e)=>e.toJson()).toList(),'holidayRegion':holidayRegion,'rosterCalId':_rosterCalendarId,'googleEventIdMap':_googleEventIdMap,'gSync':googleSyncEnabled,'gAuto':autoSync,};
+  var backup = {'version':'6.86_final_real_id','exportTime':DateTime.now().toIso8601String(),'roster':roster,'note':rosterNote,'roOt':rosterOt,'roEx':rosterExtra,'roExH':rosterExtraHrs,'defs':defs.map((k,v)=>MapEntry(k,v.toJson())),'pattern':pattern,'carry':carry,'cName':customName,'stdWeek':standardWeeklyHours,'otRate':overtimeRate,'extraNewV36':extraAllowances.map((e)=>e.toJson()).toList(),'calFont':calendarFontSize,'savedPatterns':savedPatterns.map((e)=>e.toJson()).toList(),'holidayRegion':holidayRegion,'rosterCalId':_rosterCalendarId,'rosterCalName':_rosterCalendarName,'rosterAccName':_rosterAccountName,'googleEventIdMap':_googleEventIdMap,'gSync':googleSyncEnabled,'gAuto':autoSync,};
   var f=File('$dir/$fileName'); await f.writeAsString(jsonEncode(backup));
   if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('全部備份 $dir/$fileName')));
 }
@@ -264,6 +277,7 @@ Future<void> restoreLocalFile() async{
       if(j['extraNewV36']!=null) extraAllowances=(j['extraNewV36'] as List).map((e)=>ExtraAllowance.fromJson(Map<String,dynamic>.from(e as Map))).toList();
       if(j['calFont']!=null) calendarFontSize=(j['calFont'] as num).toDouble(); if(j['savedPatterns']!=null) savedPatterns=(j['savedPatterns'] as List).map((e)=>SavedPattern.fromJson(Map<String,dynamic>.from(e as Map))).toList();
       if(j['holidayRegion']!=null) holidayRegion=j['holidayRegion']; if(j['rosterCalId']!=null) _rosterCalendarId=j['rosterCalId'];
+      if(j['rosterCalName']!=null) _rosterCalendarName=j['rosterCalName']; if(j['rosterAccName']!=null) _rosterAccountName=j['rosterAccName'];
       if(j['googleEventIdMap']!=null) _googleEventIdMap=Map<String,String>.from(j['googleEventIdMap']); if(j['gSync']!=null) googleSyncEnabled=j['gSync']; if(j['gAuto']!=null) autoSync=j['gAuto'];
     }); save(); if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('還原成功'))); }catch(e){ if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('還原失敗 $e'))); }
 }
@@ -313,14 +327,14 @@ Widget settingsTab(){
     Card(child:Column(children:[...shiftShow.map((e){ var d=e.value; return ListTile(leading:CircleAvatar(backgroundColor:d.color,child:Text(d.code,style:const TextStyle(color:Colors.white,fontSize:10))),title:Text('${d.code} - ${d.label} ${d.start}-${d.end} ${d.hasAllowance?'[有津貼\$${d.allowance}]':''}'),subtitle:Text('${d.hours.toStringAsFixed(1)}h | ${d.detailTime}'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[IconButton(icon:const Icon(Icons.edit),onPressed:()=>editShiftDialog(oldDef:d)),IconButton(icon:const Icon(Icons.delete),onPressed:(){ setState(()=>defs.remove(e.key)); save(); })])); }),if(shiftList.length>5) TextButton(onPressed:(){ setState(()=>showAllShift=!showAllShift); },child:Text(showAllShift?'收起':'顯示全部 ${shiftList.length}項')),ListTile(leading:const Icon(Icons.add),title:const Text('新增班次'),onTap:()=>editShiftDialog()),])),
     const SizedBox(height:16), const Text('公眾假期地區',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
     Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[DropdownButtonFormField<String>(value:holidayRegion,decoration:const InputDecoration(labelText:'地區',border:OutlineInputBorder()),items:['無','香港','中國內地','台灣','美國'].map((r)=>DropdownMenuItem(value:r,child:Text(r))).toList(),onChanged:(v){ setState(()=>holidayRegion=v!); save(); }),]))),
-    const SizedBox(height:16), const Text('日曆同步 - v6.85 最終版 (經系統同步上Google)',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
+    const SizedBox(height:16), const Text('日曆同步 - v6.86 真ID版 (經系統同步上Google)',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
     Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
       SwitchListTile(title:const Text('啟用日曆同步'),subtitle:Text(googleSyncEnabled?'已授權':'未授權'),value:googleSyncEnabled,onChanged:(v) async { if(v){ await _requestGooglePerm(); }else{ setState(()=>googleSyncEnabled=false); save(); } }),
       SwitchListTile(title:const Text('自動同步(去重)'),value:autoSync,onChanged:googleSyncEnabled? (v){ setState(()=>autoSync=v); save(); }:null),
       Row(children:[Expanded(child:OutlinedButton.icon(onPressed:googleSyncEnabled? ()=>_syncToGoogle():null,icon:const Icon(Icons.sync),label:const Text('手動同步去重'))),const SizedBox(width:8),Expanded(child:OutlinedButton.icon(onPressed:(){ setState(()=>googleSyncEnabled=false); save(); },icon:const Icon(Icons.link_off),label:const Text('取消')))]),
-      Text('當前ID: ${_rosterCalendarId??'未選'} (ID最短=Google)',style:const TextStyle(fontSize:10,color:Colors.grey)),
+      Text('當前: $_rosterCalendarName\nID: ${_rosterCalendarId??'未選'} 帳號: $_rosterAccountName',style:const TextStyle(fontSize:11,color:Colors.grey)),
       const SizedBox(height:8),
-      SizedBox(width: double.infinity, child: OutlinedButton.icon(icon:const Icon(Icons.list), label:const Text('選擇日曆 (ID最短=Google)'), onPressed: () async { String? id=await _pickGoogleCalendarDialog(); if(id!=null){ setState(()=>_rosterCalendarId=id); save(); }})),
+      SizedBox(width: double.infinity, child: OutlinedButton.icon(icon:const Icon(Icons.list), label:const Text('選擇日曆 真ID版 (綠色=Google)'), onPressed: () async { await _pickGoogleCalendarDialog(); })),
       SizedBox(width: double.infinity, child: FilledButton.icon(icon:const Icon(Icons.cloud), label:const Text('前往手機設定開Google同步'), onPressed: () async { await openAppSettings(); })),
     ]))),
     const SizedBox(height:16),
