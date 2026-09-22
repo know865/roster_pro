@@ -22,7 +22,7 @@ class ShiftDef {
 }
 class ExtraAllowance { String name; double amount; ExtraAllowance(this.name,this.amount); Map<String,dynamic> toJson()=>{'name':name,'amount':amount}; factory ExtraAllowance.fromJson(Map<String,dynamic> j)=>ExtraAllowance(j['name'],(j['amount'] as num).toDouble()); }
 class SavedPattern { String name; List<List<String>> data; SavedPattern(this.name,this.data); Map<String,dynamic> toJson()=>{'name':name,'data':data}; factory SavedPattern.fromJson(Map<String,dynamic> j)=>SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r)=>(r as List).map<String>((e)=>e.toString()).toList()).toList()); }
-class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v6.72',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
+class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v6.73',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
 
 class MainPage extends StatefulWidget { const MainPage({super.key}); @override State<MainPage> createState()=>MainPageState(); }
 class MainPageState extends State<MainPage> {
@@ -60,9 +60,9 @@ Future<void> load() async{
   var sp=await SharedPreferences.getInstance();
   var r=sp.getString('roster'); if(r!=null) roster=Map<String,String>.from(jsonDecode(r));
   var rn=sp.getString('note'); if(rn!=null) rosterNote=Map<String,String>.from(jsonDecode(rn));
-  var ro=sp.getString('roOt'); if(ro!=null){ try{ rosterOt=Map<String,double>.from(jsonDecode(ro).map((k,v)=>MapEntry(k,(v as num).toDouble()))); }catch(_){} }
-  var re=sp.getString('roEx'); if(re!=null){ try{ rosterExtra=Map<String,double>.from(jsonDecode(re).map((k,v)=>MapEntry(k,(v as num).toDouble()))); }catch(_){} }
-  var reh=sp.getString('roExH'); if(reh!=null){ try{ rosterExtraHrs=Map<String,double>.from(jsonDecode(reh).map((k,v)=>MapEntry(k,(v as num).toDouble()))); }catch(_){} }
+  var ro=sp.getString('roOt'); if(ro!=null){ try{ rosterOt=Map<String,double>.from((jsonDecode(ro) as Map).map((k,v)=>MapEntry(k as String,(v as num).toDouble()))); }catch(_){} }
+  var re=sp.getString('roEx'); if(re!=null){ try{ rosterExtra=Map<String,double>.from((jsonDecode(re) as Map).map((k,v)=>MapEntry(k as String,(v as num).toDouble()))); }catch(_){} }
+  var reh=sp.getString('roExH'); if(reh!=null){ try{ rosterExtraHrs=Map<String,double>.from((jsonDecode(reh) as Map).map((k,v)=>MapEntry(k as String,(v as num).toDouble()))); }catch(_){} }
   var d=sp.getString('defs'); if(d!=null){ try{ var m=Map<String,dynamic>.from(jsonDecode(d)); defs=m.map((k,v)=>MapEntry(k,ShiftDef.fromJson(Map<String,dynamic>.from(v)))); }catch(_){} }
   var p=sp.getString('pattern'); if(p!=null){ try{ var l=jsonDecode(p) as List; pattern=l.map<List<String>>((row)=>(row as List).map<String>((e)=>e.toString()).toList()).toList(); }catch(_){} }
   var ea=sp.getString('extraAllowNewV36'); if(ea!=null){ try{ extraAllowances=(jsonDecode(ea) as List).map((e)=>ExtraAllowance.fromJson(Map<String,dynamic>.from(e))).toList(); }catch(_){} }
@@ -136,13 +136,17 @@ Future<void> _requestGooglePerm() async{
 
 Future<void> _ensureCalendar() async{
   var calsResult=await _calendarPlugin.retrieveCalendars(); var cals=calsResult.data??[];
-  List<Calendar> googleCals = cals.where((c){
-    if(c.isReadOnly==true) return false;
+  List<Calendar> googleCals = [];
+  for(var c in cals){
+    if(c.isReadOnly==true) continue;
     String acc=(c.accountName??'').toLowerCase();
     String type=(c.accountType??'').toLowerCase();
-    return type.contains('google') || acc.contains('gmail') || acc.contains('google');
-  }).toList();
-  List<Calendar> searchPool = googleCals.isNotEmpty? googleCals : cals.where((c)=>c.isReadOnly==false).toList();
+    if(type.contains('google') || acc.contains('gmail') || acc.contains('google')){
+      googleCals.add(c);
+    }
+  }
+  List<Calendar> searchPool = [];
+  if(googleCals.isNotEmpty){ searchPool = googleCals; } else { searchPool = cals.where((c)=>c.isReadOnly==false).toList(); }
   Calendar? existing;
   for(var c in searchPool){ if(c.name==customName){ existing=c; break; } }
   if(existing!=null){
@@ -249,18 +253,18 @@ Future<void> restoreLocalFile() async{
     setState((){
       if(j['roster']!=null) roster=Map<String,String>.from(j['roster']);
       if(j['note']!=null) rosterNote=Map<String,String>.from(j['note']);
-      if(j['roOt']!=null) rosterOt=Map<String,double>.from((j['roOt'] as Map).map((k,v)=>MapEntry(k,(v as num).toDouble()));
-      if(j['roEx']!=null) rosterExtra=Map<String,double>.from((j['roEx'] as Map).map((k,v)=>MapEntry(k,(v as num).toDouble()));
-      if(j['roExH']!=null) rosterExtraHrs=Map<String,double>.from((j['roExH'] as Map).map((k,v)=>MapEntry(k,(v as num).toDouble()));
-      if(j['defs']!=null) defs=(j['defs'] as Map).map<String,ShiftDef>((k,v)=>MapEntry(k,ShiftDef.fromJson(Map<String,dynamic>.from(v))));
+      if(j['roOt']!=null) rosterOt=Map<String,double>.from((j['roOt'] as Map).map((k,v)=>MapEntry(k as String,(v as num).toDouble())));
+      if(j['roEx']!=null) rosterExtra=Map<String,double>.from((j['roEx'] as Map).map((k,v)=>MapEntry(k as String,(v as num).toDouble())));
+      if(j['roExH']!=null) rosterExtraHrs=Map<String,double>.from((j['roExH'] as Map).map((k,v)=>MapEntry(k as String,(v as num).toDouble())));
+      if(j['defs']!=null) defs=(j['defs'] as Map).map<String,ShiftDef>((k,v)=>MapEntry(k as String,ShiftDef.fromJson(Map<String,dynamic>.from(v as Map))));
       if(j['pattern']!=null) pattern=(j['pattern'] as List).map<List<String>>((r)=>(r as List).map<String>((e)=>e.toString()).toList()).toList();
       if(j['carry']!=null) carry=(j['carry'] as num).toDouble();
       if(j['cName']!=null){ customName=j['cName']; nameCtrl.text=customName; }
       if(j['stdWeek']!=null) standardWeeklyHours=(j['stdWeek'] as num).toDouble();
       if(j['otRate']!=null) overtimeRate=(j['otRate'] as num).toDouble();
-      if(j['extraNewV36']!=null) extraAllowances=(j['extraNewV36'] as List).map((e)=>ExtraAllowance.fromJson(Map<String,dynamic>.from(e))).toList();
+      if(j['extraNewV36']!=null) extraAllowances=(j['extraNewV36'] as List).map((e)=>ExtraAllowance.fromJson(Map<String,dynamic>.from(e as Map))).toList();
       if(j['calFont']!=null) calendarFontSize=(j['calFont'] as num).toDouble();
-      if(j['savedPatterns']!=null) savedPatterns=(j['savedPatterns'] as List).map((e)=>SavedPattern.fromJson(Map<String,dynamic>.from(e))).toList();
+      if(j['savedPatterns']!=null) savedPatterns=(j['savedPatterns'] as List).map((e)=>SavedPattern.fromJson(Map<String,dynamic>.from(e as Map))).toList();
       if(j['holidayRegion']!=null) holidayRegion=j['holidayRegion'];
     });
     save();
@@ -368,24 +372,20 @@ Widget settingsTab(){
   var stdCtrl=TextEditingController(text:standardWeeklyHours.toString()); var carryCtrl=TextEditingController(text:carry.toString()); var otRateCtrl=TextEditingController(text:overtimeRate.toString());
   List<MapEntry<String,ShiftDef>> shiftList=defs.entries.toList(); List<MapEntry<String,ShiftDef>> shiftShow=showAllShift? shiftList : shiftList.take(5).toList(); List<ExtraAllowance> allowShow=showAllExtra? extraAllowances : extraAllowances.take(5).toList();
   return SafeArea(child:ListView(padding:const EdgeInsets.all(16),children:[
-    const Text('排更日曆自定名稱 (用於Google日曆獨立日曆名)',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
-    Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[TextField(controller:nameCtrl,decoration:const InputDecoration(labelText:'日曆名稱，例如：我的更表-夜更',border:OutlineInputBorder())),const SizedBox(height:8),SizedBox(width:double.infinity,child:FilledButton(onPressed:(){ setState(()=>customName=nameCtrl.text.trim().isEmpty?'我的排更':nameCtrl.text.trim()); save(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('日曆名已改為 $customName'))); },child:const Text('保存日曆名稱')))]))),
-    const SizedBox(height:16), const Text('自定班次 (獨立，含津貼核實)',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
-    Card(child:Column(children:[...shiftShow.map((e){ var d=e.value; return ListTile(leading:CircleAvatar(backgroundColor:d.color,child:Text(d.code,style:const TextStyle(color:Colors.white,fontSize:10))),title:Text('${d.code} - ${d.label} ${d.start}-${d.end} ${d.hasAllowance?'[有津貼\$${d.allowance}]':''}'),subtitle:Text('${d.hours.toStringAsFixed(1)}h | ${d.detailTime}'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[IconButton(icon:const Icon(Icons.edit),onPressed:()=>editShiftDialog(oldDef:d)),IconButton(icon:const Icon(Icons.delete),onPressed:(){ setState(()=>defs.remove(e.key)); save(); })])); }),if(shiftList.length>5) TextButton(onPressed:(){ setState(()=>showAllShift=!showAllShift); },child:Text(showAllShift?'收起':'顯示全部 ${shiftList.length}項')),ListTile(leading:const Icon(Icons.add),title:const Text('新增班次 (獨立)'),onTap:()=>editShiftDialog()),])),
-    const SizedBox(height:16), const Text('公眾假期地區選擇 (顯示假期名)',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
-    Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[DropdownButtonFormField<String>(value:holidayRegion,decoration:const InputDecoration(labelText:'地區',border:OutlineInputBorder()),items:['無','香港','中國內地','台灣','美國'].map((r)=>DropdownMenuItem(value:r,child:Text(r))).toList(),onChanged:(v){ setState(()=>holidayRegion=v!); save(); }),const SizedBox(height:8), const Row(children:[Icon(Icons.circle,color:Colors.red,size:10),SizedBox(width:4),Text('紅點=假期 會顯示名稱'),SizedBox(width:12),Icon(Icons.circle,color:Colors.blue,size:10),SizedBox(width:4),Text('藍點=記事')]),]))),
-    const SizedBox(height:16), const Text('Google日曆同步 - 強制同步到手機 Google 日曆 (非三星日曆)',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
+    const Text('排更日曆自定名稱',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
+    Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[TextField(controller:nameCtrl,decoration:const InputDecoration(labelText:'日曆名稱',border:OutlineInputBorder())),const SizedBox(height:8),SizedBox(width:double.infinity,child:FilledButton(onPressed:(){ setState(()=>customName=nameCtrl.text.trim().isEmpty?'我的排更':nameCtrl.text.trim()); save(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('日曆名已改為 $customName'))); },child:const Text('保存日曆名稱')))]))),
+    const SizedBox(height:16), const Text('自定班次',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
+    Card(child:Column(children:[...shiftShow.map((e){ var d=e.value; return ListTile(leading:CircleAvatar(backgroundColor:d.color,child:Text(d.code,style:const TextStyle(color:Colors.white,fontSize:10))),title:Text('${d.code} - ${d.label} ${d.start}-${d.end} ${d.hasAllowance?'[有津貼\$${d.allowance}]':''}'),subtitle:Text('${d.hours.toStringAsFixed(1)}h | ${d.detailTime}'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[IconButton(icon:const Icon(Icons.edit),onPressed:()=>editShiftDialog(oldDef:d)),IconButton(icon:const Icon(Icons.delete),onPressed:(){ setState(()=>defs.remove(e.key)); save(); })])); }),if(shiftList.length>5) TextButton(onPressed:(){ setState(()=>showAllShift=!showAllShift); },child:Text(showAllShift?'收起':'顯示全部 ${shiftList.length}項')),ListTile(leading:const Icon(Icons.add),title:const Text('新增班次'),onTap:()=>editShiftDialog()),])),
+    const SizedBox(height:16), const Text('公眾假期地區',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
+    Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[DropdownButtonFormField<String>(value:holidayRegion,decoration:const InputDecoration(labelText:'地區',border:OutlineInputBorder()),items:['無','香港','中國內地','台灣','美國'].map((r)=>DropdownMenuItem(value:r,child:Text(r))).toList(),onChanged:(v){ setState(()=>holidayRegion=v!); save(); }),]))),
+    const SizedBox(height:16), const Text('Google日曆同步 - 強制Google (非三星)',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
     Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
-      SwitchListTile(title:const Text('啟用 Google日曆同步'),subtitle:Text(googleSyncEnabled?'已授權 寫入Google日曆':'未授權 - 點此授權到Google'),value:googleSyncEnabled,onChanged:(v) async { if(v){ await _requestGooglePerm(); }else{ setState(()=>googleSyncEnabled=false); save(); } }),
-      SwitchListTile(title:const Text('資料更新時自動同步'),subtitle:const Text('更新/刪除會覆蓋Google，不重複'),value:autoSync,onChanged:googleSyncEnabled? (v){ setState(()=>autoSync=v); save(); }:null),
-      Row(children:[Expanded(child:OutlinedButton.icon(onPressed:googleSyncEnabled? ()=>_syncToGoogle():null,icon:const Icon(Icons.sync),label:const Text('手動同步(去重覆蓋)'))),const SizedBox(width:8),Expanded(child:OutlinedButton.icon(onPressed:(){ setState(()=>googleSyncEnabled=false); save(); },icon:const Icon(Icons.link_off),label:const Text('取消授權')))]),
+      SwitchListTile(title:const Text('啟用 Google日曆同步'),subtitle:Text(googleSyncEnabled?'已授權 寫入Google日曆':'未授權'),value:googleSyncEnabled,onChanged:(v) async { if(v){ await _requestGooglePerm(); }else{ setState(()=>googleSyncEnabled=false); save(); } }),
+      SwitchListTile(title:const Text('自動同步'),subtitle:const Text('更新/刪除會覆蓋Google，不重複'),value:autoSync,onChanged:googleSyncEnabled? (v){ setState(()=>autoSync=v); save(); }:null),
+      Row(children:[Expanded(child:OutlinedButton.icon(onPressed:googleSyncEnabled? ()=>_syncToGoogle():null,icon:const Icon(Icons.sync),label:const Text('手動同步(去重)'))),const SizedBox(width:8),Expanded(child:OutlinedButton.icon(onPressed:(){ setState(()=>googleSyncEnabled=false); save(); },icon:const Icon(Icons.link_off),label:const Text('取消')))]),
+      Text('ID: ${_rosterCalendarId??'未選'}',style:const TextStyle(fontSize:11,color:Colors.grey)),
       const SizedBox(height:8),
-      Text('當前日曆ID: ${_rosterCalendarId??'未選擇'}',style:const TextStyle(fontSize:11,color:Colors.grey)),
-      const SizedBox(height:12),
-      SizedBox(width: double.infinity, child: FilledButton.icon(icon:const Icon(Icons.security), label:const Text('直接取得日曆權限'), onPressed: () async {
-        bool ok = await _handleCalendarPermission();
-        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(ok?'已取得讀寫權限':'仍未授權')));
-      },)),
+      SizedBox(width: double.infinity, child: FilledButton.icon(icon:const Icon(Icons.security), label:const Text('直接取得日曆權限'), onPressed: () async { bool ok = await _handleCalendarPermission(); if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(ok?'已取得權限':'仍未授權'))); },)),
     ]))),
     const SizedBox(height:16),
     const Text('清除排更 - 按日期範圍 (保留記事)',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold,color: Colors.red)),
