@@ -10,17 +10,41 @@ workflows:
       - name: 1. Force delete old android + recreate
         script: |
           set -e
-          echo "=== 刪舊 android 重新建立 ==="
           git rm -rf --cached android --ignore-unmatch || true
           rm -rf android || true
           rm -f pubspec.lock || true
           flutter create --platforms=android --project-name roster_pro --org com.example . --no-pub
 
-      - name: 2. Inject Permission + Real Calendar v7.0
+      - name: 2. Fix Kotlin Duplicate Class Issue
+        script: |
+          set -e
+          echo "=== 修復 Kotlin 重複類 ==="
+          # 統一 Kotlin 版本為 1.8.10
+          sed -i.bak "s/ext.kotlin_version = '.*'/ext.kotlin_version = '1.8.10'/" android/build.gradle || true
+          # 在 app/build.gradle 強制 resolution
+          APP_GRADLE="android/app/build.gradle"
+          if ! grep -q "resolutionStrategy" "$APP_GRADLE"; then
+            awk '
+              /android {/ {
+                print
+                print "    configurations.all {"
+                print "        resolutionStrategy {"
+                print "            force '\''org.jetbrains.kotlin:kotlin-stdlib:1.8.10'\''"
+                print "            force '\''org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.10'\''"
+                print "            force '\''org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.10'\''"
+                print "        }"
+                print "    }"
+                next
+              }
+              {print}
+            ' "$APP_GRADLE" > "$APP_GRADLE.tmp" && mv "$APP_GRADLE.tmp" "$APP_GRADLE"
+          fi
+          cat "$APP_GRADLE" | grep -A5 resolutionStrategy
+
+      - name: 3. Inject Permission + Real Calendar v7.0
         script: |
           set -e
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          echo "=== 注入權限 ==="
           sed -i.bak '/READ_CALENDAR/d' "$MANIFEST" || true
           sed -i.bak '/WRITE_CALENDAR/d' "$MANIFEST" || true
           sed -i.bak '/READ_MEDIA_IMAGES/d' "$MANIFEST" || true
@@ -73,7 +97,7 @@ workflows:
           flutter clean
           flutter pub get
 
-      - name: 3. Build APK v7.0
+      - name: 4. Build APK v7.0
         script: flutter build apk --release --no-tree-shake-icons
 
     artifacts:
