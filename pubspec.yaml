@@ -1,5 +1,5 @@
 name: roster_pro
-description: Roster Pro v7.0 - 排更日曆 支援真ID Google日曆同步(記同步記事)、全天核實、轉盤時間、長按編輯、左右滑月份、每年假期自動更新、截圖分享放大字體、全部備份路徑顯示
+description: Roster Pro v7.0 - 真ID Google日曆同步含記事、轉盤時間、全天、長按編輯、左右滑、假期自動更新、截圖分享
 publish_to: 'none'
 version: 7.0.0+70
 
@@ -18,7 +18,7 @@ dependencies:
   device_calendar: ^4.3.3
   timezone: ^0.9.2
   permission_handler: ^11.3.1
-  share_plus: ^8.0.8
+  share_plus: ^12.0.2
 
 dev_dependencies:
   flutter_test:
