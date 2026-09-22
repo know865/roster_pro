@@ -11,24 +11,19 @@ workflows:
         script: |
           set -e
           echo "=== 刪舊 android 重新建立 ==="
-          git rm -rf --cached android || true
-          rm -rf android
-          rm -f pubspec.lock
-          flutter create --platforms=android --project-name roster_pro --org com.example .
+          git rm -rf --cached android --ignore-unmatch || true
+          rm -rf android || true
+          rm -f pubspec.lock || true
+          flutter create --platforms=android --project-name roster_pro --org com.example . --no-pub
 
-      - name: 2. Inject Calendar Permission + Real Google Calendar Reader v7.0
+      - name: 2. Inject Permission + Real Calendar v7.0
         script: |
           set -e
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          echo "=== 注入權限到 $MANIFEST ==="
-          # 清舊避免重複
+          echo "=== 注入權限 ==="
           sed -i.bak '/READ_CALENDAR/d' "$MANIFEST" || true
           sed -i.bak '/WRITE_CALENDAR/d' "$MANIFEST" || true
           sed -i.bak '/READ_MEDIA_IMAGES/d' "$MANIFEST" || true
-          sed -i.bak '/WRITE_EXTERNAL_STORAGE/d' "$MANIFEST" || true
-          sed -i.bak '/READ_EXTERNAL_STORAGE/d' "$MANIFEST" || true
-
-          # 在 <application 前插入權限 (v7.0 需要分享+存圖)
           awk '
             /<application/ {
               print "    <uses-permission android:name=\"android.permission.READ_CALENDAR\" />"
@@ -40,21 +35,6 @@ workflows:
             }
             {print}
           ' "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
-
-          # 加入 queries 給 share_plus (Android 11+ 需要)
-          if ! grep -q "queries" "$MANIFEST"; then
-            awk '
-              /<uses-permission/ {p=$0; next}
-              /<application/ {
-                if(p!="") print p
-                print "    <queries><intent><action android:name=\"android.intent.action.SEND\" /></intent></queries>"
-                print ""
-              }
-              {if(p!="") {print p; p=""} print}
-            ' "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST" || true
-          fi
-
-          echo "=== 注入 MainActivity.kt 真實日曆讀取 v7.0 ==="
           mkdir -p android/app/src/main/kotlin/com/example/roster_pro
           cat > android/app/src/main/kotlin/com/example/roster_pro/MainActivity.kt << 'EOF'
           package com.example.roster_pro
@@ -90,10 +70,6 @@ workflows:
               }
           }
           EOF
-
-          echo "=== 最終檢查 ==="
-          cat "$MANIFEST" | grep -E "CALENDAR|STORAGE|queries" || true
-          cat android/app/src/main/kotlin/com/example/roster_pro/MainActivity.kt
           flutter clean
           flutter pub get
 
