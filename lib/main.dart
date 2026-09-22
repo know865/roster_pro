@@ -22,7 +22,7 @@ class ShiftDef {
 }
 class ExtraAllowance { String name; double amount; ExtraAllowance(this.name,this.amount); Map<String,dynamic> toJson()=>{'name':name,'amount':amount}; factory ExtraAllowance.fromJson(Map<String,dynamic> j)=>ExtraAllowance(j['name'],(j['amount'] as num).toDouble()); }
 class SavedPattern { String name; List<List<String>> data; SavedPattern(this.name,this.data); Map<String,dynamic> toJson()=>{'name':name,'data':data}; factory SavedPattern.fromJson(Map<String,dynamic> j)=>SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r)=>(r as List).map<String>((e)=>e.toString()).toList()).toList()); }
-class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v6.73',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
+class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v6.74',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
 
 class MainPage extends StatefulWidget { const MainPage({super.key}); @override State<MainPage> createState()=>MainPageState(); }
 class MainPageState extends State<MainPage> {
@@ -135,7 +135,8 @@ Future<void> _requestGooglePerm() async{
 }
 
 Future<void> _ensureCalendar() async{
-  var calsResult=await _calendarPlugin.retrieveCalendars(); var cals=calsResult.data??[];
+  var calsResult=await _calendarPlugin.retrieveCalendars();
+  var cals=calsResult.data??[];
   List<Calendar> googleCals = [];
   for(var c in cals){
     if(c.isReadOnly==true) continue;
@@ -146,7 +147,11 @@ Future<void> _ensureCalendar() async{
     }
   }
   List<Calendar> searchPool = [];
-  if(googleCals.isNotEmpty){ searchPool = googleCals; } else { searchPool = cals.where((c)=>c.isReadOnly==false).toList(); }
+  if(googleCals.isNotEmpty){
+    searchPool = googleCals;
+  } else {
+    searchPool = cals.where((c)=>c.isReadOnly==false).toList().cast<Calendar>();
+  }
   Calendar? existing;
   for(var c in searchPool){ if(c.name==customName){ existing=c; break; } }
   if(existing!=null){
@@ -157,7 +162,7 @@ Future<void> _ensureCalendar() async{
       _rosterCalendarId=createResult.data;
       var after=await _calendarPlugin.retrieveCalendars();
       if(after.data!=null){
-        var sameName=after.data!.where((c)=>c.name==customName).toList();
+        var sameName=after.data!.where((c)=>c.name==customName).toList().cast<Calendar>();
         var gSame=sameName.where((c){
           String t=(c.accountType??'').toLowerCase();
           String a=(c.accountName??'').toLowerCase();
@@ -169,7 +174,8 @@ Future<void> _ensureCalendar() async{
       if(searchPool.isNotEmpty){ _rosterCalendarId=searchPool.first.id; }
     }
   }
-  var sp=await SharedPreferences.getInstance(); if(_rosterCalendarId!=null) sp.setString('rosterCalId', _rosterCalendarId!);
+  var sp=await SharedPreferences.getInstance();
+  if(_rosterCalendarId!=null) sp.setString('rosterCalId', _rosterCalendarId!);
 }
 
 Future<void> _syncToGoogle({bool silent=false}) async{
