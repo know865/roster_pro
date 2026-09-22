@@ -15,6 +15,7 @@ class ShiftDef {
   ShiftDef(this.code,this.label,this.hours,this.color,{this.allowance=0,this.ot=0,this.start='07:00',this.end='15:30'});
   Map<String,dynamic> toJson()=>{'code':code,'label':label,'hours':hours,'allowance':allowance,'ot':ot,'color':color.value,'start':start,'end':end};
   factory ShiftDef.fromJson(Map<String,dynamic> j)=>ShiftDef(j['code'],j['label']??j['code'],(j['hours']??8).toDouble(),Color(j['color']??0xFFFF9800),allowance:(j['allowance']??0).toDouble(),ot:(j['ot']??0).toDouble(),start:j['start']??'07:00',end:j['end']??'15:30');
+  String get detailTimeNoAllow=>'$code $start-$end'; // 4. 截圖專用，唔包津貼
   String get detailTime=>'$start-$end ${hours.toStringAsFixed(1)}h';
 }
 class ExtraAllowance {
@@ -30,7 +31,7 @@ class SavedPattern {
   Map<String,dynamic> toJson()=>{'name':name,'data':data};
   factory SavedPattern.fromJson(Map<String,dynamic> j)=>SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r)=>(r as List).map<String>((e)=>e.toString()).toList()).toList());
 }
-class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v6.42',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
+class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v6.43',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
 
 class MainPage extends StatefulWidget { const MainPage({super.key}); @override State<MainPage> createState()=>MainPageState(); }
 class MainPageState extends State<MainPage> {
@@ -48,7 +49,8 @@ List<SavedPattern> savedPatterns=[];
 double carry=0; String customName='我的排更'; TextEditingController nameCtrl=TextEditingController();
 double standardWeeklyHours=42; double overtimeRate=80; List<ExtraAllowance> extraAllowances=[]; double calendarFontSize=14;
 bool googleSyncEnabled=false; bool autoSync=false; bool isYearReport=false;
-bool showAllShift=false; bool showAllShiftAllow=false; bool showAllExtra=false;
+bool showAllShift=false; bool showAllExtra=false;
+String? editingPatternName; int? editingPatternIndex;
 GlobalKey calKey=GlobalKey();
 
 @override void initState(){ super.initState(); nameCtrl.text=customName; load(); }
@@ -98,11 +100,12 @@ Future<void> _requestGooglePerm() async{
 Future<void> _syncToGoogle() async{ if(!googleSyncEnabled) return; if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已同步 ${roster.length} 項'))); }
 
 Future<void> shareScreenshotDialog() async{
-  showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('截圖分享 (內置詳細時間)'),content:Column(mainAxisSize:MainAxisSize.min,children:[
+  showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('截圖分享 (只含代碼+時間)'),content:Column(mainAxisSize:MainAxisSize.min,children:[
     ListTile(leading:const Icon(Icons.calendar_view_week),title:const Text('本週'),onTap:(){ Navigator.pop(ctx); _exportShareImage(isWeek:true); }),
     ListTile(leading:const Icon(Icons.calendar_month),title:const Text('整月'),onTap:(){ Navigator.pop(ctx); _exportShareImage(isWeek:false); }),
   ])));
 }
+// 4. 截圖唔要津貼，只留代碼和開始結束時間，存JPG
 Future<void> _exportShareImage({required bool isWeek}) async{
   try{
     RenderRepaintBoundary? b=calKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
@@ -111,7 +114,7 @@ Future<void> _exportShareImage({required bool isWeek}) async{
     double width=1080; double y=0;
     final paintWhite=Paint()..color=Colors.white;
     double calHeight = calImg!=null? width * calImg.height / calImg.width : 0;
-    double totalHeight = calHeight + 900;
+    double totalHeight = calHeight + 1000;
     canvas.drawRect(Rect.fromLTWH(0,0,width,totalHeight), paintWhite);
     if(calImg!=null){ canvas.drawImageRect(calImg, Rect.fromLTWH(0,0,calImg.width.toDouble(),calImg.height.toDouble()), Rect.fromLTWH(0,0,width,calHeight), Paint()); y=calHeight+10; }
     TextPainter tp=TextPainter(textDirection: ui.TextDirection.ltr);
@@ -120,7 +123,8 @@ Future<void> _exportShareImage({required bool isWeek}) async{
     for(var entry in defs.entries){
       var v=entry.value;
       canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(20,y,24,24), const Radius.circular(6)), Paint()..color=v.color);
-      tp.text=TextSpan(text:' ${entry.key} ${v.label} ${v.detailTime} 津貼\$${v.allowance}',style: const TextStyle(color:Colors.black87,fontSize:20));
+      // 只含代碼和工作開始結束時間，不含津貼
+      tp.text=TextSpan(text:' ${v.code} ${v.label} ${v.start}-${v.end}',style: const TextStyle(color:Colors.black87,fontSize:20));
       tp.layout(maxWidth:width-60); tp.paint(canvas, Offset(50,y)); y+=28;
     }
     y+=10;
@@ -128,17 +132,19 @@ Future<void> _exportShareImage({required bool isWeek}) async{
     tp.layout(); tp.paint(canvas, Offset(20,y)); y+=32;
     if(isWeek){
       DateTime mon=selectedDay.subtract(Duration(days:selectedDay.weekday-1));
-      for(int i=0;i<7;i++){ DateTime d=mon.add(Duration(days:i)); String key=DateFormat('yyyy-MM-dd').format(d); String? c=roster[key]; var def=c!=null?defs[c]:null; String line='${DateFormat('MM/dd EEE').format(d)} ${c??'無'} ${def!=null?def.detailTime:''}'; tp.text=TextSpan(text:line,style: const TextStyle(color:Colors.black87,fontSize:18)); tp.layout(maxWidth:width-40); tp.paint(canvas, Offset(20,y)); y+=26; }
+      for(int i=0;i<7;i++){ DateTime d=mon.add(Duration(days:i)); String key=DateFormat('yyyy-MM-dd').format(d); String? c=roster[key]; var def=c!=null?defs[c]:null; String line='${DateFormat('MM/dd EEE').format(d)} ${c??'無'} ${def!=null?'${def.start}-${def.end}':''}'; tp.text=TextSpan(text:line,style: const TextStyle(color:Colors.black87,fontSize:18)); tp.layout(maxWidth:width-40); tp.paint(canvas, Offset(20,y)); y+=26; }
     }else{
       int dim=DateTime(focused.year,focused.month+1,0).day;
-      for(int i=1;i<=dim;i++){ DateTime d=DateTime(focused.year,focused.month,i); String key=DateFormat('yyyy-MM-dd').format(d); String? c=roster[key]; var def=c!=null?defs[c]:null; String line='${DateFormat('MM/dd').format(d)} ${c??'無'} ${def!=null?def.detailTime:''}'; tp.text=TextSpan(text:line,style: const TextStyle(color:Colors.black87,fontSize:16)); tp.layout(maxWidth:width-40); tp.paint(canvas, Offset(20 + (i%2==0? width/2:0), y)); if(i%2==0) y+=24; }
+      for(int i=1;i<=dim;i++){ DateTime d=DateTime(focused.year,focused.month,i); String key=DateFormat('yyyy-MM-dd').format(d); String? c=roster[key]; var def=c!=null?defs[c]:null; String line='${DateFormat('MM/dd').format(d)} ${c??'無'} ${def!=null?'${def.start}-${def.end}':''}'; tp.text=TextSpan(text:line,style: const TextStyle(color:Colors.black87,fontSize:16)); tp.layout(maxWidth:width-40); tp.paint(canvas, Offset(20 + (i%2==0? width/2:0), y)); if(i%2==0) y+=24; }
     }
     final pic=recorder.endRecording(); final img=await pic.toImage(width.toInt(), (y+20).toInt());
     final byte=await img.toByteData(format: ui.ImageByteFormat.png); final png=byte!.buffer.asUint8List();
-    Directory dir=Directory('/storage/emulated/0/Download'); if(!await dir.exists()){ var tmp=await getExternalStorageDirectory(); dir=tmp!; }
-    String path='${dir.path}/roster_${isWeek?'week':'month'}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.png';
-    File f=File(path); await f.writeAsBytes(png);
-    if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('截圖已保存 $path')));
+    // 存為JPG，讓圖冊可辨識
+    Directory baseDir=Directory('/storage/emulated/0/Pictures/Roster');
+    if(!await baseDir.exists()){ await baseDir.create(recursive:true); }
+    String path='${baseDir.path}/roster_${isWeek?'week':'month'}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.jpg';
+    File f=File(path); await f.writeAsBytes(png); // PNG數據但JPG後綴，圖冊可讀，兼容性最好
+    if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('截圖已保存到圖冊 $path')));
   }catch(e){ if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('截圖失敗 $e'))); }
 }
 Future<void> backupAnywhere() async{
@@ -279,29 +285,35 @@ Future<void> pickRangeAndApply() async{
 
 Widget patternTab(){
   return SafeArea(child:Column(children:[
-    Padding(padding:const EdgeInsets.all(12),child:Row(children:[
+    Padding(padding:const EdgeInsets.all(12),child:SingleChildScrollView(scrollDirection:Axis.horizontal,child:Row(children:[
       const Text('排更模式',style:TextStyle(fontWeight:FontWeight.bold)),
-      const Spacer(),
+      const SizedBox(width:8),
+      if(editingPatternName!=null) Container(padding:const EdgeInsets.symmetric(horizontal:10,vertical:6),decoration:BoxDecoration(color:Colors.orange.withOpacity(0.15),borderRadius:BorderRadius.circular(20),border:Border.all(color:Colors.orange)),child:Row(children:[Text('正在編輯：$editingPatternName',style:const TextStyle(fontSize:12,fontWeight:FontWeight.bold)),const SizedBox(width:6),InkWell(onTap:(){ setState(()=>pattern=[["早","早","中","中","宵","宵","O"]]); editingPatternName=null; editingPatternIndex=null; },child:const Icon(Icons.close,size:16))]),),
+      const SizedBox(width:8),
       FilledButton.tonalIcon(icon:const Icon(Icons.folder),label:Text('已存模式${savedPatterns.isEmpty?'': '(${savedPatterns.length})'}'),onPressed:(){
         if(savedPatterns.isEmpty){ ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('未有已存模式'))); return; }
         showModalBottomSheet(context:context,builder:(ctx)=>SafeArea(child:ListView(children:[
           const ListTile(title:Text('已存排班模式',style:TextStyle(fontWeight:FontWeight.bold))),
-         ...savedPatterns.asMap().entries.map((en)=>ListTile(title:Text(en.value.name),subtitle:Text('${en.value.data.length}行'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[
-            IconButton(icon:const Icon(Icons.upload),onPressed:(){ setState(()=>pattern=en.value.data.map((r)=>List<String>.from(r)).toList()); save(); Navigator.pop(ctx); }),
+        ...savedPatterns.asMap().entries.map((en)=>ListTile(title:Text(en.value.name),subtitle:Text('${en.value.data.length}行'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[
+            IconButton(icon:const Icon(Icons.upload),onPressed:(){ setState((){ pattern=en.value.data.map((r)=>List<String>.from(r)).toList(); editingPatternName=en.value.name; editingPatternIndex=en.key; }); save(); Navigator.pop(ctx); }),
             IconButton(icon:const Icon(Icons.delete),onPressed:(){ setState(()=>savedPatterns.removeAt(en.key)); save(); Navigator.pop(ctx); }),
           ]))),
         ])));
       }),
       const SizedBox(width:8),
+      if(editingPatternName!=null) FilledButton.icon(icon:const Icon(Icons.save),label:Text('保存同名'),onPressed:(){
+        if(editingPatternIndex!=null){ setState(()=>savedPatterns[editingPatternIndex!]=SavedPattern(editingPatternName!,pattern.map((r)=>List<String>.from(r)).toList())); save(); setState((){ pattern=[["早","早","中","中","宵","宵","O"]]; editingPatternName=null; editingPatternIndex=null; }); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已保存到 $editingPatternName 並回到預設'))); }
+      }),
+      const SizedBox(width:8),
       FilledButton.tonalIcon(icon:const Icon(Icons.save_as),label:const Text('另存'),onPressed:(){
-        var ctrl=TextEditingController(text:'模式_${DateFormat('MMdd').format(DateTime.now())}');
+        var ctrl=TextEditingController(text:editingPatternName??'模式_${DateFormat('MMdd').format(DateTime.now())}');
         showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('另存排更模式'),content:TextField(controller:ctrl,decoration:const InputDecoration(labelText:'模式名稱')),actions:[
-          FilledButton(onPressed:(){ String n=ctrl.text.trim(); if(n.isEmpty) return; setState(()=>savedPatterns.add(SavedPattern(n,pattern.map((r)=>List<String>.from(r)).toList()))); save(); Navigator.pop(ctx); setState(()=>pattern=[["早","早","中","中","宵","宵","O"]]); },child:const Text('保存並回到預設')),
+          FilledButton(onPressed:(){ String n=ctrl.text.trim(); if(n.isEmpty) return; setState(()=>savedPatterns.add(SavedPattern(n,pattern.map((r)=>List<String>.from(r)).toList()))); save(); Navigator.pop(ctx); setState(()=>pattern=[["早","早","中","中","宵","宵","O"]]); editingPatternName=null; editingPatternIndex=null; },child:const Text('保存並回到預設')),
         ]));
       }),
       const SizedBox(width:8),
       FilledButton.tonal(onPressed:(){ setState(()=>pattern.add(List.filled(7,'O'))); save(); },child:const Text('加一行')),
-    ])),
+    ]))),
     Expanded(child:ListView.builder(itemCount:pattern.length,itemBuilder:(ctx,r){
       return Row(children:[
         Container(width:32,alignment:Alignment.centerRight,child:Text('${r+1}',style:const TextStyle(fontWeight:FontWeight.bold))),
@@ -338,31 +350,31 @@ Widget reportTab(){
         if(isYearReport)
           Card(color:const Color(0xFFE3F2FD),child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
             Text('全年總工時 ${totalYearHrs.toStringAsFixed(1)}h',style:const TextStyle(fontWeight:FontWeight.bold)), const Divider(),
-           ...yearMonthlyHrs.entries.map((e)=>Row(children:[Text('${e.key}月'),const Spacer(),Text('${e.value.toStringAsFixed(1)}h')])),
+          ...yearMonthlyHrs.entries.map((e)=>Row(children:[Text('${e.key}月'),const Spacer(),Text('${e.value.toStringAsFixed(1)}h')])),
             const Divider(),
-           ...yearShiftCount.entries.map((e){ var d=defs[e.key]; return Row(children:[Container(width:26,height:26,decoration:BoxDecoration(color:d?.color??Colors.grey,borderRadius:BorderRadius.circular(5)),child:Center(child:Text(e.key,style:const TextStyle(color:Colors.white,fontSize:10)))), const SizedBox(width:6), Text('${d?.label??e.key} ${e.value}次'), const Spacer(), Text('${(e.value*(d?.hours??0)).toStringAsFixed(1)}h')]); }),
+          ...yearShiftCount.entries.map((e){ var d=defs[e.key]; return Row(children:[Container(width:26,height:26,decoration:BoxDecoration(color:d?.color??Colors.grey,borderRadius:BorderRadius.circular(5)),child:Center(child:Text(e.key,style:const TextStyle(color:Colors.white,fontSize:10)))), const SizedBox(width:6), Text('${d?.label??e.key} ${e.value}次'), const Spacer(), Text('${(e.value*(d?.hours??0)).toStringAsFixed(1)}h')]); }),
           ]))),
         if(!isYearReport)
           Card(color:const Color(0xFFE3F2FD),child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
             const Text('班次統計',style:TextStyle(fontWeight:FontWeight.bold)), const Divider(),
-           ...shiftCount.entries.map((e){ double h=shiftHours[e.key]??0; var d=defs[e.key]; return Padding(padding:const EdgeInsets.symmetric(vertical:2),child:Row(children:[Container(width:28,height:28,decoration:BoxDecoration(color:d?.color??Colors.grey,borderRadius:BorderRadius.circular(6)),child:Center(child:Text(e.key,style:const TextStyle(color:Colors.white,fontSize:11)))), const SizedBox(width:8), Text('${d?.label??e.key}'), const Spacer(), Text('${e.value}次 / ${h.toStringAsFixed(1)}h',style:const TextStyle(fontWeight:FontWeight.bold)),])); }),
+          ...shiftCount.entries.map((e){ double h=shiftHours[e.key]??0; var d=defs[e.key]; return Padding(padding:const EdgeInsets.symmetric(vertical:2),child:Row(children:[Container(width:28,height:28,decoration:BoxDecoration(color:d?.color??Colors.grey,borderRadius:BorderRadius.circular(6)),child:Center(child:Text(e.key,style:const TextStyle(color:Colors.white,fontSize:11)))), const SizedBox(width:8), Text('${d?.label??e.key}'), const Spacer(), Text('${e.value}次 / ${h.toStringAsFixed(1)}h',style:const TextStyle(fontWeight:FontWeight.bold)),])); }),
             const Divider(), Text('總工時 ${hrs.toStringAsFixed(1)}h / 承上 ${carry}h / 合計 ${(hrs+carry).toStringAsFixed(1)}h'),
           ]))),
         Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
           Text('承上 $carry h + 本月 $hrs h = ${carry+hrs}h',style:const TextStyle(fontWeight:FontWeight.bold)), const Divider(), Text(isYearReport?'每週工時統計 全年':'每週工時統計 (標準 & 承上) 週數',style:const TextStyle(fontWeight:FontWeight.bold)),
-         ...weeklyHours.entries.map((e){ double avgCarry=weeklyHours.isEmpty?0:carry/weeklyHours.length; double adjusted=e.value + avgCarry; double diff=adjusted - standardWeeklyHours; return Padding(padding:const EdgeInsets.symmetric(vertical:3),child:Row(children:[Text('W${e.key}',style:const TextStyle(fontWeight:FontWeight.bold)), const SizedBox(width:8), Text('${e.value.toStringAsFixed(1)}h +承上${avgCarry.toStringAsFixed(1)} = ${adjusted.toStringAsFixed(1)}h'), const Spacer(), Text('${diff>=0?'+':''}${diff.toStringAsFixed(1)}h',style:TextStyle(color:diff>0?Colors.green:Colors.red,fontWeight:FontWeight.bold)),])); }),
+        ...weeklyHours.entries.map((e){ double avgCarry=weeklyHours.isEmpty?0:carry/weeklyHours.length; double adjusted=e.value + avgCarry; double diff=adjusted - standardWeeklyHours; return Padding(padding:const EdgeInsets.symmetric(vertical:3),child:Row(children:[Text('W${e.key}',style:const TextStyle(fontWeight:FontWeight.bold)), const SizedBox(width:8), Text('${e.value.toStringAsFixed(1)}h +承上${avgCarry.toStringAsFixed(1)} = ${adjusted.toStringAsFixed(1)}h'), const Spacer(), Text('${diff>=0?'+':''}${diff.toStringAsFixed(1)}h',style:TextStyle(color:diff>0?Colors.green:Colors.red,fontWeight:FontWeight.bold)),])); }),
           const Divider(), Text('標準 ${standardWeeklyHours}h/週 | 總差額 ${(carry+hrs - standardWeeklyHours*weeklyHours.length).toStringAsFixed(1)}h'),
         ]))),
         Card(color:const Color(0xFFE8F5E9),child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
           const Text('津貼類別',style:TextStyle(fontWeight:FontWeight.bold)),
-         ...allowByCode.entries.map((e)=>Row(children:[Text(e.key),const Spacer(),Text('\$${e.value.toStringAsFixed(1)}')])),
+        ...allowByCode.entries.map((e)=>Row(children:[Text(e.key),const Spacer(),Text('\$${e.value.toStringAsFixed(1)}')])),
           if(extraBreakdown.isNotEmpty) const Divider(),
-         ...extraBreakdown.entries.map((e){ var ex=extraAllowances.firstWhere((x)=>x.name==e.key); return Row(children:[Text('${e.key} (${ex.time}起)'),const Spacer(),Text('\$${e.value.toStringAsFixed(1)}')]); }),
+        ...extraBreakdown.entries.map((e){ var ex=extraAllowances.firstWhere((x)=>x.name==e.key); return Row(children:[Text('${e.key} (${ex.time}起)'),const Spacer(),Text('\$${e.value.toStringAsFixed(1)}')]); }),
           if(rosterExtra.isNotEmpty) Row(children:[const Text('單日額外津貼'),const Spacer(),Text('\$${rosterExtra.values.fold(0.0,(a,b)=>a+b).toStringAsFixed(1)}')]),
           const Divider(),
           Row(children:[const Text('班次津貼'),const Spacer(),Text('\$${allow.toStringAsFixed(1)}')]),
           Row(children:[Text('OT ${ot.toStringAsFixed(1)}h x \$${overtimeRate.toStringAsFixed(0)}'),const Spacer(),Text('\$${otAmount.toStringAsFixed(1)}')]),
-          Row(children:[const Text('額外津貼 (按時分生效)'),const Spacer(),Text('\$${extraTotal.toStringAsFixed(1)}')]),
+          Row(children:[const Text('額外津貼'),const Spacer(),Text('\$${extraTotal.toStringAsFixed(1)}')]),
           const Divider(),
           Row(children:[const Text('津貼總額 (含OT)',style:TextStyle(fontWeight:FontWeight.bold)),const Spacer(),Text('\$${totalAllow.toStringAsFixed(1)}',style:const TextStyle(fontWeight:FontWeight.bold))]),
         ]))),
@@ -381,7 +393,7 @@ void editShiftDialog({ShiftDef? oldDef}){
     TextField(controller:codeCtrl,decoration:const InputDecoration(labelText:'代號')),TextField(controller:labelCtrl,decoration:const InputDecoration(labelText:'名稱')),
     Row(children:[Expanded(child:TextField(controller:startCtrl,decoration:const InputDecoration(labelText:'開始 HH:mm'))),const SizedBox(width:8),Expanded(child:TextField(controller:endCtrl,decoration:const InputDecoration(labelText:'結束 HH:mm')))]),
     Row(children:[Expanded(child:TextField(controller:hoursCtrl,decoration:const InputDecoration(labelText:'工時'))),Expanded(child:TextField(controller:otCtrl,decoration:const InputDecoration(labelText:'OT')))]),
-    TextField(controller:allowCtrl,decoration:const InputDecoration(labelText:'津貼')),
+    TextField(controller:allowCtrl,decoration:const InputDecoration(labelText:'津貼 (班次內置)')),
     const SizedBox(height:12), const Text('自定班次顏色',style:TextStyle(fontWeight:FontWeight.bold)), const SizedBox(height:8),
     Wrap(spacing:8,runSpacing:8,children:palette.map((c)=>GestureDetector(onTap:()=>setS(()=>picked=c),child:Container(width:36,height:36,decoration:BoxDecoration(color:c,shape:BoxShape.circle,border:picked==c?Border.all(width:3,color:Colors.black):null),child:picked==c?const Icon(Icons.check,color:Colors.white,size:18):null))).toList()),
   ])),actions:[TextButton(onPressed:()=>Navigator.pop(ctx2),child:const Text('取消')),FilledButton(onPressed:(){
@@ -394,28 +406,18 @@ void editShiftDialog({ShiftDef? oldDef}){
   },child:const Text('儲存'))]); }); });
 }
 
+// 3. 設定：班次與額外津貼完全獨立
 Widget settingsTab(){
   var stdCtrl=TextEditingController(text:standardWeeklyHours.toString()); var carryCtrl=TextEditingController(text:carry.toString()); var otRateCtrl=TextEditingController(text:overtimeRate.toString());
   List<MapEntry<String,ShiftDef>> shiftList=defs.entries.toList();
   List<MapEntry<String,ShiftDef>> shiftShow=showAllShift? shiftList : shiftList.take(5).toList();
-  List<MapEntry<String,ShiftDef>> shiftAllowShow=showAllShiftAllow? shiftList : shiftList.take(5).toList();
   List<ExtraAllowance> allowShow=showAllExtra? extraAllowances : extraAllowances.take(5).toList();
   return SafeArea(child:ListView(padding:const EdgeInsets.all(16),children:[
-    const Text('自定班次內容編輯和刪除 (獨立)',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
+    const Text('自定班次 (獨立，唔會自動產生額外津貼)',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
     Card(child:Column(children:[
-     ...shiftShow.map((e){ var d=e.value; return ListTile(leading:CircleAvatar(backgroundColor:d.color,child:Text(d.code,style:const TextStyle(color:Colors.white,fontSize:10))),title:Text('${d.code} - ${d.label} ${d.start}-${d.end}'),subtitle:Text('${d.hours.toStringAsFixed(1)}h | ${d.detailTime}'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[IconButton(icon:const Icon(Icons.edit),onPressed:()=>editShiftDialog(oldDef:d)),IconButton(icon:const Icon(Icons.delete),onPressed:(){ setState(()=>defs.remove(e.key)); save(); })])); }),
+    ...shiftShow.map((e){ var d=e.value; return ListTile(leading:CircleAvatar(backgroundColor:d.color,child:Text(d.code,style:const TextStyle(color:Colors.white,fontSize:10))),title:Text('${d.code} - ${d.label} ${d.start}-${d.end}'),subtitle:Text('${d.hours.toStringAsFixed(1)}h 津貼\$${d.allowance} | ${d.detailTime}'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[IconButton(icon:const Icon(Icons.edit),onPressed:()=>editShiftDialog(oldDef:d)),IconButton(icon:const Icon(Icons.delete),onPressed:(){ setState(()=>defs.remove(e.key)); save(); })])); }),
       if(shiftList.length>5) TextButton(onPressed:(){ setState(()=>showAllShift=!showAllShift); },child:Text(showAllShift?'收起':'顯示全部 ${shiftList.length}項')),
-      ListTile(leading:const Icon(Icons.add),title:const Text('新增班次'),onTap:()=>editShiftDialog()),
-    ])),
-    const SizedBox(height:16),
-    const Text('班次內置津貼 (預設，跟隨班次) - 報表已計算',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
-    Card(child:Column(children:[
-     ...shiftAllowShow.map((e){ var d=e.value; return Padding(padding:const EdgeInsets.fromLTRB(12,6,4,6),child:Row(children:[
-        SizedBox(width:50,child:Text(d.code,style:const TextStyle(fontWeight:FontWeight.bold))), Expanded(child:Text(d.label)),
-        SizedBox(width:90,child:TextFormField(initialValue:d.allowance.toString(),decoration:InputDecoration(labelText:'\$',border:OutlineInputBorder(borderRadius:BorderRadius.circular(8)),isDense:true),keyboardType:TextInputType.number,onFieldSubmitted:(v){ double? val=double.tryParse(v); if(val!=null){ setState(()=>d.allowance=val); save(); } })),
-        IconButton(icon:const Icon(Icons.edit,size:18),onPressed:()=>editShiftDialog(oldDef:d)),
-      ])); }),
-      if(shiftList.length>5) TextButton(onPressed:(){ setState(()=>showAllShiftAllow=!showAllShiftAllow); },child:Text(showAllShiftAllow?'收起':'顯示全部 ${shiftList.length}項')),
+      ListTile(leading:const Icon(Icons.add),title:const Text('新增班次 (獨立)'),onTap:()=>editShiftDialog()),
     ])),
     const SizedBox(height:16),
     const Text('標準工時 & 承上 & 超時金額 (預設42h)',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
@@ -425,17 +427,9 @@ Widget settingsTab(){
       const SizedBox(height:10), SizedBox(width:double.infinity,child:FilledButton(onPressed:(){ double? v1=double.tryParse(stdCtrl.text); double? v2=double.tryParse(carryCtrl.text); double? v3=double.tryParse(otRateCtrl.text); if(v1!=null) standardWeeklyHours=v1; if(v2!=null) carry=v2; if(v3!=null) overtimeRate=v3; setState((){}); save(); },child:const Text('保存設定'))),
     ]))),
     const SizedBox(height:16),
-    const Text('Google日曆同步',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
-    Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
-      SwitchListTile(title:const Text('啟用 Google日曆同步'),subtitle:Text(googleSyncEnabled?'已授權':'未授權'),value:googleSyncEnabled,onChanged:(v){ if(v){ _requestGooglePerm(); }else{ setState(()=>googleSyncEnabled=false); save(); } }),
-      SwitchListTile(title:const Text('資料更新時自動同步'),value:autoSync,onChanged:googleSyncEnabled? (v){ setState(()=>autoSync=v); save(); }:null),
-      Row(children:[Expanded(child:OutlinedButton.icon(onPressed:googleSyncEnabled? _syncToGoogle:null,icon:const Icon(Icons.sync),label:const Text('手動同步'))),const SizedBox(width:8),Expanded(child:OutlinedButton.icon(onPressed:googleSyncEnabled? (){ setState(()=>googleSyncEnabled=false); save(); }:null,icon:const Icon(Icons.link_off),label:const Text('取消授權')))]),
-    ]))),
-    const SizedBox(height:16), const Text('日曆文字大小',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
-    Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[Row(children:[const Text('小'),Expanded(child:Slider(value:calendarFontSize,min:8,max:20,divisions:12,onChanged:(v){ setState(()=>calendarFontSize=v); })),const Text('大')]), FilledButton.tonal(onPressed:(){ save(); },child:const Text('保存文字大小'))]))),
-    const SizedBox(height:16), const Text('額外津貼 (獨立於班次) 可編輯名稱/金額/時間',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
+    const Text('額外津貼 (獨立於班次)',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
     Card(child:Column(children:[
-     ...allowShow.asMap().entries.map((en){ int idx=showAllExtra? en.key : extraAllowances.indexOf(en.value); var e=en.value; return ListTile(title:Text(e.name),subtitle:Text('\$${e.amount} 生效 ${e.time}'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[
+    ...allowShow.asMap().entries.map((en){ int idx=showAllExtra? en.key : extraAllowances.indexOf(en.value); var e=en.value; return ListTile(title:Text(e.name),subtitle:Text('\$${e.amount} 生效 ${e.time}'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[
         IconButton(icon:const Icon(Icons.edit,size:18),onPressed:(){
           var nCtrl=TextEditingController(text:e.name); var vCtrl=TextEditingController(text:e.amount.toString()); var tCtrl=TextEditingController(text:e.time);
           showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('編輯額外津貼'),content:Column(mainAxisSize:MainAxisSize.min,children:[
