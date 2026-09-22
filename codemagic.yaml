@@ -7,24 +7,22 @@ workflows:
       flutter: 3.22.2
       java: 17
     scripts:
-      - name: Force delete old android + recreate with calendar permission
+      - name: 1. Force delete old android + recreate
         script: |
           set -e
-          echo "=== 手機版自動刪舊 android ==="
+          echo "=== 刪舊 android 重新建立 ==="
           git rm -rf --cached android || true
           rm -rf android
           rm -f pubspec.lock
           flutter create --platforms=android --project-name roster_pro --org com.example .
-
+      - name: 2. Inject Calendar Permission + Real Google Calendar Reader
+        script: |
+          set -e
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          echo "=== 注入日曆權限到 $MANIFEST ==="
-
-          # 清掉舊嘅避免重複
+          echo "=== 注入權限到 $MANIFEST ==="
           sed -i.bak '/READ_CALENDAR/d' "$MANIFEST" || true
           sed -i.bak '/WRITE_CALENDAR/d' "$MANIFEST" || true
           sed -i.bak '/READ_MEDIA_IMAGES/d' "$MANIFEST" || true
-
-          # 喺 <application 前插入3個權限 (兼容 mac_mini_m2)
           awk '
             /<application/ {
               print "    <uses-permission android:name=\"android.permission.READ_CALENDAR\" />"
@@ -34,16 +32,48 @@ workflows:
             }
             {print}
           ' "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
-
-          echo "=== 最終 AndroidManifest.xml ==="
-          cat "$MANIFEST"
-
+          echo "=== 注入 MainActivity.kt 真實日曆讀取 ==="
+          mkdir -p android/app/src/main/kotlin/com/example/roster_pro
+          cat > android/app/src/main/kotlin/com/example/roster_pro/MainActivity.kt << 'EOF'
+          package com.example.roster_pro
+          import android.content.ContentResolver
+          import android.database.Cursor
+          import android.provider.CalendarContract
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+          class MainActivity: FlutterActivity() {
+              private val CHANNEL = "com.roster/calendar_real"
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+                      if (call.method == "getCalendars") {
+                          try {
+                              val cr: ContentResolver = contentResolver
+                              val uri = CalendarContract.Calendars.CONTENT_URI
+                              val projection = arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.CALENDAR_DISPLAY_NAME, CalendarContract.Calendars.ACCOUNT_NAME, CalendarContract.Calendars.ACCOUNT_TYPE, CalendarContract.Calendars.OWNER_ACCOUNT, CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
+                              val cur: Cursor? = cr.query(uri, projection, null, null, null)
+                              val list = mutableListOf<Map<String, Any?>>()
+                              if (cur != null) {
+                                  while (cur.moveToNext()) {
+                                      val id = cur.getLong(0); val displayName = cur.getString(1) ?: ""; val accName = cur.getString(2) ?: ""; val accType = cur.getString(3) ?: ""; val owner = cur.getString(4) ?: ""; val access = cur.getInt(5)
+                                      list.add(mapOf("id" to id.toString(), "displayName" to displayName, "accountName" to accName, "accountType" to accType, "owner" to owner, "access" to access, "isGoogle" to (accType == "com.google" || accName.contains("@gmail.com"))))
+                                  }
+                                  cur.close()
+                              }
+                              result.success(list)
+                          } catch (e: Exception) { result.error("ERR", e.message, null) }
+                      } else { result.notImplemented() }
+                  }
+              }
+          }
+          EOF
+          echo "=== 最終檢查 ==="
+          cat "$MANIFEST" | grep -A2 -B2 CALENDAR
+          cat android/app/src/main/kotlin/com/example/roster_pro/MainActivity.kt
           flutter clean
           flutter pub get
-          ls android/gradle/wrapper/
-
-      - name: Build APK
+      - name: 3. Build APK
         script: flutter build apk --release --no-tree-shake-icons
-
     artifacts:
       - build/**/outputs/**/*.apk
