@@ -88,23 +88,18 @@ Future<void> save() async{
 int isoWeek(DateTime date){ DateTime thursday=date.add(Duration(days:4-date.weekday)); DateTime jan1=DateTime(thursday.year,1,1); int days=thursday.difference(jan1).inDays; return 1+(days/7).floor(); }
 void quickJumpMonth({bool forReport=false}){ int y=focused.year; int m=focused.month; showDialog(context:context,builder:(ctx){ return StatefulBuilder(builder:(ctx2,setD){ return AlertDialog(title:Text(forReport?'選擇報表年月':'快速查找年月'),content:Column(mainAxisSize:MainAxisSize.min,children:[Row(children:[IconButton(icon:const Icon(Icons.remove),onPressed:()=>setD(()=>y--)),Expanded(child:Text('$y年',textAlign:TextAlign.center,style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold))),IconButton(icon:const Icon(Icons.add),onPressed:()=>setD(()=>y++))]),Wrap(spacing:8,children:List.generate(12,(i){ int mon=i+1; return ChoiceChip(label:Text('${mon}月'),selected:mon==m,onSelected:(_)=>setD(()=>m=mon)); }))]),actions:[TextButton(onPressed:()=>Navigator.pop(ctx2),child:const Text('取消')),FilledButton(onPressed:(){ setState(()=>focused=DateTime(y,m,1)); Navigator.pop(ctx2); },child:const Text('跳轉'))]); }); }); }
 
-// ===== 核心修復：讀寫手機Google日曆權限 =====
+// ===== 核心修復：只用 calendar + calendarFullAccess =====
 Future<bool> _handleCalendarPermission() async {
-  // 1. 用 permission_handler 同時申請 READ/WRITE/FULL
   PermissionStatus statusCalendar = PermissionStatus.denied;
   PermissionStatus statusFull = PermissionStatus.denied;
-  PermissionStatus statusWrite = PermissionStatus.denied;
   try { statusCalendar = await Permission.calendar.status; } catch(_) {}
   try { statusFull = await Permission.calendarFullAccess.status; } catch(_) {}
-  try { statusWrite = await Permission.calendarWrite.status; } catch(_) {}
 
   if (!statusCalendar.isGranted) { try { statusCalendar = await Permission.calendar.request(); } catch(_) {} }
-  if (!statusWrite.isGranted) { try { statusWrite = await Permission.calendarWrite.request(); } catch(_) {} }
   if (!statusFull.isGranted) { try { statusFull = await Permission.calendarFullAccess.request(); } catch(_) {} }
 
-  bool phGranted = statusCalendar.isGranted || statusFull.isGranted || statusWrite.isGranted;
+  bool phGranted = statusCalendar.isGranted || statusFull.isGranted;
 
-  // 2. 再用 device_calendar 再申請一次，確保 content provider 權限
   var devHas = await _calendarPlugin.hasPermissions();
   if (devHas.isSuccess && devHas.data==true) return true;
   var devReq = await _calendarPlugin.requestPermissions();
@@ -112,8 +107,7 @@ Future<bool> _handleCalendarPermission() async {
 
   if (phGranted) return true;
 
-  // 3. 永久拒絕 -> 帶去設定
-  if (statusCalendar.isPermanentlyDenied || statusFull.isPermanentlyDenied || statusWrite.isPermanentlyDenied) {
+  if (statusCalendar.isPermanentlyDenied || statusFull.isPermanentlyDenied) {
     if (mounted) {
       bool? go = await showDialog<bool>(context: context, builder: (ctx)=>AlertDialog(
         title: const Text('需要手動開啟日曆權限'),
