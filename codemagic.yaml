@@ -7,7 +7,7 @@ workflows:
       flutter: 3.22.2
       java: 17
     scripts:
-      - name: Force delete old android on phone
+      - name: Force delete old android + recreate with calendar permission
         script: |
           set -e
           echo "=== 手機版自動刪舊 android ==="
@@ -15,10 +15,35 @@ workflows:
           rm -rf android
           rm -f pubspec.lock
           flutter create --platforms=android --project-name roster_pro --org com.example .
+
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          echo "=== 注入日曆權限到 $MANIFEST ==="
+
+          # 清掉舊嘅避免重複
+          sed -i.bak '/READ_CALENDAR/d' "$MANIFEST" || true
+          sed -i.bak '/WRITE_CALENDAR/d' "$MANIFEST" || true
+          sed -i.bak '/READ_MEDIA_IMAGES/d' "$MANIFEST" || true
+
+          # 喺 <application 前插入3個權限 (兼容 mac_mini_m2)
+          awk '
+            /<application/ {
+              print "    <uses-permission android:name=\"android.permission.READ_CALENDAR\" />"
+              print "    <uses-permission android:name=\"android.permission.WRITE_CALENDAR\" />"
+              print "    <uses-permission android:name=\"android.permission.READ_MEDIA_IMAGES\" />"
+              print ""
+            }
+            {print}
+          ' "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
+
+          echo "=== 最終 AndroidManifest.xml ==="
+          cat "$MANIFEST"
+
           flutter clean
           flutter pub get
           ls android/gradle/wrapper/
+
       - name: Build APK
         script: flutter build apk --release --no-tree-shake-icons
+
     artifacts:
       - build/**/outputs/**/*.apk
