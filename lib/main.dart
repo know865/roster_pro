@@ -9,6 +9,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:device_calendar/device_calendar.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzData;
+import 'package:permission_handler/permission_handler.dart';
 
 void main() { tzData.initializeTimeZones(); runApp(const RosterApp()); }
 
@@ -21,7 +22,7 @@ class ShiftDef {
 }
 class ExtraAllowance { String name; double amount; ExtraAllowance(this.name,this.amount); Map<String,dynamic> toJson()=>{'name':name,'amount':amount}; factory ExtraAllowance.fromJson(Map<String,dynamic> j)=>ExtraAllowance(j['name'],(j['amount'] as num).toDouble()); }
 class SavedPattern { String name; List<List<String>> data; SavedPattern(this.name,this.data); Map<String,dynamic> toJson()=>{'name':name,'data':data}; factory SavedPattern.fromJson(Map<String,dynamic> j)=>SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r)=>(r as List).map<String>((e)=>e.toString()).toList()).toList()); }
-class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v6.49',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
+class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v6.50',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
 
 class MainPage extends StatefulWidget { const MainPage({super.key}); @override State<MainPage> createState()=>MainPageState(); }
 class MainPageState extends State<MainPage> {
@@ -87,14 +88,45 @@ Future<void> save() async{
 int isoWeek(DateTime date){ DateTime thursday=date.add(Duration(days:4-date.weekday)); DateTime jan1=DateTime(thursday.year,1,1); int days=thursday.difference(jan1).inDays; return 1+(days/7).floor(); }
 void quickJumpMonth({bool forReport=false}){ int y=focused.year; int m=focused.month; showDialog(context:context,builder:(ctx){ return StatefulBuilder(builder:(ctx2,setD){ return AlertDialog(title:Text(forReport?'選擇報表年月':'快速查找年月'),content:Column(mainAxisSize:MainAxisSize.min,children:[Row(children:[IconButton(icon:const Icon(Icons.remove),onPressed:()=>setD(()=>y--)),Expanded(child:Text('$y年',textAlign:TextAlign.center,style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold))),IconButton(icon:const Icon(Icons.add),onPressed:()=>setD(()=>y++))]),Wrap(spacing:8,children:List.generate(12,(i){ int mon=i+1; return ChoiceChip(label:Text('${mon}月'),selected:mon==m,onSelected:(_)=>setD(()=>m=mon)); }))]),actions:[TextButton(onPressed:()=>Navigator.pop(ctx2),child:const Text('取消')),FilledButton(onPressed:(){ setState(()=>focused=DateTime(y,m,1)); Navigator.pop(ctx2); },child:const Text('跳轉'))]); }); }); }
 
-Future<void> _requestGooglePerm() async{
-  var perm=await _calendarPlugin.hasPermissions();
-  if(perm.isSuccess==false || (perm.data==false)){
-    var req=await _calendarPlugin.requestPermissions();
-    if(req.isSuccess==false || req.data==false){ if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('需要日曆權限'))); return; }
+// === 1. 修復日曆權限 ===
+Future<bool> _handleCalendarPermission() async {
+  var status = await Permission.calendarFullAccess.status;
+  if(status.isGranted) return true;
+  // Android 13 以下用 calendar
+  if(!status.isGranted){
+    var s1 = await Permission.calendarFullAccess.request();
+    if(s1.isGranted) return true;
+    if(s1.isPermanentlyDenied){
+      if(mounted){
+        bool? go = await showDialog<bool>(context: context, builder: (ctx)=>AlertDialog(
+          title: const Text('需要日曆權限'),
+          content: const Text('你之前拒絕了日曆權限，請到 系統設定 → 應用程式 → Roster Pro → 權限 → 日曆 → 允許，才能啟用同步'),
+          actions: [TextButton(onPressed: ()=>Navigator.pop(ctx,false), child: const Text('取消')), FilledButton(onPressed: ()=>Navigator.pop(ctx,true), child: const Text('前往設定'))]
+        ));
+        if(go==true) await openAppSettings();
+      }
+      return false;
+    }
   }
-  bool? ok=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(title:const Text('Google日曆同步'),content:Text('將直接寫入手機日曆，獨立日曆名：\n$customName\n\n只同步：班次代碼+時間+記事'),actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('取消')),FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('授權並建立'))]));
+  // fallback 試 device_calendar 權限
+  var perm = await _calendarPlugin.hasPermissions();
+  if(perm.data==false){
+    var req = await _calendarPlugin.requestPermissions();
+    if(req.data==true) return true;
+  }
+  return false;
+}
+
+Future<void> _requestGooglePerm() async{
+  bool granted = await _handleCalendarPermission();
+  if(!granted){
+    if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('未授權日曆，無法啟用')));
+    setState(()=>googleSyncEnabled=false);
+    return;
+  }
+  bool? ok=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(title:const Text('Google日曆同步'),content:Text('已取得日曆權限，將建立獨立日曆：\n$customName\n\n只同步：代碼+時間+記事'),actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('取消')),FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('建立並同步'))]));
   if(ok==true){ setState(()=>googleSyncEnabled=true); await _ensureCalendar(); await _syncToGoogle(); save(); }
+  else { setState(()=>googleSyncEnabled=false); }
 }
 Future<void> _ensureCalendar() async{
   var calsResult=await _calendarPlugin.retrieveCalendars(); var cals=calsResult.data??[];
@@ -109,6 +141,8 @@ Future<void> _ensureCalendar() async{
 }
 Future<void> _syncToGoogle({bool silent=false}) async{
   if(!googleSyncEnabled) return;
+  bool hasPerm = await _handleCalendarPermission();
+  if(!hasPerm){ if(!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('需要日曆權限'))); return; }
   try{
     if(_rosterCalendarId==null) await _ensureCalendar(); if(_rosterCalendarId==null) throw '未找到日曆';
     var existingEvents=await _calendarPlugin.retrieveEvents(_rosterCalendarId!, RetrieveEventsParams(startDate: DateTime(2023), endDate: DateTime(2030)));
@@ -132,7 +166,7 @@ Future<void> _syncToGoogle({bool silent=false}) async{
       var ev=Event(_rosterCalendarId!, title:title, description:desc, start:tz.TZDateTime.from(startDt, tz.local), end:tz.TZDateTime.from(endDt, tz.local));
       await _calendarPlugin.createOrUpdateEvent(ev);
     }
-    if(!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已寫入 [$customName] ${roster.length}項 (代碼+時間+記事)')));
+    if(!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已寫入 [$customName] ${roster.length}項')));
   }catch(e){ if(!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('同步失敗 $e'))); }
 }
 
@@ -203,7 +237,18 @@ Widget settingsTab(){
     const SizedBox(height:16), const Text('公眾假期地區選擇 (顯示假期名)',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
     Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[DropdownButtonFormField<String>(value:holidayRegion,decoration:const InputDecoration(labelText:'地區',border:OutlineInputBorder()),items:['無','香港','中國內地','台灣','美國'].map((r)=>DropdownMenuItem(value:r,child:Text(r))).toList(),onChanged:(v){ setState(()=>holidayRegion=v!); save(); }),const SizedBox(height:8), const Row(children:[Icon(Icons.circle,color:Colors.red,size:10),SizedBox(width:4),Text('紅點=假期 會顯示名稱'),SizedBox(width:12),Icon(Icons.circle,color:Colors.blue,size:10),SizedBox(width:4),Text('藍點=記事')]),]))),
     const SizedBox(height:16), Text('Google日曆同步 (手動+自動) - 直接寫入 [$customName] 只同步代碼+時間+記事',style:const TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
-    Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[SwitchListTile(title:const Text('啟用 Google日曆同步'),subtitle:Text(googleSyncEnabled?'已授權 直接寫入手機日曆':'未授權'),value:googleSyncEnabled,onChanged:(v){ if(v){ _requestGooglePerm(); }else{ setState(()=>googleSyncEnabled=false); save(); } }),SwitchListTile(title:const Text('資料更新時自動同步'),subtitle:const Text('只同步代碼+時間+記事'),value:autoSync,onChanged:googleSyncEnabled? (v){ setState(()=>autoSync=v); save(); }:null),Row(children:[Expanded(child:OutlinedButton.icon(onPressed:googleSyncEnabled? ()=>_syncToGoogle():null,icon:const Icon(Icons.sync),label:const Text('手動同步直接寫入'))),const SizedBox(width:8),Expanded(child:OutlinedButton.icon(onPressed:googleSyncEnabled? (){ setState(()=>googleSyncEnabled=false); save(); }:null,icon:const Icon(Icons.link_off),label:const Text('取消授權')))]),]))),
+    Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
+      SwitchListTile(title:const Text('啟用 Google日曆同步'),subtitle:Text(googleSyncEnabled?'已授權 直接寫入手機日曆':'未授權 - 點此直接授權'),value:googleSyncEnabled,onChanged:(v) async {
+        if(v){ await _requestGooglePerm(); }else{ setState(()=>googleSyncEnabled=false); save(); }
+      }),
+      SwitchListTile(title:const Text('資料更新時自動同步'),subtitle:const Text('只同步代碼+時間+記事'),value:autoSync,onChanged:googleSyncEnabled? (v){ setState(()=>autoSync=v); save(); }:null),
+      Row(children:[Expanded(child:OutlinedButton.icon(onPressed:googleSyncEnabled? ()=>_syncToGoogle():null,icon:const Icon(Icons.sync),label:const Text('手動同步直接寫入'))),const SizedBox(width:8),Expanded(child:OutlinedButton.icon(onPressed:(){ setState(()=>googleSyncEnabled=false); save(); },icon:const Icon(Icons.link_off),label:const Text('取消授權')))]),
+      const SizedBox(height:8),
+      FilledButton.icon(icon:const Icon(Icons.security), label:const Text('直接取得日曆權限 (如果開關無反應)'), onPressed: () async {
+        bool ok = await _handleCalendarPermission();
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(ok?'已取得日曆權限，請再開同步開關':'仍未授權')));
+      }),
+    ]))),
     const SizedBox(height:16), const Text('標準工時 & 承上 & 超時金額 (預設42h)',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
     Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[Row(children:[Expanded(child:TextField(controller:stdCtrl,decoration:const InputDecoration(labelText:'標準工時',suffixText:'h/週',border:OutlineInputBorder()))),const SizedBox(width:8),Expanded(child:TextField(controller:carryCtrl,decoration:const InputDecoration(labelText:'承上餘額',border:OutlineInputBorder())))]),const SizedBox(height:10), TextField(controller:otRateCtrl,decoration:const InputDecoration(labelText:'超時金額 /h',prefixText:'\$ ',border:OutlineInputBorder())),const SizedBox(height:10), SizedBox(width:double.infinity,child:FilledButton(onPressed:(){ double? v1=double.tryParse(stdCtrl.text); double? v2=double.tryParse(carryCtrl.text); double? v3=double.tryParse(otRateCtrl.text); if(v1!=null) standardWeeklyHours=v1; if(v2!=null) carry=v2; if(v3!=null) overtimeRate=v3; setState((){}); save(); },child:const Text('保存設定'))),]))),
     const SizedBox(height:16), const Text('日曆文字大小',style:TextStyle(fontSize:16,fontWeight:FontWeight.bold)),
