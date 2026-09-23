@@ -1,75 +1,20 @@
 workflows:
   Default Workflow:
-    name: RosterPro v9.5 FINAL FIX
-    max_build_duration: 60
+    name: RosterPro FINAL WORKING
     instance_type: mac_mini_m2
     environment:
       flutter: 3.22.2
       java: 17
     scripts:
-      - name: 1. Recreate Android
+      - name: Fix project
         script: |
-          set -e
           rm -rf test
-          git rm -rf --cached android --ignore-unmatch || true
-          rm -rf android ~/.gradle/caches || true
-          rm -f pubspec.lock || true
-          flutter config --no-analytics || true
-          flutter create. --platforms=android --project-name roster_pro --org com.example --no-pub
+          flutter config --no-analytics
+          flutter create . --platforms=android --project-name roster_pro --org com.example --no-pub
           flutter pub get
-
-      - name: 2. Overwrite main.dart
-        script: |
-          cat > lib/main.dart << 'DART'
-          import 'dart:convert';
-          import 'package:flutter/material.dart';
-          import 'package:intl/intl.dart';
-          import 'package:shared_preferences/shared_preferences.dart';
-          import 'package:device_calendar/device_calendar.dart';
-          import 'package:timezone/timezone.dart' as tz;
-          import 'package:timezone/data/latest.dart' as tz_data;
-          import 'package:permission_handler/permission_handler.dart';
-          import 'package:home_widget/home_widget.dart';
-          void main(){tz_data.initializeTimeZones();runApp(const RosterApp());}
-          class ShiftDef{String code;String label;double hours;Color color;String start;String end;bool hasAllowance;double allowance;bool isAllDay;ShiftDef(this.code,this.label,this.hours,this.color,{this.start='07:00',this.end='15:30',this.hasAllowance=false,this.allowance=0,this.isAllDay=false});Map<String,dynamic> toJson()=>{'code':code,'label':label,'hours':hours,'color':color.value,'start':start,'end':end,'hasAllowance':hasAllowance,'allowance':allowance,'isAllDay':isAllDay};factory ShiftDef.fromJson(Map<String,dynamic> j)=>ShiftDef(j['code'],j['label']??j['code'],(j['hours']??8).toDouble(),Color(j['color']??0xFFFF9800),start:j['start']??'07:00',end:j['end']??'15:30',hasAllowance:j['hasAllowance']??false,allowance:(j['allowance']??0).toDouble(),isAllDay:j['isAllDay']??false);}
-          class RosterApp extends StatelessWidget{const RosterApp({super.key});@override Widget build(BuildContext context){return MaterialApp(title:'Roster Pro',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage());}}
-          class MainPage extends StatefulWidget{const MainPage({super.key});@override State<MainPage> createState()=>MainPageState();}
-          class MainPageState extends State<MainPage>{int tab=0;DateTime focused=DateTime.now();DateTime selectedDay=DateTime.now();Map<String,String> roster={};Map<String,ShiftDef> defs={'早':ShiftDef('早','早更',8,Colors.orange,start:'07:00',end:'15:30',hasAllowance:true,allowance:80),'中':ShiftDef('中','中更',8,Colors.blue),'宵':ShiftDef('宵','宵更',8,Colors.purple),'O':ShiftDef('O','休',0,Colors.green,isAllDay:true),};final DeviceCalendarPlugin _cal=DeviceCalendarPlugin();String? _calId;bool _syncing=false;bool googleSync=false;
-          Future<void> _pickCal() async{await Permission.calendarFullAccess.request();await Permission.calendar.request();var cals=(await _cal.retrieveCalendars()).data??[];var writable=cals.where((c)=>c.isReadOnly==false).toList();Calendar? p=await showDialog<Calendar>(context:context,builder:(ctx)=>AlertDialog(title:Text('選日曆(${writable.length})'),content:SizedBox(height:300,width:300,child:ListView(children:writable.map((c)=>ListTile(title:Text(c.name??''),subtitle:Text(c.accountName??''),onTap:()=>Navigator.pop(ctx,c))).toList())),));if(p!=null){_calId=p.id;setState(()=>googleSync=true);}}
-          Widget calTab(){DateTime first=DateTime(focused.year,focused.month,1);DateTime s=first.subtract(Duration(days:first.weekday-1));int weeks=6;List<DateTime> days=List.generate(weeks*7,(i)=>s.add(Duration(days:i)));String sel=DateFormat('yyyy-MM-dd').format(selectedDay);return Column(children:[Row(children:[IconButton(icon:const Icon(Icons.chevron_left),onPressed:(){setState(()=>focused=DateTime(focused.year,focused.month-1,1));}),Text('${focused.year}-${focused.month}',style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold)),IconButton(icon:const Icon(Icons.chevron_right),onPressed:(){setState(()=>focused=DateTime(focused.year,focused.month+1,1));})]),Expanded(child:GridView.builder(padding:const EdgeInsets.all(4),gridDelegate:const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount:7,childAspectRatio:0.9),itemCount:weeks*7,itemBuilder:(ctx,i){DateTime d=days[i];String k=DateFormat('yyyy-MM-dd').format(d);String? code=roster[k];bool inM=d.month==focused.month;return GestureDetector(onTap:(){setState(()=>selectedDay=d);showModalBottomSheet(context:context,builder:(ctx)=>Wrap(children:defs.keys.map((c)=>ListTile(title:Text(c),onTap:(){setState(()=>roster[k]=c);Navigator.pop(ctx);})).toList()));},child:Container(margin:const EdgeInsets.all(2),decoration:BoxDecoration(color:!inM?Colors.grey[200]:code!=null?defs[code]!.color.withOpacity(0.3):Colors.orange[50],borderRadius:BorderRadius.circular(8),border:k==sel?Border.all(color:Colors.deepPurple,width:2):null),child:Column(children:[Text('${d.day}'),if(code!=null)Text(code,style:const TextStyle(fontSize:10))])));} )) ]);}
-          @override Widget build(BuildContext context){return Scaffold(body:[calTab(),const Center(child:Text('模式')),const Center(child:Text('報表')),ListView(children:[SwitchListTile(title:const Text('同步日曆'),value:googleSync,onChanged:(v) async {if(v){await _pickCal();} else {setState(()=>googleSync=false);}})])][tab],bottomNavigationBar:NavigationBar(selectedIndex:tab,onDestinationSelected:(i)=>setState(()=>tab=i),destinations:const[NavigationDestination(icon:Icon(Icons.calendar_month),label:'月曆'),NavigationDestination(icon:Icon(Icons.pattern),label:'模式'),NavigationDestination(icon:Icon(Icons.bar_chart),label:'報表'),NavigationDestination(icon:Icon(Icons.settings),label:'設定')]));}
-          }
-          DART
-
-      - name: 3. Patch and Widget
-        script: |
-          set -e
-          mkdir -p android/app/src/main/res/layout android/app/src/main/res/xml android/app/src/main/kotlin/com/example/roster_pro
-          echo '<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="match_parent"><TextView android:id="@+id/widget_month" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Roster"/></LinearLayout>' > android/app/src/main/res/layout/roster_widget_layout.xml
-          echo '<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android" android:minWidth="180dp" android:minHeight="180dp" android:updatePeriodMillis="3600000" android:initialLayout="@layout/roster_widget_layout"/>' > android/app/src/main/res/xml/roster_widget_info.xml
-          cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt << 'EOF'
-          package com.example.roster_pro
-          import android.appwidget.AppWidgetProvider
-          class RosterWidgetProvider : AppWidgetProvider()
-          EOF
-          cat > android/app/src/main/kotlin/com/example/roster_pro/MainActivity.kt << 'EOF'
-          package com.example.roster_pro
-          import io.flutter.embedding.android.FlutterActivity
-          class MainActivity: FlutterActivity()
-          EOF
-          python3 << 'PY'
-          import re, pathlib
-          p=pathlib.Path("android/app/src/main/AndroidManifest.xml").read_text()
-          p=re.sub(r'<uses-permission[^>]*CALENDAR[^>]*/?>',"",p)
-          p=p.replace("<application",'<uses-permission android:name="android.permission.READ_CALENDAR" />\n<uses-permission android:name="android.permission.WRITE_CALENDAR" />\n<application',1)
-          pathlib.Path("android/app/src/main/AndroidManifest.xml").write_text(p)
-          PY
-          flutter clean; flutter pub get
-
-      - name: 4. Build APK
-        script: |
           flutter analyze || true
+      - name: Build APK
+        script: |
           flutter build apk --release --no-tree-shake-icons
-
     artifacts:
       - build/**/outputs/**/*.apk
