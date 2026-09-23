@@ -1,11 +1,7 @@
 import 'dart:convert';
-import 'dart:io';
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:device_calendar/device_calendar.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzData;
@@ -22,7 +18,7 @@ class ShiftDef {
   String get detailTime=>isAllDay?'全天 ${hours.toStringAsFixed(1)}h':'$start-$end ${hours.toStringAsFixed(1)}h';
 }
 class SavedPattern { String name; List<List<String>> data; SavedPattern(this.name,this.data); Map<String,dynamic> toJson()=>{'name':name,'data':data}; factory SavedPattern.fromJson(Map<String,dynamic> j)=>SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r)=>(r as List).map<String>((e)=>e.toString()).toList()).toList()); }
-class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v7.7',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
+class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v8.8',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
 
 class MainPage extends StatefulWidget { const MainPage({super.key}); @override State<MainPage> createState()=>MainPageState(); }
 class MainPageState extends State<MainPage> {
@@ -233,7 +229,6 @@ FilledButton(onPressed: ()=>Navigator.pop(ctx2), child:const Text('完成')),
 });
 }
 
-// === 已修復 310 行括號 ===
 void editShiftDialog({ShiftDef? oldDef}){
   var codeCtrl=TextEditingController(text:oldDef?.code??'');
   var labelCtrl=TextEditingController(text:oldDef?.label??'');
@@ -263,14 +258,14 @@ void editShiftDialog({ShiftDef? oldDef}){
               decoration:BoxDecoration(border:Border.all(color:Colors.greenAccent,width:2),borderRadius:BorderRadius.circular(12)),
               child:Column(children:[
                 Row(children:[
-                  Checkbox(value:isAllDay,onChanged:(v){ setS(()=>isAllDay=v??false); }),
+                  Checkbox(value:isAllDay,onChanged:(v){ setS(() { isAllDay=v??false; }); }),
                   const Text('全天'),
                 ]),
                 SizedBox(height:56,child:TextField(controller:hoursCtrl,decoration:const InputDecoration(labelText:'工時',border:OutlineInputBorder(),isDense:true))),
               ]),
             ),
             Row(children:[
-              Checkbox(value:hasAllow,onChanged:(v){ setS(()=>hasAllow=v??false); }),
+              Checkbox(value:hasAllow,onChanged:(v){ setS(() { hasAllow=v??false; }); }),
               const Text('有津貼核實'),
             ]),
             if(hasAllow) TextField(controller:allowCtrl,decoration:const InputDecoration(labelText:'津貼金額',border:OutlineInputBorder(),isDense:true)),
