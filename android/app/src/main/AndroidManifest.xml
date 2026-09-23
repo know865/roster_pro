@@ -1,1 +1,14 @@
 
+<receiver
+    android:name=".RosterWidgetProvider"
+    android:exported="false">
+    <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+        <action android:name="PREV_MONTH" />
+        <action android:name="NEXT_MONTH" />
+        <action android:name="REFRESH_WIDGET" />
+    </intent-filter>
+    <meta-data
+        android:name="android.appwidget.provider"
+        android:resource="@xml/widget_info" />
+</receiver>
