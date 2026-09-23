@@ -1,25 +1,28 @@
 name: roster_pro
+description: Roster Pro v8.0 with Widget
 publish_to: 'none'
 version: 8.0.0+80
 environment:
   sdk: ">=3.2.0 <4.0.0"
-  flutter: ">=3.22.0"
+
 dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
   intl: ^0.19.0
   shared_preferences: ^2.3.3
-  file_picker: ^8.0.0
+  file_picker: ^8.1.0+1
   path_provider: ^2.1.5
   device_calendar: ^4.3.3
-  timezone: ^0.9.2
+  timezone: ^0.9.4
   permission_handler: ^11.3.1
   share_plus: ^7.2.2
   home_widget: ^0.6.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+
 flutter:
   uses-material-design: true
