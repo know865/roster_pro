@@ -23,8 +23,9 @@ workflows:
 
       - name: Rebuild Android Skeleton
         script: |
-          echo "=== 1. 備份 lib/main.dart ==="
+          echo "=== 1. 備份 lib/main.dart 和 pubspec.yaml ==="
           cp lib/main.dart /tmp/main.dart.bak
+          cp pubspec.yaml /tmp/pubspec.yaml.bak
 
           echo "=== 2. 刪除損壞的 android 目錄 ==="
           rm -rf android
@@ -32,14 +33,17 @@ workflows:
           echo "=== 3. 用官方模板重建 android 骨架 (v2 embedding) ==="
           flutter create --platforms=android --org com.example --project-name roster_pro .
 
-          echo "=== 4. 還原 lib/main.dart ==="
+          echo "=== 4. 還原 lib/main.dart 和 pubspec.yaml ==="
           cp /tmp/main.dart.bak lib/main.dart
+          cp /tmp/pubspec.yaml.bak pubspec.yaml
 
           echo "=== 5. 確認關鍵檔案存在 ==="
           test -f android/build.gradle && echo "✓ android/build.gradle" || echo "✗ 缺失"
           test -f android/settings.gradle && echo "✓ android/settings.gradle" || echo "✗ 缺失"
           test -f android/app/build.gradle && echo "✓ android/app/build.gradle" || echo "✗ 缺失"
           test -f android/app/src/main/AndroidManifest.xml && echo "✓ AndroidManifest.xml" || echo "✗ 缺失"
+          test -f pubspec.yaml && echo "✓ pubspec.yaml 已還原" || echo "✗ 缺失"
+          grep -c "home_widget" pubspec.yaml && echo "✓ 依賴還在" || echo "✗ 依賴已丟失"
 
       - name: Add Custom Widget Files
         script: |
@@ -54,7 +58,6 @@ workflows:
           with open(manifest, 'r') as f:
               content = f.read()
 
-          # 加入日曆權限
           if 'READ_CALENDAR' not in content:
               content = content.replace(
                   '<application',
@@ -64,7 +67,6 @@ workflows:
                   1
               )
 
-          # 加入 Receiver
           if 'RosterWidgetProvider' not in content:
               receiver = '''        <receiver android:name=".RosterWidgetProvider" android:exported="false">
                       <intent-filter>
