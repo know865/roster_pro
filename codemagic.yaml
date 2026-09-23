@@ -1,6 +1,6 @@
 workflows:
   Default Workflow:
-    name: RosterPro v10 Complete FIXED
+    name: RosterPro v10 FIXED 1.9.22
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
@@ -18,7 +18,11 @@ workflows:
           for fp in [pathlib.Path("android/build.gradle"), pathlib.Path("android/settings.gradle")]:
             if not fp.exists(): continue
             t=fp.read_text()
-            t=t.replace("1.7.1","1.9.22").replace("1.7.10","1.9.22").replace("1.8.22","1.9.22")
+            # 一定要長的先換，否則 1.7.10 -> 1.9.220
+            t=t.replace("1.7.10","1.9.22")
+            t=t.replace("1.7.1","1.9.22")
+            t=t.replace("1.8.22","1.9.22")
+            t=t.replace("1.9.220","1.9.22") # 修復上次壞掉的
             fp.write_text(t)
             print(f"patched {fp}")
           PY
