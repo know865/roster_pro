@@ -21,13 +21,13 @@ workflows:
           flutter clean
           flutter pub get
 
-      - name: Fix Android MainActivity for Real Calendar ID + Widget 4x4
+      - name: Fix Android MainActivity + Widget 4x4 (Correct Version)
         script: |
           # 1. 確保 MainActivity.kt 有 getCalendars 真ID方法 (Fix 日曆空白 0個問題)
           MAIN_KT=$(find android/app/src/main/kotlin -name "MainActivity.kt" | head -n 1)
           if [ -n "$MAIN_KT" ]; then
           cat > "$MAIN_KT" <<'KT'
-          package com.example.roster_pro
+          package com.example.roster_pro // <--- 如果你的包名不同，請替換這裡
 
           import android.Manifest
           import android.content.pm.PackageManager
@@ -72,7 +72,7 @@ workflows:
           echo "MainActivity.kt patched for real calendar ID"
           fi
 
-          # 2. 確保 Widget 4x4 有 focused_month + month_data + 選中日顯示詳細 (Fix5 Widget空白)
+          # 2. 建立 Widget 佈局 (包含 42 個日期格子)
           mkdir -p android/app/src/main/res/layout
           cat > android/app/src/main/res/layout/widget_layout.xml <<'XML'
           <?xml version="1.0" encoding="utf-8"?>
@@ -82,60 +82,235 @@ workflows:
               android:orientation="vertical"
               android:background="#FFFFFF"
               android:padding="8dp">
-              <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-                  <TextView android:id="@+id/widget_month" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="2026年5月" android:textStyle="bold" android:textSize="14sp"/>
-                  <TextView android:id="@+id/widget_prev" android:layout_width="32dp" android:layout_height="32dp" android:text="&lt;" android:gravity="center" android:background="#EEEEEE"/>
-                  <TextView android:id="@+id/widget_next" android:layout_width="32dp" android:layout_height="32dp" android:text="&gt;" android:gravity="center" android:background="#EEEEEE" android:layout_marginStart="4dp"/>
+
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:orientation="horizontal"
+                  android:gravity="center_vertical"
+                  android:layout_marginBottom="4dp">
+
+                  <ImageButton
+                      android:id="@+id/btn_prev"
+                      android:layout_width="36dp"
+                      android:layout_height="36dp"
+                      android:src="@android:drawable/ic_media_previous"
+                      android:background="?android:attr/selectableItemBackground" />
+
+                  <TextView
+                      android:id="@+id/tv_month_title"
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:text="2024年1月"
+                      android:textAlignment="center"
+                      android:textSize="16sp"
+                      android:textStyle="bold"
+                      android:textColor="#333333" />
+
+                  <ImageButton
+                      android:id="@+id/btn_next"
+                      android:layout_width="36dp"
+                      android:layout_height="36dp"
+                      android:src="@android:drawable/ic_media_next"
+                      android:background="?android:attr/selectableItemBackground" />
+
+                  <ImageButton
+                      android:id="@+id/btn_refresh"
+                      android:layout_width="36dp"
+                      android:layout_height="36dp"
+                      android:src="@android:drawable/ic_popup_sync"
+                      android:background="?android:attr/selectableItemBackground" />
               </LinearLayout>
-              <TextView android:id="@+id/widget_today" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="今天: O" android:textSize="12sp" android:layout_marginTop="4dp"/>
-              <TextView android:id="@+id/widget_selected" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="選中: 無" android:textSize="11sp" android:textColor="#673AB7" android:fontFamily="monospace" android:maxLines="3"/>
-              <GridLayout android:id="@+id/widget_grid" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:columnCount="7" android:rowCount="6" android:layout_marginTop="4dp"/>
+
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:orientation="horizontal"
+                  android:weightSum="7">
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="一" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="二" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="三" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="四" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="五" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="六" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#D32F2F" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="日" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#D32F2F" />
+              </LinearLayout>
+
+              <GridLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="0dp"
+                  android:layout_weight="1"
+                  android:columnCount="7"
+                  android:rowCount="6"
+                  android:layout_marginTop="2dp">
+
+                  <TextView android:id="@+id/day0" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day1" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day2" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day3" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day4" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day5" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day6" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+
+                  <TextView android:id="@+id/day7" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day8" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day9" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day10" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day11" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day12" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day13" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+
+                  <TextView android:id="@+id/day14" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day15" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day16" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day17" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day18" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day19" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day20" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+
+                  <TextView android:id="@+id/day21" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day22" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day23" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day24" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day25" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day26" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day27" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+
+                  <TextView android:id="@+id/day28" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day29" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day30" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day31" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day32" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day33" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day34" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+
+                  <TextView android:id="@+id/day35" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day36" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day37" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day38" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day39" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day40" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+                  <TextView android:id="@+id/day41" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
+              </GridLayout>
           </LinearLayout>
           XML
 
+          # 3. 建立 RosterWidgetProvider.kt (使用 AppWidgetProvider，直接讀取 SharedPreferences)
           mkdir -p android/app/src/main/kotlin/com/example/roster_pro
           cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt <<'KT'
-          package com.example.roster_pro
+          package com.example.roster_pro // <--- 請替換為你的包名
 
           import android.app.PendingIntent
           import android.appwidget.AppWidgetManager
+          import android.appwidget.AppWidgetProvider
           import android.content.Context
           import android.content.Intent
+          import android.content.SharedPreferences
+          import android.graphics.Color
+          import android.view.View
           import android.widget.RemoteViews
-          import es.antonborri.home_widget.HomeWidgetLaunchIntent
-          import es.antonborri.home_widget.HomeWidgetProvider
+          import org.json.JSONObject
+          import java.text.SimpleDateFormat
+          import java.util.*
 
-          class RosterWidgetProvider : HomeWidgetProvider() {
-              override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray, widgetData: android.content.SharedPreferences) {
-                  appWidgetIds.forEach { widgetId ->
-                      val views = RemoteViews(context.packageName, R.layout.widget_layout).apply {
-                          val month = widgetData.getString("focused_month", "") ?: ""
-                          val monthDataStr = widgetData.getString("month_data", "") ?: ""
-                          val todayCode = widgetData.getString("today_code", "O") ?: "O"
-                          val selectedDay = widgetData.getString("selected_day", "") ?: ""
-                          val note = widgetData.getString("note", "") ?: ""
-                          setTextViewText(R.id.widget_month, if(month.isNotEmpty()) month.replace("-", "年")+"月" else "排更月曆")
-                          setTextViewText(R.id.widget_today, "今天: $todayCode ${if(note.isNotEmpty()) "| $note" else ""}")
-                          setTextViewText(R.id.widget_selected, "選中: $selectedDay")
-                          // Grid簡化顯示 1:早 2:O...
-                          removeAllViews(R.id.widget_grid)
-                          // 點擊打開App顯示詳細
-                          val launchIntent = HomeWidgetLaunchIntent.getActivity(context, MainActivity::class.java)
-                          setOnClickPendingIntent(R.id.widget_layout_root, PendingIntent.getActivity(context, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
-                          // 上下月按鈕
-                          val prevIntent = Intent(context, RosterWidgetProvider::class.java).apply { action = "PREV_MONTH" }
-                          val nextIntent = Intent(context, RosterWidgetProvider::class.java).apply { action = "NEXT_MONTH" }
-                          setOnClickPendingIntent(R.id.widget_prev, PendingIntent.getBroadcast(context, 1, prevIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
-                          setOnClickPendingIntent(R.id.widget_next, PendingIntent.getBroadcast(context, 2, nextIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+          class RosterWidgetProvider : AppWidgetProvider() {
+              override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+                  for (appWidgetId in appWidgetIds) {
+                      updateAppWidget(context, appWidgetManager, appWidgetId)
+                  }
+              }
+
+              override fun onReceive(context: Context, intent: Intent) {
+                  super.onReceive(context, intent)
+                  val action = intent.action
+                  if (action == "PREV_MONTH" || action == "NEXT_MONTH" || action == "REFRESH_WIDGET") {
+                      val appWidgetManager = AppWidgetManager.getInstance(context)
+                      val thisWidget = android.content.ComponentName(context, RosterWidgetProvider::class.java)
+                      val allWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget)
+                      val prefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
+                      var year = prefs.getInt("year", Calendar.getInstance().get(Calendar.YEAR))
+                      var month = prefs.getInt("month", Calendar.getInstance().get(Calendar.MONTH))
+                      if (action == "PREV_MONTH") { month--; if (month < 0) { month = 11; year-- } }
+                      else if (action == "NEXT_MONTH") { month++; if (month > 11) { month = 0; year++ } }
+                      prefs.edit().putInt("year", year).putInt("month", month).apply()
+                      for (appWidgetId in allWidgetIds) { updateAppWidget(context, appWidgetManager, appWidgetId) }
+                  }
+              }
+
+              companion object {
+                  fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
+                      val views = RemoteViews(context.packageName, R.layout.widget_layout)
+                      val widgetPrefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
+                      val cal = Calendar.getInstance()
+                      val year = widgetPrefs.getInt("year", cal.get(Calendar.YEAR))
+                      val month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH))
+                      val monthNames = arrayOf("1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月")
+                      views.setTextViewText(R.id.tv_month_title, "${year}年 ${monthNames[month]}")
+
+                      val flutterPrefs: SharedPreferences = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                      val rosterJsonStr = flutterPrefs.getString("flutter.roster_json", "{}")
+                      val defsJsonStr = flutterPrefs.getString("flutter.defs_json", "{}")
+                      val todayBgColor = flutterPrefs.getLong("flutter.today_bg", 0xFFFFF9C4).toInt()
+                      val rosterJson = try { JSONObject(rosterJsonStr) } catch (e: Exception) { JSONObject() }
+                      val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
+
+                      val calendar = Calendar.getInstance()
+                      calendar.set(year, month, 1)
+                      val firstDayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
+                      val startOffset = if (firstDayOfWeek == Calendar.SUNDAY) 6 else firstDayOfWeek - 2
+                      val maxDaysInMonth = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
+                      val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+
+                      for (i in 0 until 42) {
+                          val dayIndex = i - startOffset + 1
+                          val textViewId = context.resources.getIdentifier("day$i", "id", context.packageName)
+                          if (textViewId != 0) {
+                              if (dayIndex in 1..maxDaysInMonth) {
+                                  val dateStr = String.format("%04d-%02d-%02d", year, month + 1, dayIndex)
+                                  val shiftCode = rosterJson.optString(dateStr, "")
+                                  var displayText = dayIndex.toString()
+                                  if (shiftCode.isNotEmpty()) { displayText = "$dayIndex\n$shiftCode" }
+                                  views.setTextViewText(textViewId, displayText)
+                                  views.setTextColor(textViewId, Color.parseColor("#333333"))
+                                  views.setViewVisibility(textViewId, View.VISIBLE)
+                                  if (shiftCode.isNotEmpty()) {
+                                      val defObj = defsJson.optJSONObject(shiftCode)
+                                      if (defObj != null) {
+                                          val colorInt = defObj.optLong("color", 0).toInt()
+                                          val r = (Color.red(colorInt) * 0.3 + 255 * 0.7).toInt()
+                                          val g = (Color.green(colorInt) * 0.3 + 255 * 0.7).toInt()
+                                          val b = (Color.blue(colorInt) * 0.3 + 255 * 0.7).toInt()
+                                          views.setInt(textViewId, "setBackgroundColor", Color.rgb(r, g, b))
+                                      }
+                                  } else {
+                                      views.setInt(textViewId, "setBackgroundColor", Color.TRANSPARENT)
+                                  }
+                                  if (dateStr == todayStr) { views.setInt(textViewId, "setBackgroundColor", todayBgColor) }
+                                  val intent = Intent(context, MainActivity::class.java)
+                                  intent.putExtra("selected_date", dateStr)
+                                  val pendingIntent = PendingIntent.getActivity(context, i, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                                  views.setOnClickPendingIntent(textViewId, pendingIntent)
+                              } else {
+                                  views.setTextViewText(textViewId, "")
+                                  views.setViewVisibility(textViewId, View.INVISIBLE)
+                              }
+                          }
                       }
-                      appWidgetManager.updateAppWidget(widgetId, views)
+                      val prevIntent = Intent(context, RosterWidgetProvider::class.java).setAction("PREV_MONTH")
+                      views.setOnClickPendingIntent(R.id.btn_prev, PendingIntent.getBroadcast(context, 0, prevIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+                      val nextIntent = Intent(context, RosterWidgetProvider::class.java).setAction("NEXT_MONTH")
+                      views.setOnClickPendingIntent(R.id.btn_next, PendingIntent.getBroadcast(context, 1, nextIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+                      val refreshIntent = Intent(context, RosterWidgetProvider::class.java).setAction("REFRESH_WIDGET")
+                      views.setOnClickPendingIntent(R.id.btn_refresh, PendingIntent.getBroadcast(context, 2, refreshIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+                      appWidgetManager.updateAppWidget(appWidgetId, views)
                   }
               }
           }
           KT
-          echo "Widget 4x4 patched - Fix5"
+          echo "RosterWidgetProvider.kt patched successfully"
 
-          # 3. AndroidManifest 確保有日曆權限和Widget receiver
+          # 4. 修改 AndroidManifest.xml (加入權限與 Receiver)
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if grep -q "READ_CALENDAR" "$MANIFEST"; then echo "Calendar permission exists"; else
             sed -i '' 's/<manifest/<manifest xmlns:tools="http:\/\/schemas.android.com\/tools"/' "$MANIFEST" 2>/dev/null || sed -i 's/<manifest/<manifest xmlns:tools="http:\/\/schemas.android.com\/tools"/' "$MANIFEST"
@@ -143,6 +318,21 @@ workflows:
               <uses-permission android:name="android.permission.READ_CALENDAR" />\
               <uses-permission android:name="android.permission.WRITE_CALENDAR" />\
           ' "$MANIFEST" 2>/dev/null || sed -i '/<application/i <uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />\n' "$MANIFEST"
+          fi
+          
+          # 確保有 Receiver 註冊
+          if grep -q "RosterWidgetProvider" "$MANIFEST"; then echo "Receiver exists"; else
+            sed -i '' '/<\/application>/i\
+              <receiver android:name=".RosterWidgetProvider" android:exported="false">\
+                <intent-filter>\
+                  <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\
+                  <action android:name="PREV_MONTH" />\
+                  <action android:name="NEXT_MONTH" />\
+                  <action android:name="REFRESH_WIDGET" />\
+                </intent-filter>\
+                <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info" />\
+              </receiver>\
+          ' "$MANIFEST" 2>/dev/null || sed -i '/<\/application>/i <receiver android:name=".RosterWidgetProvider" android:exported="false">\n<intent-filter>\n<action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n<action android:name="PREV_MONTH" />\n<action android:name="NEXT_MONTH" />\n<action android:name="REFRESH_WIDGET" />\n</intent-filter>\n<meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info" />\n</receiver>\n' "$MANIFEST"
           fi
           cat "$MANIFEST"
 
