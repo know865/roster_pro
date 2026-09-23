@@ -136,37 +136,28 @@ String k=DateFormat('yyyy-MM-dd').format(day); String cur=roster[k]??''; var nc=
 var otc=TextEditingController(text:(rosterOt[k]??0).toString()); var exCtrl=TextEditingController(text:(rosterExtra[k]??0).toString()); var exH=TextEditingController(text:(rosterExtraHrs[k]??0).toString());
 showModalBottomSheet(context:context,isScrollControlled:true,builder:(ctx){
   return StatefulBuilder(builder:(ctx2,setM){
-    return Padding(
-      padding:EdgeInsets.only(bottom:MediaQuery.of(ctx2).viewInsets.bottom),
-      child:Padding(padding:const EdgeInsets.all(16),child:Column(mainAxisSize:MainAxisSize.min,children:[
+    return Padding(padding:EdgeInsets.only(bottom:MediaQuery.of(ctx2).viewInsets.bottom),child:Padding(padding:const EdgeInsets.all(16),child:Column(mainAxisSize:MainAxisSize.min,children:[
         Text(DateFormat('yyyy-MM-dd EEE').format(day),style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),
         Wrap(spacing:8,children:defs.keys.map((c)=>ChoiceChip(label:Text(c),selected:cur==c,onSelected:(_)=>setM(()=>cur=c))).toList()),
         TextField(controller:nc,decoration:const InputDecoration(labelText:'記事')),
-        Row(children:[
-          Expanded(child:TextField(controller:otc,decoration:const InputDecoration(labelText:'OT'),keyboardType:TextInputType.number)),
-          const SizedBox(width:8),
-          Expanded(child:TextField(controller:exH,decoration:const InputDecoration(labelText:'額外工時'),keyboardType:TextInputType.number))
-        ]),
+        Row(children:[Expanded(child:TextField(controller:otc,decoration:const InputDecoration(labelText:'OT'),keyboardType:TextInputType.number)),const SizedBox(width:8),Expanded(child:TextField(controller:exH,decoration:const InputDecoration(labelText:'額外工時'),keyboardType:TextInputType.number))]),
         TextField(controller:exCtrl,decoration:const InputDecoration(labelText:'額外津貼'),keyboardType:TextInputType.number),
         const SizedBox(height:12),
-        Row(children:[
-          Expanded(child:OutlinedButton(onPressed:(){ setState(()=>roster.remove(k)); save(); Navigator.pop(ctx2); },child:const Text('清除'))),
-          const SizedBox(width:8),
-          Expanded(child:FilledButton(onPressed:(){
-            setState((){
-              if(cur.isNotEmpty) roster[k]=cur;
-              if(nc.text.isNotEmpty) rosterNote[k]=nc.text;
-              rosterOt[k]=double.tryParse(otc.text)??0;
-              rosterExtra[k]=double.tryParse(exCtrl.text)??0;
-              rosterExtraHrs[k]=double.tryParse(exH.text)??0;
-            });
-            save(); Navigator.pop(ctx2);
-          },child:const Text('儲存')))
-        ])
-      ]))
-    );
+        Row(children:[Expanded(child:OutlinedButton(onPressed:(){ setState(()=>roster.remove(k)); save(); Navigator.pop(ctx2); },child:const Text('清除'))),const SizedBox(width:8),Expanded(child:FilledButton(onPressed:(){ setState((){ if(cur.isNotEmpty) roster[k]=cur; if(nc.text.isNotEmpty) rosterNote[k]=nc.text; rosterOt[k]=double.tryParse(otc.text)??0; rosterExtra[k]=double.tryParse(exCtrl.text)??0; rosterExtraHrs[k]=double.tryParse(exH.text)??0; }); save(); Navigator.pop(ctx2); },child:const Text('儲存')))])
+      ])));
   });
 });
+}
+
+Widget buildDayCell(DateTime d, String selKey){
+  String k=DateFormat('yyyy-MM-dd').format(d); String? code=roster[k]; var def=code!=null?defs[code]:null;
+  bool inM=d.month==focused.month; bool isToday=DateTime.now().year==d.year && DateTime.now().month==d.month && DateTime.now().day==d.day; bool sel=k==selKey;
+  Color bg; if(isToday) bg=const Color(0xFFFFF9C4); else if(!inM) bg=const Color(0xFFF5F5F0); else if(def!=null) bg=def.color.withOpacity(0.18); else bg=const Color(0xFFFFF0D0);
+  return GestureDetector(onTap:(){ setState(()=>selectedDay=d); },onLongPress:(){ setState(()=>selectedDay=d); showDetail(d); },
+    child: Container(margin:const EdgeInsets.all(2),decoration:BoxDecoration(color:bg,borderRadius:BorderRadius.circular(12),border:isToday?Border.all(width:2.5,color:Colors.orange):sel?Border.all(width:2,color:Colors.deepPurple):null),
+      child: Column(mainAxisAlignment:MainAxisAlignment.center,children:[Text('${d.day}',style:TextStyle(fontWeight:FontWeight.bold,fontSize:calendarFontSize-1)),if(code!=null)Container(padding:const EdgeInsets.symmetric(horizontal:4,vertical:1),decoration:BoxDecoration(color:def?.color,borderRadius:BorderRadius.circular(8)),child:Text(code,style:TextStyle(color:Colors.white,fontSize:calendarFontSize-2)))])
+    )
+  );
 }
 
 Widget calTab(){
@@ -176,7 +167,17 @@ List<DateTime> days=List.generate(weeks*7,(i)=>start.add(Duration(days:i)));
 String selKey=DateFormat('yyyy-MM-dd').format(selectedDay); DateTime today=DateTime.now();
 return SafeArea(child:Column(children:[
 Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),child:Row(children:[InkWell(onTap:quickJumpMonth,child:Row(children:[Text('${focused.year}年${focused.month}月',style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold)),const Icon(Icons.arrow_drop_down)])),const Spacer(),IconButton(icon:const Icon(Icons.chevron_left),onPressed:(){ setState(()=>focused=DateTime(focused.year,focused.month-1,1)); }),IconButton(icon:const Icon(Icons.chevron_right),onPressed:(){ setState(()=>focused=DateTime(focused.year,focused.month+1,1)); }),FilledButton.tonal(onPressed:(){ setState((){ focused=DateTime(today.year,today.month,1); selectedDay=today; }); },child:const Text('今天'))])),
-RepaintBoundary(key:calKey,child:Column(children:[Padding(padding:const EdgeInsets.symmetric(horizontal:6),child:Row(children:[const SizedBox(width:32,child:Text('週',textAlign:TextAlign.center,style:TextStyle(fontSize:11,fontWeight:FontWeight.bold,color:Colors.deepPurple))),Expanded(child:Row(children:["一","二","三","四","五","六","日"].map((w)=>Expanded(child:Text(w,textAlign:TextAlign.center,style:const TextStyle(fontSize:11)))).toList()))])),ListView.builder(shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),padding:EdgeInsets.zero,itemCount:weeks,itemBuilder:(ctx,row){ return Row(children:[Container(width:32,alignment:Alignment.center,child:Text('W${isoWeek(days[row*7])}',style:const TextStyle(fontSize:11,color:Colors.deepPurple))),Expanded(child:GridView.builder(shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),padding:const EdgeInsets.all(3),gridDelegate:const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount:7,childAspectRatio:0.78,mainAxisSpacing:4,crossAxisSpacing:4),itemCount:7,itemBuilder:(ctx2,col){ int idx=row*7+col; DateTime d=days[idx]; bool inM=d.month==focused.month; String k=DateFormat('yyyy-MM-dd').format(d); String? code=roster[k]; var def=code!=null?defs[code]:null; bool sel=k==selKey; bool isToday=d.year==today.year&&d.month==today.month&&d.day==today.day; return GestureDetector(onTap:(){ setState(()=>selectedDay=d); },onLongPress:(){ setState(()=>selectedDay=d); showDetail(d); },child:Container(decoration:BoxDecoration(color:isToday?const Color(0xFFFFF9C4):!inM?const Color(0xFFF5F5F0):def!=null?def.color.withOpacity(0.18):const Color(0xFFFFF0D0),borderRadius:BorderRadius.circular(12),border:isToday?Border.all(width:2.5,color:Colors.orange):sel?Border.all(width:2,color:Colors.deepPurple):null),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[Text('${d.day}',style:TextStyle(fontWeight:FontWeight.bold,fontSize:calendarFontSize-1)),if(code!=null)Container(padding:const EdgeInsets.symmetric(horizontal:4,vertical:1),decoration:BoxDecoration(color:def?.color,borderRadius:BorderRadius.circular(8)),child:Text(code,style:TextStyle(color:Colors.white,fontSize:calendarFontSize-2)))]) )); }))]))])),
+Column(children:[
+Padding(padding:const EdgeInsets.symmetric(horizontal:6),child:Row(children:[const SizedBox(width:32,child:Text('週',textAlign:TextAlign.center,style:TextStyle(fontSize:11,fontWeight:FontWeight.bold,color:Colors.deepPurple))),Expanded(child:Row(children:["一","二","三","四","五","六","日"].map((w)=>Expanded(child:Text(w,textAlign:TextAlign.center,style:const TextStyle(fontSize:11)))).toList()))])),
+Column(children: List.generate(weeks, (row){
+  return Row(children:[
+    Container(width:32,alignment:Alignment.center,child:Text('W${isoWeek(days[row*7])}',style:const TextStyle(fontSize:11,color:Colors.deepPurple))),
+    Expanded(child: Row(children: List.generate(7, (col){
+      int idx=row*7+col; return Expanded(child: SizedBox(height:68,child: buildDayCell(days[idx], selKey)));
+    })))
+  ]);
+})),
+]),
 Container(width:double.infinity,padding:const EdgeInsets.all(10),color:Colors.white,child:Text('${DateFormat('MM/dd EEE').format(selectedDay)} ${roster[selKey]??'未排班'} | ${rosterNote[selKey]??'無記事'}')),
 ]));
 }
