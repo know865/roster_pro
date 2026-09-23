@@ -1,1 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#FFFFFF"
+    android:padding="8dp">
 
+    <!-- 頂部標題與上下月按鈕 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="4dp">
+
+        <ImageButton
+            android:id="@+id/btn_prev"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:src="@android:drawable/ic_media_previous"
+            android:background="?android:attr/selectableItemBackground"
+            android:contentDescription="上個月" />
+
+        <TextView
+            android:id="@+id/tv_month_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="2024年1月"
+            android:textAlignment="center"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="#333333" />
+
+        <ImageButton
+            android:id="@+id/btn_next"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:src="@android:drawable/ic_media_next"
+            android:background="?android:attr/selectableItemBackground"
+            android:contentDescription="下個月" />
+
+        <ImageButton
+            android:id="@+id/btn_refresh"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:src="@android:drawable/ic_popup_sync"
+            android:background="?android:attr/selectableItemBackground"
+            android:contentDescription="重新整理" />
+    </LinearLayout>
+
+    <!-- 星期標題列 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:weightSum="7">
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="一" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="二" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="三" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="四" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="五" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="六" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#D32F2F" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="日" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#D32F2F" />
+    </LinearLayout>
+
+    <!-- 日期網格 (使用 GridLayout 模擬 6行7列) -->
+    <GridLayout
+        android:id="@+id/grid_calendar"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:columnCount="7"
+        android:rowCount="6"
+        android:layout_marginTop="4dp">
+
+        <!-- 這裡我們會在 Kotlin 代碼中動態填充，但為了 XML 預覽，先放 42 個空的 TextView -->
+        <!-- 你可以直接複製貼上 42 個，或者依靠 Kotlin 動態加載。為了保持 XML 簡潔，Kotlin 會負責設置文本。 -->
+    </GridLayout>
+</LinearLayout>
