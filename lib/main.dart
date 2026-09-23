@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
@@ -13,21 +14,17 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:home_widget/home_widget.dart';
 
-void main(){
-  tzData.initializeTimeZones();
-  WidgetsFlutterBinding.ensureInitialized();
-  HomeWidget.setAppGroupId('group.rosterPro');
-  runApp(const RosterApp());
-}
+void main() { tzData.initializeTimeZones(); WidgetsFlutterBinding.ensureInitialized(); HomeWidget.setAppGroupId('group.rosterPro'); runApp(const RosterApp()); }
 
-class ShiftDef{
+class ShiftDef {
 String code; String label; double hours; double ot; Color color; String start; String end; bool hasAllowance; double allowance; bool isAllDay;
 ShiftDef(this.code,this.label,this.hours,this.color,{this.ot=0,this.start='07:00',this.end='15:30',this.hasAllowance=false,this.allowance=0,this.isAllDay=false});
 Map<String,dynamic> toJson()=>{'code':code,'label':label,'hours':hours,'ot':ot,'color':color.value,'start':start,'end':end,'hasAllowance':hasAllowance,'allowance':allowance,'isAllDay':isAllDay};
 factory ShiftDef.fromJson(Map<String,dynamic> j)=>ShiftDef(j['code'],j['label']??j['code'],(j['hours']??8).toDouble(),Color(j['color']??0xFFFF9800),ot:(j['ot']??0).toDouble(),start:j['start']??'07:00',end:j['end']??'15:30',hasAllowance:j['hasAllowance']??((j['allowance']??0)>0),allowance:(j['allowance']??0).toDouble(),isAllDay:j['isAllDay']??false);
+String get detailTime=>isAllDay?'全天':'$start-$end ${hours.toStringAsFixed(1)}h';
 }
-class ExtraAllowance{ String name; double amount; ExtraAllowance(this.name,this.amount); Map<String,dynamic> toJson()=>{'name':name,'amount':amount}; factory ExtraAllowance.fromJson(Map<String,dynamic> j)=>ExtraAllowance(j['name'],(j['amount'] as num).toDouble()); }
-class SavedPattern{ String name; List<List<String>> data; SavedPattern(this.name,this.data); Map<String,dynamic> toJson()=>{'name':name,'data':data}; factory SavedPattern.fromJson(Map<String,dynamic> j)=>SavedPattern(j['name'],(j['data'] as List).map<List<String>>((r)=>(r as List).map<String>((e)=>e.toString()).toList()).toList()); }
+class ExtraAllowance { String name; double amount; ExtraAllowance(this.name,this.amount); Map<String,dynamic> toJson()=>{'name':name,'amount':amount}; factory ExtraAllowance.fromJson(Map<String,dynamic> j)=>ExtraAllowance(j['name'],(j['amount'] as num).toDouble()); }
+class SavedPattern { String name; List<List<String>> data; SavedPattern(this.name,this.data); Map<String,dynamic> toJson()=>{'name':name,'data':data}; factory SavedPattern.fromJson(Map<String,dynamic> j)=>SavedPattern(j['name'],(j['data'] as List).map<List<String>>((r)=>(r as List).map<String>((e)=>e.toString()).toList()).toList()); }
 
 class RosterApp extends StatelessWidget{ const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v7.0',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
 
@@ -44,27 +41,20 @@ Map<String,ShiftDef> defs={
 List<List<String>> pattern=[["早","早","中","中","宵","宵","O"],["早","早","早","中","中","O","O"]];
 List<SavedPattern> savedPatterns=[]; double carry=0; String customName='我的排更-專屬日曆'; TextEditingController nameCtrl=TextEditingController();
 double standardWeeklyHours=42; double overtimeRate=80; List<ExtraAllowance> extraAllowances=[]; double calendarFontSize=14;
-bool googleSyncEnabled=false; bool autoSync=false; bool isYearReport=false;
-String holidayRegion='香港';
+bool googleSyncEnabled=false; bool autoSync=false; bool isYearReport=false; bool showAllShift=false; bool showAllExtra=false;
+String? editingPatternName; int? editingPatternIndex; String holidayRegion='香港';
 GlobalKey calKey=GlobalKey();
 DeviceCalendarPlugin _calendarPlugin=DeviceCalendarPlugin();
 String? _rosterCalendarId; String _rosterCalendarName='未選'; String _rosterAccountName='';
-Map<String,String> _googleEventIdMap={}; bool _isSyncing=false;
+Map<String,String> _googleEventIdMap={};
+Future<void> updateWidget() async{ try{ String todayKey=DateFormat('yyyy-MM-dd').format(DateTime.now()); String tomorrowKey=DateFormat('yyyy-MM-dd').format(DateTime.now().add(const Duration(days:1))); await HomeWidget.saveWidgetData('today_code', roster[todayKey]??'O'); await HomeWidget.saveWidgetData('tomorrow_code', roster[tomorrowKey]??'O'); await HomeWidget.saveWidgetData('note', rosterNote[todayKey]??''); await HomeWidget.updateWidget(androidName:'RosterWidgetProvider'); }catch(_){} }
+
+bool _isSyncing=false;
 String _lastBackupPath='未備份'; Color todayBgColor=const Color(0xFFFFF9C4); Color todayBorderColor=Colors.orange; Color holidayDotColor=Colors.red;
 
-Future<void> updateWidget() async{
-  try{
-    String todayKey=DateFormat('yyyy-MM-dd').format(DateTime.now());
-    String tomorrowKey=DateFormat('yyyy-MM-dd').format(DateTime.now().add(const Duration(days:1)));
-    await HomeWidget.saveWidgetData('today_code', roster[todayKey]??'O');
-    await HomeWidget.saveWidgetData('tomorrow_code', roster[tomorrowKey]??'O');
-    await HomeWidget.saveWidgetData('note', rosterNote[todayKey]??'');
-    await HomeWidget.updateWidget(androidName:'RosterWidgetProvider');
-  }catch(_){}
-}
 Map<String,String> getHolidays(int year,String region){
 Map<String,String> m={}; if(region=='無') return m;
-m['$year-01-01']='元旦'; m['$year-05-01']='勞動節'; m['$year-07-01']='回歸'; m['$year-10-01']='國慶'; m['$year-12-25']='聖誕';
+if(region=='香港'){ m['$year-01-01']='元旦'; m['$year-05-01']='勞動節'; m['$year-07-01']='回歸'; m['$year-10-01']='國慶'; m['$year-12-25']='聖誕'; if(year==2026){ m.addAll({'2026-02-17':'初一','2026-02-18':'初二','2026-02-19':'初三','2026-04-05':'清明','2026-05-24':'佛誕','2026-06-19':'端午'}); } }
 return m;
 }
 bool isHoliday(DateTime d){ return getHolidays(d.year,holidayRegion).containsKey(DateFormat('yyyy-MM-dd').format(d)); }
@@ -134,14 +124,15 @@ Future<void> _requestGooglePerm() async{ String? id=await _pickGoogleCalendarDia
 Future<void> _ensureCalendar() async{ if(_rosterCalendarId!=null&&_rosterCalendarId!.isNotEmpty) return; await _pickGoogleCalendarDialog(); }
 
 Future<void> _syncToGoogle({bool silent=false}) async{
-if(!googleSyncEnabled&&!silent){
+if(!googleSyncEnabled &&!silent){
 bool? en = await showDialog<bool>(context: context, builder: (ctx)=>AlertDialog(title:const Text('未開啟同步'), content:const Text('是否開啟同步並立即寫入？'), actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false), child:const Text('取消')), FilledButton(onPressed:()=>Navigator.pop(ctx,true), child:const Text('開啟並同步'))]));
 if(en==true) setState(()=>googleSyncEnabled=true); else return;
 }
 if(_isSyncing) return; _isSyncing=true;
-if(!silent) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('開始同步，正在去重...')));
+if(!silent) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('開始同步，正在去重以 [RosterPro]yyyy-MM-dd...')));
 try{
-if(_rosterCalendarId==null||_rosterCalendarId!.isEmpty) await _ensureCalendar(); if(_rosterCalendarId==null||_rosterCalendarId!.isEmpty) throw '未選真 Google 日曆';
+if(_rosterCalendarId==null || _rosterCalendarId!.isEmpty) await _ensureCalendar();
+if(_rosterCalendarId==null || _rosterCalendarId!.isEmpty) throw '未選真 Google 日曆';
 var existingEvents=await _calendarPlugin.retrieveEvents(_rosterCalendarId!, RetrieveEventsParams(startDate: DateTime(2023,1,1), endDate: DateTime(2030,12,31)));
 int del=0;
 for(var e in existingEvents.data??[]){ if((e.description??'').contains('[RosterPro]')){ await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.eventId); del++; } }
@@ -152,21 +143,23 @@ var code=entry.value; var def=defs[code]; if(def==null) continue;
 DateTime date=DateFormat('yyyy-MM-dd').parse(entry.key);
 String note = rosterNote[entry.key]??'';
 String tag='[RosterPro]${entry.key}';
-String desc='$tag\n$customName\n排更:${def.label}\n時間:${def.isAllDay?'全天':'${def.start}-${def.end}'} ${def.hours}h\nOT:${rosterOt[entry.key]??0}h\n津貼:${def.hasAllowance?'${def.allowance}':''} 額外\$${rosterExtra[entry.key]??0}\n記事:${note.isEmpty?'無':note}\n日期:${entry.key}${isHoliday(date)?'\n假期:${holidayName(date)}':''}';
+String desc='$tag\n$customName\n排更: ${def.label}\n時間: ${def.isAllDay?'全天':'${def.start}-${def.end}'} ${def.hours}h\nOT: ${rosterOt[entry.key]??0}h\n津貼: ${def.hasAllowance?'${def.allowance}':''} 額外\$${rosterExtra[entry.key]??0}\n記事: ${note.isEmpty?'無':note}\n日期: ${entry.key}${isHoliday(date)?'\n假期: ${holidayName(date)}':''}\n同步: ${DateTime.now().toIso8601String()}';
 Event ev;
-if(def.isAllDay||def.code=='O'){
-ev=Event(_rosterCalendarId!,title:'${def.code}',description:desc,start:tz.TZDateTime(tz.local,date.year,date.month,date.day),end:tz.TZDateTime(tz.local,date.year,date.month,date.day+1),allDay:true);
+if(def.isAllDay || def.code=='O'){
+ev=Event(_rosterCalendarId!, title:'${def.code}', description:desc, start:tz.TZDateTime(tz.local,date.year,date.month,date.day), end:tz.TZDateTime(tz.local,date.year,date.month,date.day+1), allDay:true);
 }else{
 DateTime s=DateTime(date.year,date.month,date.day,int.parse(def.start.split(':')[0]),int.parse(def.start.split(':')[1]));
 DateTime ee=DateTime(date.year,date.month,date.day,int.parse(def.end.split(':')[0]),int.parse(def.end.split(':')[1]));
 if(ee.isBefore(s)) ee=ee.add(const Duration(days:1));
-ev=Event(_rosterCalendarId!,title:'${def.code} ${def.start}-${def.end} ${note.isNotEmpty?'| $note':''}',description:desc,start:tz.TZDateTime.from(s,tz.local),end:tz.TZDateTime.from(ee,tz.local),allDay:false);
+ev=Event(_rosterCalendarId!, title:'${def.code} ${def.start}-${def.end}${note.isNotEmpty?' | $note':''}', description:desc, start:tz.TZDateTime.from(s,tz.local), end:tz.TZDateTime.from(ee,tz.local), allDay:false);
 }
-var res=await _calendarPlugin.createOrUpdateEvent(ev); if(res!=null&&res.isSuccess&&res.data!=null){ _googleEventIdMap[entry.key]=res.data!; add++; }
+var res=await _calendarPlugin.createOrUpdateEvent(ev); if(res!=null && res.isSuccess && res.data!=null){ _googleEventIdMap[entry.key]=res.data!; add++; }
 }
 var sp=await SharedPreferences.getInstance(); sp.setString('googleEventIdMap',jsonEncode(_googleEventIdMap));
-if(!silent&&mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已寫入 $_rosterCalendarName 刪$del 加$add 項，含記事，去重以 [RosterPro]yyyy-MM-dd 全天 allDay:true')));
-}catch(e){ if(!silent&&mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('同步失敗 $e'))); } finally{ _isSyncing=false; }
+updateWidget();
+if(!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已寫入 $_rosterCalendarName 刪$del 加$add 項，去重 [RosterPro]yyyy-MM-dd 全天 allDay:true 含記事')));
+}catch(e){ if(!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('同步失敗 $e'))); }
+finally { _isSyncing=false; }
 }
 
 Future<void> clearRosterByRange() async{
@@ -253,39 +246,31 @@ Row(children:[Expanded(child:OutlinedButton(onPressed:(){ setState(()=>roster.re
 
 Widget calTab(){
 DateTime first=DateTime(focused.year,focused.month,1); DateTime start=first.subtract(Duration(days:first.weekday-1));
-int dim=DateTime(focused.year,focused.month+1,0).day; int needed=first.weekday-1+dim; int weeks=(needed/7).ceil(); if(weeks<5) weeks=5; if(weeks>6) weeks=6;
+int daysInMonth=DateTime(focused.year,focused.month+1,0).day; int neededCells=first.weekday-1+daysInMonth; int weeks=(neededCells/7).ceil(); if(weeks<5) weeks=5; if(weeks>6) weeks=6;
 List<DateTime> days=List.generate(weeks*7,(i)=>start.add(Duration(days:i)));
-String selKey=DateFormat('yyyy-MM-dd').format(selectedDay);
+String selKey=DateFormat('yyyy-MM-dd').format(selectedDay); var selDef=roster[selKey]!=null?defs[roster[selKey]]:null;
+double selOt=rosterOt[selKey]??selDef?.ot??0; String note=rosterNote[selKey]??'無';
 DateTime today=DateTime.now();
-return SafeArea(
-child: Column(children:[
-Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),child:Row(children:[InkWell(onTap:()=>quickJumpMonth(),child:Row(children:[Text('${focused.year}年${focused.month}月',style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold)),const Icon(Icons.arrow_drop_down)])),const Spacer(),IconButton(icon:const Icon(Icons.camera_alt_outlined),onPressed:shareScreenshotDialog),IconButton(icon:const Icon(Icons.chevron_left),onPressed:(){ setState(()=>focused=DateTime(focused.year,focused.month-1,1)); }),IconButton(icon:const Icon(Icons.chevron_right),onPressed:(){ setState(()=>focused=DateTime(focused.year,focused.month+1,1)); }),FilledButton.tonal(onPressed:(){ setState(()=>focused=DateTime(today.year,today.month,1)); },child:const Text('今天'))])),
-Expanded(child: RepaintBoundary(
-key: calKey,
-child: Column(children:[
-Padding(padding:const EdgeInsets.symmetric(horizontal:6),child:Row(children:[Container(width:32,child:const Text('週',textAlign:TextAlign.center,style:TextStyle(fontWeight:FontWeight.bold,fontSize:11,color:Colors.deepPurple))),Expanded(child:Row(children:["一","二","三","四","五","六","日"].map((w)=>Expanded(child:Text(w,textAlign:TextAlign.center,style:const TextStyle(fontSize:11)))).toList()))])),
-Expanded(child: ListView.builder(itemCount:weeks,itemBuilder:(ctx,row){
-return Row(children:[
-Container(width:32,alignment:Alignment.center,child:Text('W${isoWeek(days[row*7])}',style:const TextStyle(fontSize:11,color:Colors.deepPurple,fontWeight:FontWeight.bold))),
-Expanded(child: GridView.builder(shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),padding:const EdgeInsets.all(3),gridDelegate:const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount:7,childAspectRatio:0.78,mainAxisSpacing:4,crossAxisSpacing:4),itemCount:7,itemBuilder:(ctx2,col){
-int idx=row*7+col; DateTime d=days[idx]; bool inM=d.month==focused.month; String k=DateFormat('yyyy-MM-dd').format(d); String? code=roster[k]; var def=code!=null?defs[code]:null; bool sel=k==selKey; bool isToday=d.year==today.year&&d.month==today.month&&d.day==today.day; bool hasNote=rosterNote.containsKey(k)&&rosterNote[k]!.isNotEmpty; bool isHol=isHoliday(d);
+return SafeArea(child:Column(children:[
+Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),child:Row(children:[InkWell(onTap:()=>quickJumpMonth(),child:Row(children:[Text('${focused.year}年${focused.month}月',style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold)),const Icon(Icons.arrow_drop_down)])),const Spacer(),IconButton(icon:const Icon(Icons.camera_alt_outlined),tooltip:'整月截圖分享',onPressed:shareScreenshotDialog),IconButton(icon:const Icon(Icons.chevron_left),onPressed:(){ setState(()=>focused=DateTime(focused.year,focused.month-1,1)); }),IconButton(icon:const Icon(Icons.chevron_right),onPressed:(){ setState(()=>focused=DateTime(focused.year,focused.month+1,1)); }),FilledButton.tonal(onPressed:(){ setState((){ focused=DateTime(today.year,today.month,1); selectedDay=DateTime(today.year,today.month,today.day); }); },child:const Text('今天')),])),
+Expanded(child: GestureDetector(
+onHorizontalDragEnd: (details){ if(details.primaryVelocity!=null){ if(details.primaryVelocity! < -200){ setState(()=>focused=DateTime(focused.year,focused.month+1,1)); } else if(details.primaryVelocity! > 200){ setState(()=>focused=DateTime(focused.year,focused.month-1,1)); } } },
+child: RepaintBoundary(key:calKey,child:Column(children:[Padding(padding:const EdgeInsets.symmetric(horizontal:6),child:Row(children:[Container(width:32,child:const Text('週',textAlign:TextAlign.center,style:TextStyle(fontWeight:FontWeight.bold,fontSize:11,color:Colors.deepPurple))),Expanded(child:Row(children:["一","二","三","四","五","六","日"].map((w)=>Expanded(child:Text(w,textAlign:TextAlign.center,style:const TextStyle(fontSize:11)))).toList()))])),Expanded(child: ListView.builder(shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),padding:EdgeInsets.zero,itemCount:weeks,itemBuilder:(ctx,row){ return Row(children:[Container(width:32,alignment:Alignment.center,child:Text('W${isoWeek(days[row*7])}',style:const TextStyle(fontSize:11,color:Colors.deepPurple,fontWeight:FontWeight.bold))),Expanded(child:GridView.builder(shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),padding:const EdgeInsets.all(3),gridDelegate:const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount:7,childAspectRatio:0.78,mainAxisSpacing:4,crossAxisSpacing:4),itemCount:7,itemBuilder:(ctx2,col){ int idx=row*7+col; DateTime day=days[idx]; bool inM=day.month==focused.month; String k=DateFormat('yyyy-MM-dd').format(day); String? code=roster[k]; var def=code!=null?defs[code]:null; bool sel=k==selKey; bool isToday=day.year==today.year&&day.month==today.month&&day.day==today.day; bool hasNote=rosterNote.containsKey(k)&&rosterNote[k]!.isNotEmpty; bool isHol=isHoliday(day);
 Color bg; if(isToday) bg=todayBgColor; else if(!inM) bg=const Color(0xFFF5F5F0); else if(def!=null) bg=def.color.withOpacity(0.18); else bg=const Color(0xFFFFF0D0);
-return GestureDetector(onTap:(){ setState(()=>selectedDay=d); },onLongPress:(){ setState(()=>selectedDay=d); showDetail(d); },child:Container(decoration:BoxDecoration(color:bg,borderRadius:BorderRadius.circular(12),border:isToday?Border.all(width:2.8,color:todayBorderColor):sel?Border.all(width:2,color:Colors.deepPurple):null),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[Text('${d.day}',style:TextStyle(fontWeight:isToday?FontWeight.w900:FontWeight.bold,fontSize:calendarFontSize-1)),if(code!=null) Container(margin:const EdgeInsets.only(top:1),padding:const EdgeInsets.symmetric(horizontal:4,vertical:1),decoration:BoxDecoration(color:def?.color,borderRadius:BorderRadius.circular(8)),child:Text(code,style:TextStyle(color:Colors.white,fontSize:calendarFontSize-2))),Row(mainAxisAlignment:MainAxisAlignment.center,children:[if(isHol) Container(width:6,height:6,margin:const EdgeInsets.symmetric(horizontal:1),decoration:BoxDecoration(color:holidayDotColor,shape:BoxShape.circle)),if(hasNote) Container(width:6,height:6,margin:const EdgeInsets.symmetric(horizontal:1),decoration:const BoxDecoration(color:Colors.blue,shape:BoxShape.circle))])])));
+return GestureDetector(onTap:(){ setState(()=>selectedDay=day); },onLongPress:(){ setState(()=>selectedDay=day); showDetail(day); },child:Container(decoration:BoxDecoration(color:bg,borderRadius:BorderRadius.circular(12),border:isToday?Border.all(width:2.8,color:todayBorderColor):sel?Border.all(width:2,color:Colors.deepPurple):null),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[Text('${day.day}',style:TextStyle(fontWeight:isToday?FontWeight.w900:FontWeight.bold,fontSize:calendarFontSize-1)),if(code!=null) Container(margin:const EdgeInsets.only(top:1),padding:const EdgeInsets.symmetric(horizontal:4,vertical:1),decoration:BoxDecoration(color:def?.color,borderRadius:BorderRadius.circular(8)),child:Text(code,style:TextStyle(color:Colors.white,fontSize:calendarFontSize-2))),Row(mainAxisAlignment:MainAxisAlignment.center,children:[if(isHol) Container(width:6,height:6,margin:const EdgeInsets.symmetric(horizontal:1),decoration:BoxDecoration(color:holidayDotColor,shape:BoxShape.circle)),if(hasNote) Container(width:6,height:6,margin:const EdgeInsets.symmetric(horizontal:1),decoration:const BoxDecoration(color:Colors.blue,shape:BoxShape.circle))])])));
 })),
-]);
-})),
+]); })),
 ])),
 ),
-Container(width:double.infinity,padding:const EdgeInsets.all(10),color:Colors.white,child:Text('${DateFormat('MM/dd EEE').format(selectedDay)} ${roster[selKey]??'未排班'} | ${rosterNote[selKey]??'無記事'}')),
-]),
-);
+Container(width:double.infinity,padding:const EdgeInsets.all(10),color:Colors.white,child:Text('${DateFormat('MM/dd EEE').format(selectedDay)} ${roster[selKey]??'未排班'} | OT ${rosterOt[selKey]??0} | 津貼 ${rosterExtra[selKey]??0} | 記事 $note')),
+]));
 }
 
 Widget patternTab(){
 return SafeArea(child:Column(children:[
 const Padding(padding:EdgeInsets.only(top:12),child:Center(child:Text('排更模式',style:TextStyle(fontWeight:FontWeight.bold,fontSize:18)))),
 Padding(padding:const EdgeInsets.symmetric(vertical:6),child:Row(mainAxisAlignment:MainAxisAlignment.center,children:[
-FilledButton.icon(icon:const Icon(Icons.add),label:const Text('加一行'),onPressed:(){ setState(()=>pattern.add(List.filled(7,'O'))); save(); }),
+FilledButton.icon(icon:const Icon(Icons.add),label:Text('加一行(自動${defs.length}格)'),onPressed:(){ setState(()=>pattern.add(List.filled(7,'O'))); save(); }),
 const SizedBox(width:8),
 FilledButton.tonalIcon(icon:const Icon(Icons.playlist_add),label:const Text('一次加N行'),onPressed:(){
 var c=TextEditingController(text:'3');
@@ -294,11 +279,11 @@ showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('一次�
 const SizedBox(width:8),
 FilledButton(onPressed:() async{ DateTimeRange? p=await showDateRangePicker(context:context,firstDate:DateTime(2023),lastDate:DateTime(2030)); if(p==null) return; var flat=pattern.expand((e)=>e).toList(); setState((){ int i=0; for(DateTime d=p.start;!d.isAfter(p.end);d=d.add(const Duration(days:1))){ roster[DateFormat('yyyy-MM-dd').format(d)]=flat[i%flat.length]; i++; }}); save(); setState(()=>tab=0); },child:const Text('自動排班'))
 ])),
-SingleChildScrollView(scrollDirection:Axis.horizontal,padding:const EdgeInsets.symmetric(horizontal:12,vertical:4),child:Row(children: defs.keys.map((k)=>Padding(padding:const EdgeInsets.only(right:8),child:Chip(label:Text(k),backgroundColor:defs[k]!.color.withOpacity(0.3)))).toList())),
+SingleChildScrollView(scrollDirection: Axis.horizontal, padding:const EdgeInsets.all(8), child: Row(children: defs.keys.map((k)=>Padding(padding:const EdgeInsets.only(right:8),child: Chip(label:Text(k),backgroundColor:defs[k]!.color.withOpacity(0.3)))).toList())),
 Expanded(child:ListView.builder(itemCount:pattern.length,itemBuilder:(ctx,r){
 return Card(margin:const EdgeInsets.symmetric(horizontal:8,vertical:4),child:Padding(padding:const EdgeInsets.all(6),child:Row(children:[
 SizedBox(width:28,child:Text('${r+1}',textAlign:TextAlign.center,style:const TextStyle(fontWeight:FontWeight.bold))),
-Expanded(child:Row(children:List.generate(7,(c){ return Expanded(child:GestureDetector(onTap:(){ showModalBottomSheet(context:context,builder:(ctx)=>Wrap(children:defs.keys.map((k)=>ListTile(title:Text(k),onTap:(){ setState(()=>pattern[r][c]=k); save(); Navigator.pop(ctx); })).toList())); },child:Container(margin:const EdgeInsets.all(2),height:40,decoration:BoxDecoration(color:defs[pattern[r][c]]?.color.withOpacity(0.3),borderRadius:BorderRadius.circular(8)),child:Center(child:Text(pattern[r][c]))))); }))),
+Expanded(child:Row(children:List.generate(7,(c){ return Expanded(child:GestureDetector(onTap:(){ showModalBottomSheet(context:context,builder:(ctx)=>Wrap(children:defs.keys.map((k)=>ListTile(title:Text(k),onTap:(){ setState(()=>pattern[r][c]=k); save(); Navigator.pop(ctx); })).toList())); },child:Container(margin:const EdgeInsets.all(2),height:56,decoration:BoxDecoration(color:defs[pattern[r][c]]?.color.withOpacity(0.3),borderRadius:BorderRadius.circular(8),border:Border.all(color:Colors.black12)),child:Center(child:FittedBox(child:Text(pattern[r][c],style:TextStyle(fontSize:calendarFontSize))))))); }))),
 IconButton(icon:const Icon(Icons.delete),onPressed:(){ setState(()=>pattern.removeAt(r)); save(); })
 ]))); })),
 ]));
@@ -312,13 +297,13 @@ Row(children:[Text('${focused.year}年${focused.month}月報表',style:const Tex
 ...cnt.entries.map((e)=>ListTile(title:Text(e.key),trailing:Text('${e.value}次'))),
 const Divider(), ListTile(title:const Text('總工時'),trailing:Text('${hrs.toStringAsFixed(1)}h')), ListTile(title:const Text('OT'),trailing:Text('${ot.toStringAsFixed(1)}h')), ListTile(title:const Text('班次津貼+當日額外'),trailing:Text('\$$allow')),
 const Divider(),
-Row(children:[const Text('額外津貼 (自定名)',style:TextStyle(fontWeight:FontWeight.bold)), const Spacer(), IconButton(icon:const Icon(Icons.add),onPressed:(){
+Row(children:[const Text('額外津貼 (自定名) - 計入總津貼',style:TextStyle(fontWeight:FontWeight.bold)), const Spacer(), IconButton(icon:const Icon(Icons.add),onPressed:(){
 var nCtrl=TextEditingController(); var aCtrl=TextEditingController();
 showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('新增津貼'),content:Column(mainAxisSize:MainAxisSize.min,children:[SizedBox(height:56,child:TextField(controller:nCtrl,decoration:const InputDecoration(labelText:'名稱 例如: 大假津貼',isDense:true,border:OutlineInputBorder()))), const SizedBox(height:8), SizedBox(height:56,child:TextField(controller:aCtrl,decoration:const InputDecoration(labelText:'金額',isDense:true,border:OutlineInputBorder()),keyboardType:TextInputType.number))]),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('取消')), FilledButton(onPressed:(){ if(nCtrl.text.isEmpty) return; setState(()=>extraAllowances.add(ExtraAllowance(nCtrl.text,double.tryParse(aCtrl.text)??0))); save(); Navigator.pop(ctx); },child:const Text('新增'))]));
 })]),
-...extraAllowances.asMap().entries.map((en)=>ListTile(title:Text(en.value.name),trailing:Row(mainAxisSize:MainAxisSize.min,children:[Text('\$${en.value.amount}'), IconButton(icon:const Icon(Icons.delete),onPressed:(){ setState(()=>extraAllowances.removeAt(en.key)); save(); })]))),
+...extraAllowances.asMap().entries.map((en)=>ListTile(title:Text(en.value.name),subtitle:Text('金額可刪除'),trailing:Row(mainAxisSize:MainAxisSize.min,children:[Text('\$${en.value.amount}'), IconButton(icon:const Icon(Icons.delete),onPressed:(){ setState(()=>extraAllowances.removeAt(en.key)); save(); })]))),
 const Divider(),
-ListTile(title:const Text('總津貼 (含自定)'),trailing:Text('\$${(allow+fixedExtra).toStringAsFixed(0)}',style:const TextStyle(fontWeight:FontWeight.bold,fontSize:16))),
+ListTile(title:const Text('總津貼 (含自定)',style:TextStyle(fontWeight:FontWeight.bold)),trailing:Text('\$${(allow+fixedExtra).toStringAsFixed(0)}',style:const TextStyle(fontWeight:FontWeight.bold,fontSize:16))),
 FilledButton(onPressed:exportReport,child:const Text('匯出報表 CSV')),
 ]);
 }
@@ -334,7 +319,7 @@ ListTile(title:const Text('清除範圍排更'),onTap:clearRosterByRange),
 ListTile(title:const Text('匯出報表'),onTap:exportReport),
 ListTile(title:const Text('截圖分享'),onTap:exportShareImage),
 const Divider(),
-const ListTile(title:Text('桌面Widget已接通 home_widget'),subtitle:Text('今日/明日自動更新')),
+const ListTile(title:Text('桌面Widget已接通 home_widget'),subtitle:Text('今日/明日自動更新到桌面 RosterWidgetProvider - 需在原生加入 Widget')),
 ]);
 }
 @override Widget build(BuildContext context){ return Scaffold(body:[calTab(),patternTab(),reportTab(),settingsTab()][tab],bottomNavigationBar:NavigationBar(selectedIndex:tab,onDestinationSelected:(i)=>setState(()=>tab=i),destinations:const[NavigationDestination(icon:Icon(Icons.calendar_month),label:'月曆'),NavigationDestination(icon:Icon(Icons.pattern),label:'模式'),NavigationDestination(icon:Icon(Icons.bar_chart),label:'報表'),NavigationDestination(icon:Icon(Icons.settings),label:'設定')])); }
