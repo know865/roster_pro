@@ -1,13 +1,13 @@
 workflows:
   Default Workflow:
-    name: RosterPro v9.2 No Analytics
+    name: RosterPro v9.3 Fixed create
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
       flutter: 3.22.2
       java: 17
     scripts:
-      - name: 0. Disable analytics to hide Welcome banner
+      - name: 0. Disable analytics
         script: |
           flutter config --no-analytics || true
 
@@ -19,7 +19,8 @@ workflows:
           rm -rf android || true
           rm -rf ~/.gradle/caches || true
           rm -f pubspec.lock || true
-          flutter create --platforms=android --project-name roster_pro --org com.example. --no-pub
+          # 注意最後有個. 代表當前目錄
+          flutter create --platforms=android --project-name roster_pro --org com.example.. --no-pub
           flutter pub get
 
       - name: 2. Overwrite lib/main.dart AFTER create
@@ -37,7 +38,7 @@ workflows:
           void main() { tz_data.initializeTimeZones(); runApp(const RosterApp()); }
           class ShiftDef { String code; String label; double hours; double ot; Color color; String start; String end; bool hasAllowance; double allowance; bool isAllDay; ShiftDef(this.code,this.label,this.hours,this.color,{this.ot=0,this.start='07:00',this.end='15:30',this.hasAllowance=false,this.allowance=0,this.isAllDay=false}); Map<String,dynamic> toJson()=>{'code':code,'label':label,'hours':hours,'ot':ot,'color':color.value,'start':start,'end':end,'hasAllowance':hasAllowance,'allowance':allowance,'isAllDay':isAllDay}; factory ShiftDef.fromJson(Map<String,dynamic> j)=>ShiftDef(j['code'],j['label']??j['code'],(j['hours']??8).toDouble(),Color(j['color']??0xFFFF9800),ot:(j['ot']??0).toDouble(),start:j['start']??'07:00',end:j['end']??'15:30',hasAllowance:j['hasAllowance']??((j['allowance']??0)>0),allowance:(j['allowance']??0).toDouble(),isAllDay:j['isAllDay']??false); }
           class SavedPattern { String name; List<List<String>> data; SavedPattern(this.name,this.data); Map<String,dynamic> toJson()=>{'name':name,'data':data}; factory SavedPattern.fromJson(Map<String,dynamic> j)=>SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r)=>(r as List).map<String>((e)=>e.toString()).toList()).toList()); }
-          class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v9.2',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
+          class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v9.3',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
           class MainPage extends StatefulWidget { const MainPage({super.key}); @override State<MainPage> createState()=>MainPageState(); }
           class MainPageState extends State<MainPage> { int tab=0; DateTime focused=DateTime.now(); DateTime selectedDay=DateTime.now(); Map<String,String> roster={}; Map<String,String> rosterNote={}; Map<String,double> rosterOt={}; Map<String,double> rosterExtra={}; Map<String,double> rosterExtraHrs={}; Map<String,String> rosterExtraType={}; List<String> allowanceTypes=['夜更','辛勞','特別','額外']; Map<String,ShiftDef> defs={ '早':ShiftDef('早','早更',8,Colors.orange,start:'07:00',end:'15:30',hasAllowance:true,allowance:80), '中':ShiftDef('中','中更',8,Colors.blue,start:'14:00',end:'22:00'), '宵':ShiftDef('宵','宵更',8,Colors.purple,start:'22:00',end:'06:00',hasAllowance:true,allowance:60), 'O':ShiftDef('O','休',0,Colors.green,start:'00:00',end:'00:00',isAllDay:true), }; List<List<String>> pattern=[["早","早","中","中","宵","宵","O"],["早","早","早","中","中","O","O"]]; List<SavedPattern> savedPatterns=[]; double carry=0; String customName='我的排更-專屬日曆'; TextEditingController nameCtrl=TextEditingController(); double standardWeeklyHours=42; double overtimeRate=80; double calendarFontSize=14; bool googleSyncEnabled=false; bool autoSync=false; final DeviceCalendarPlugin _calendarPlugin = DeviceCalendarPlugin(); String? _rosterCalendarId; Map<String,String> _googleEventIdMap={}; bool _isSyncing=false; String holidayRegion='香港';
           @override void initState(){ super.initState(); nameCtrl.text=customName; load(); }
@@ -65,11 +66,11 @@ workflows:
           }
           DART
 
-      - name: 3. Patch device_calendar Kotlin
+      - name: 3. Patch Kotlin
         script: |
           for BASE in ~/.pub-cache ~/Library/Caches; do DC=$(find $BASE -path "*device_calendar-*/android/build.gradle" 2>/dev/null | head -n 1); if [ -n "$DC" ]; then sed -i '' "s/1\.3\.41/1.9.22/g" "$DC" 2>/dev/null || sed -i "s/1\.3\.41/1.9.22/g" "$DC" || true; fi; done
 
-      - name: 4. Inject Widget + Manifest
+      - name: 4. Inject Widget
         script: |
           set -e
           mkdir -p android/app/src/main/res/layout android/app/src/main/res/xml android/app/src/main/kotlin/com/example/roster_pro
