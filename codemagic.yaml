@@ -12,17 +12,16 @@ workflows:
           set -e
           rm -rf test ~/.gradle/caches
           flutter config --no-analytics
-          flutter create . --platforms=android --project-name roster_pro --org com.example --no-pub
+          flutter create. --platforms=android --project-name roster_pro --org com.example --no-pub
           python3 << 'PY'
           import pathlib
           for fp in [pathlib.Path("android/build.gradle"), pathlib.Path("android/settings.gradle")]:
             if not fp.exists(): continue
             t=fp.read_text()
-            # 一定要長的先換，否則 1.7.10 -> 1.9.220
             t=t.replace("1.7.10","1.9.22")
             t=t.replace("1.7.1","1.9.22")
             t=t.replace("1.8.22","1.9.22")
-            t=t.replace("1.9.220","1.9.22") # 修復上次壞掉的
+            t=t.replace("1.9.220","1.9.22")
             fp.write_text(t)
             print(f"patched {fp}")
           PY
