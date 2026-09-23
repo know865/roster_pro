@@ -1,24 +1,38 @@
 workflows:
   Default Workflow:
-    name: RosterPro Kotlin Fix
+    name: RosterPro Kotlin 1.9.22 FIX
     instance_type: mac_mini_m2
     environment:
       flutter: 3.22.2
       java: 17
     scripts:
-      - name: Fix project
+      - name: Fix project + Kotlin
         script: |
           set -e
-          rm -rf test
+          rm -rf test ~/.gradle/caches
           flutter config --no-analytics
           flutter create . --platforms=android --project-name roster_pro --org com.example --no-pub
-          
-          # 關鍵修正：將 Kotlin 1.7.1 升到 1.9.22
-          sed -i '' 's/ext.kotlin_version.*=.*/ext.kotlin_version = '\''1.9.22'\''/g' android/build.gradle 2>/dev/null || sed -i 's/ext.kotlin_version.*=.*/ext.kotlin_version = '\''1.9.22'\''/g' android/build.gradle
-          
+
+          python3 << 'PY'
+          import pathlib, re
+          for fp in [pathlib.Path("android/build.gradle"), pathlib.Path("android/settings.gradle")]:
+              if not fp.exists(): continue
+              txt = fp.read_text()
+              txt = re.sub(r"ext\.kotlin_version\s*=\s*['\"][^'\"]+['\"]", "ext.kotlin_version = '1.9.22'", txt)
+              txt = re.sub(r'org\.jetbrains\.kotlin\.android.*version\s*["\'][^"\']+["\']', 'id "org.jetbrains.kotlin.android" version "1.9.22" apply false', txt)
+              txt = re.sub(r'kotlin_version\s*=\s*["\'][^"\']+["\']', 'kotlin_version = "1.9.22"', txt)
+              # 如果仲係舊格式，強制寫入
+              if "1.7.1" in txt:
+                  txt = txt.replace("1.7.1", "1.9.22")
+              fp.write_text(txt)
+              print(f"patched {fp}")
+          PY
+
           flutter pub get
+
       - name: Build APK
         script: |
-          flutter build apk --release --no-tree-shake-icons
+          flutter build apk --release --no-tree-shake-icons --verbose
+
     artifacts:
       - build/**/outputs/**/*.apk
