@@ -1,6 +1,6 @@
 workflows:
   Default Workflow:
-    name: RosterPro v10 Complete
+    name: RosterPro v10 Complete FIXED
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
@@ -12,16 +12,15 @@ workflows:
           set -e
           rm -rf test ~/.gradle/caches
           flutter config --no-analytics
-          flutter create. --platforms=android --project-name roster_pro --org com.example --no-pub
+          flutter create . --platforms=android --project-name roster_pro --org com.example --no-pub
           python3 << 'PY'
-          import pathlib, re
+          import pathlib
           for fp in [pathlib.Path("android/build.gradle"), pathlib.Path("android/settings.gradle")]:
             if not fp.exists(): continue
             t=fp.read_text()
-            t=re.sub(r"ext\.kotlin_version\s*=\s*['\"][^'\"]+['\"]", "ext.kotlin_version = '1.9.22'", t)
-            t=t.replace("1.7.1","1.9.22").replace("1.8.22","1.9.22")
-            t=re.sub(r'version\s*"1\.\d+\.\d+"', 'version "1.9.22"', t)
+            t=t.replace("1.7.1","1.9.22").replace("1.7.10","1.9.22").replace("1.8.22","1.9.22")
             fp.write_text(t)
+            print(f"patched {fp}")
           PY
           flutter pub get
       - name: Build APK
