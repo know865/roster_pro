@@ -1,16 +1,16 @@
 workflows:
   Default Workflow:
-    name: RosterPro v7 FINAL FIX
+    name: RosterPro v7.0 FULL 6Fix
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
       flutter: 3.22.2
       java: 17
     scripts:
-      - name: Fix
+      - name: Fix Kotlin
         script: |
           set -e
-          rm -rf test ~/.gradle/caches
+          rm -rf test
           flutter config --no-analytics
           flutter create . --platforms=android --project-name roster_pro --org com.example --no-pub
           python3 << 'PY'
