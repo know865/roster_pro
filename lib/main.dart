@@ -28,13 +28,16 @@ void main() async {
   runApp(const MaterialApp(debugShowCheckedModeBanner:false, home:RosterApp()));
 }
 
-class RosterApp extends StatefulWidget { const RosterApp({super.key}); @override State<RosterApp> createState()=>_RosterAppState(); }
+class RosterApp extends StatefulWidget {
+  const RosterApp({super.key});
+  @override State<RosterApp> createState()=>_RosterAppState();
+}
 
 class _RosterAppState extends State<RosterApp> {
   DateTime focusMonth = DateTime(2026,9,1);
   Map<String,Shift> shifts = {};
   Map<String,DayEntry> entries = {};
-  List<String> allowanceTypes = ['夜更','辛勞','特別','額外'];
+  List<String> allowanceTypes = ['夜更','辛勞','特別'];
   List<List<String>> rosterPatterns = [["T","T","T","T","T","Off","Off"]];
   String selectedCalendarId = "";
   int bottomIdx = 0;
@@ -44,9 +47,15 @@ class _RosterAppState extends State<RosterApp> {
 
   Future<void> _loadAll() async {
     final sp = await SharedPreferences.getInstance();
-    if(sp.containsKey('shifts')){ shifts = (jsonDecode(sp.getString('shifts')!) as Map).map((k,v)=>MapEntry(k as String, Shift.fromJson(v))); }
-    if(sp.containsKey('entries')){ entries = (jsonDecode(sp.getString('entries')!) as Map).map((k,v)=>MapEntry(k as String, DayEntry.fromJson(v))); }
-    if(sp.containsKey('allowanceTypes')){ allowanceTypes = List<String>.from(jsonDecode(sp.getString('allowanceTypes')!)); }
+    if(sp.containsKey('shifts')){
+      shifts = (jsonDecode(sp.getString('shifts')!) as Map).map((k,v)=>MapEntry(k as String, Shift.fromJson(v)));
+    }
+    if(sp.containsKey('entries')){
+      entries = (jsonDecode(sp.getString('entries')!) as Map).map((k,v)=>MapEntry(k as String, DayEntry.fromJson(v)));
+    }
+    if(sp.containsKey('allowanceTypes')){
+      allowanceTypes = List<String>.from(jsonDecode(sp.getString('allowanceTypes')!));
+    }
     selectedCalendarId = sp.getString('calId')??"";
     if(shifts.isEmpty){
       shifts = {
@@ -58,16 +67,19 @@ class _RosterAppState extends State<RosterApp> {
     }
     setState((){});
   }
+
   Future<void> _saveAll() async {
     final sp = await SharedPreferences.getInstance();
     sp.setString('shifts', jsonEncode(shifts.map((k,v)=>MapEntry(k,v.toJson()))));
     sp.setString('entries', jsonEncode(entries.map((k,v)=>MapEntry(k,v.toJson()))));
     sp.setString('allowanceTypes', jsonEncode(allowanceTypes));
     sp.setString('calId', selectedCalendarId);
-    try{ await HomeWidget.saveWidgetData('month', DateFormat('yyyy年M月').format(focusMonth)); await HomeWidget.updateWidget(androidName:'RosterWidgetProvider'); }catch(_){}
+    try{
+      await HomeWidget.saveWidgetData('month', DateFormat('yyyy年M月').format(focusMonth));
+      await HomeWidget.updateWidget(androidName:'RosterWidgetProvider');
+    }catch(_){}
   }
 
-  // 修復5+6 去重同步
   Future<void> syncSingleDay(DateTime date) async {
     if(selectedCalendarId.isEmpty) return;
     await Permission.calendarFullAccess.request();
@@ -85,7 +97,7 @@ class _RosterAppState extends State<RosterApp> {
         }
       }
       if(entry==null || entry.shiftCode==null || entry.shiftCode!.isEmpty){
-        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text("$key 已從Google日曆刪除")));
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text("$key 已從日曆刪除")));
         return;
       }
       final shift = shifts[entry.shiftCode];
@@ -95,24 +107,32 @@ class _RosterAppState extends State<RosterApp> {
       final note = entry.note;
       final title = isAllDay? "${shift.code} 全天${note.isNotEmpty?' | $note':''}" : "${shift.code} ${shift.start}-${shift.end}${note.isNotEmpty?' | $note':''}";
       final startTime = isAllDay? tz.TZDateTime.from(DateTime(date.year,date.month,date.day), loc) : tz.TZDateTime.from(DateTime(date.year,date.month,date.day,int.parse(shift.start.split(':')[0]),int.parse(shift.start.split(':')[1])), loc);
-      final endDateTime = DateTime(date.year,date.month,date.day,int.parse(shift.end.split(':')[0]),int.parse(shift.end.split(':')[1]));
-      final startDateTime = DateTime(date.year,date.month,date.day,int.parse(shift.start.split(':')[0]),int.parse(shift.start.split(':')[1]));
-      final realEnd = endDateTime.isAfter(startDateTime)? endDateTime : endDateTime.add(const Duration(days:1));
-      final endTime = isAllDay? tz.TZDateTime.from(DateTime(date.year,date.month,date.day).add(const Duration(days:1)), loc) : tz.TZDateTime.from(realEnd, loc);
-      final description = "$tag|Hing\n排更: ${shift.code} (${shift.name})\n時間: ${isAllDay?'全天':'${shift.start}-${shift.end}'}\nOT: ${entry.ot}h\n津貼: ${entry.allowanceType}\$${entry.extraAllowance}\n記事: $note\n日期: $key";
+      DateTime endDt = DateTime(date.year,date.month,date.day,int.parse(shift.end.split(':')[0]),int.parse(shift.end.split(':')[1]));
+      DateTime startDt = DateTime(date.year,date.month,date.day,int.parse(shift.start.split(':')[0]),int.parse(shift.start.split(':')[1]));
+      if(endDt.isBefore(startDt) || endDt.isAtSameMomentAs(startDt)){ endDt = endDt.add(const Duration(days:1)); }
+      final endTime = isAllDay? tz.TZDateTime.from(DateTime(date.year,date.month,date.day).add(const Duration(days:1)), loc) : tz.TZDateTime.from(endDt, loc);
+      final description = "$tag\n排更: ${shift.code}\n時間: ${isAllDay?'全天':'${shift.start}-${shift.end}'}\n記事: $note\n日期: $key";
       final event = Event(selectedCalendarId, title: title, description: description, start: startTime, end: endTime, allDay: isAllDay);
       await calendarPlugin.createOrUpdateEvent(event);
-      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text("同步完成: $key ${shift.code}"), duration: const Duration(seconds:1)));
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text("同步完成 $key ${shift.code}")));
     }catch(e){
-      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text("同步失敗 $key: $e")));
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text("同步失敗 $e")));
     }
   }
 
   @override Widget build(BuildContext context){
     return Scaffold(
       body: [buildMonthView(), buildRosterMode(), buildReport(), buildSettings()][bottomIdx],
-      bottomNavigationBar: NavigationBar(selectedIndex: bottomIdx, onDestinationSelected: (i)=>setState(()=>bottomIdx=i),
-        destinations: const [NavigationDestination(icon: Icon(Icons.calendar_month), label:"月曆"), NavigationDestination(icon: Icon(Icons.view_module), label:"模式"), NavigationDestination(icon: Icon(Icons.bar_chart), label:"報表"), NavigationDestination(icon: Icon(Icons.settings), label:"設定")]),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: bottomIdx,
+        onDestinationSelected: (i)=>setState(()=>bottomIdx=i),
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.calendar_month), label:"月曆"),
+          NavigationDestination(icon: Icon(Icons.view_module), label:"模式"),
+          NavigationDestination(icon: Icon(Icons.bar_chart), label:"報表"),
+          NavigationDestination(icon: Icon(Icons.settings), label:"設定"),
+        ],
+      ),
     );
   }
 
@@ -122,22 +142,53 @@ class _RosterAppState extends State<RosterApp> {
     return Column(children:[
       const SizedBox(height:40),
       Row(children:[
-        DropdownButton<DateTime>(value: focusMonth, items: List.generate(24, (i){ final d=DateTime(2026,1+i); return DropdownMenuItem(value:DateTime(d.year,d.month), child:Text("${d.year}年${d.month}月"));}), onChanged:(v)=>setState(()=>focusMonth=v!)),
+        DropdownButton<DateTime>(
+          value: focusMonth,
+          items: List.generate(24, (i){
+            final d=DateTime(2026,1+i);
+            return DropdownMenuItem(value:DateTime(d.year,d.month), child:Text("${d.year}年${d.month}月"));
+          }),
+          onChanged:(v){ if(v!=null) setState(()=>focusMonth=v); },
+        ),
         const Spacer(),
-        FilledButton(onPressed: ()=>setState(()=>focusMonth=DateTime.now()), child:const Text("今天"))
+        FilledButton(onPressed: ()=>setState(()=>focusMonth=DateTime.now()), child:const Text("今天")),
       ]),
-      Row(children:[const SizedBox(width:40, child:Text("週", style:TextStyle(color:Colors.deepPurple))), Expanded(child: Row(children: ["一","二","三","四","五","六","日"].map((e)=>Expanded(child:Center(child:Text(e)))).toList()))]),
-      Expanded(child: GridView.builder(gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount:8, childAspectRatio:0.8), itemCount: 48, itemBuilder: (c, idx){
-        if(idx%8==0){
-          final weekDate = start.add(Duration(days:(idx~/8)*7));
-          return Center(child:Text("W${DateFormat('w').format(weekDate)}", style:const TextStyle(fontSize:12, color:Colors.deepPurple)));
-        }
-        final date = start.add(Duration(days:(idx~/8)*7 + (idx%8)-1));
-        final key = DateFormat('yyyy-MM-dd').format(date);
-        final entry = entries[key];
-        final isThisMonth = date.month==focusMonth.month;
-        return GestureDetector(onTap: ()=>_openDayEdit(date), child: Container(margin:const EdgeInsets.all(4), decoration: BoxDecoration(color: isThisMonth?Colors.orange.shade100.withOpacity(0.6):Colors.grey.shade200, borderRadius: BorderRadius.circular(12), border: DateFormat('yyyy-MM-dd').format(DateTime.now())==key?Border.all(color:Colors.deepPurple,width:2):null), child: Column(children:[Text("${date.day}", style:const TextStyle(fontWeight: FontWeight.bold)), if(entry?.shiftCode!=null) Container(padding:const EdgeInsets.symmetric(horizontal:4,vertical:2), decoration: BoxDecoration(color: shifts[entry!.shiftCode]?.color??Colors.grey, borderRadius: BorderRadius.circular(6)), child:Text(entry.shiftCode!, style:const TextStyle(fontSize:11,color:Colors.white)))])));
-      }))
+      Row(children:[
+        const SizedBox(width:40, child:Text("週", style:TextStyle(color:Colors.deepPurple))),
+        Expanded(child: Row(children: ["一","二","三","四","五","六","日"].map((e)=>Expanded(child:Center(child:Text(e)))).toList())),
+      ]),
+      Expanded(child: GridView.builder(
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount:8, childAspectRatio:0.8),
+        itemCount: 48,
+        itemBuilder: (c, idx){
+          if(idx%8==0){
+            final weekDate = start.add(Duration(days:(idx~/8)*7));
+            return Center(child:Text("W${DateFormat('w').format(weekDate)}", style:const TextStyle(fontSize:12, color:Colors.deepPurple)));
+          }
+          final date = start.add(Duration(days:(idx~/8)*7 + (idx%8)-1));
+          final key = DateFormat('yyyy-MM-dd').format(date);
+          final entry = entries[key];
+          final isThisMonth = date.month==focusMonth.month;
+          return GestureDetector(
+            onTap: ()=>_openDayEdit(date),
+            child: Container(
+              margin:const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: isThisMonth?Colors.orange.shade100.withOpacity(0.6):Colors.grey.shade200,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(children:[
+                Text("${date.day}", style:const TextStyle(fontWeight: FontWeight.bold)),
+                if(entry?.shiftCode!=null) Container(
+                  padding:const EdgeInsets.symmetric(horizontal:4,vertical:2),
+                  decoration: BoxDecoration(color: shifts[entry!.shiftCode]?.color??Colors.grey, borderRadius: BorderRadius.circular(6)),
+                  child:Text(entry.shiftCode!, style:const TextStyle(fontSize:11,color:Colors.white)),
+                ),
+              ]),
+            ),
+          );
+        },
+      )),
     ]);
   }
 
@@ -147,82 +198,127 @@ class _RosterAppState extends State<RosterApp> {
     String? selected = entry.shiftCode;
     TextEditingController noteC = TextEditingController(text: entry.note);
     TextEditingController otC = TextEditingController(text: entry.ot.toString());
-    TextEditingController extraHC = TextEditingController(text: entry.extraHours.toString());
     TextEditingController extraAC = TextEditingController(text: entry.extraAllowance.toString());
     String selectedAllowType = allowanceTypes.contains(entry.allowanceType)? entry.allowanceType : allowanceTypes.first;
-    showModalBottomSheet(context: context, isScrollControlled:true, builder: (ctx)=> StatefulBuilder(builder:(ctx,setS)=> Padding(padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom), child: Container(padding:const EdgeInsets.all(16), child: Column(mainAxisSize: MainAxisSize.min, children:[
-      Text(DateFormat('yyyy-MM-dd EEE').format(date), style:const TextStyle(fontSize:18,fontWeight: FontWeight.bold)),
-      const SizedBox(height:12),
-      Wrap(spacing:8, children: shifts.keys.map((code){ final isSel = selected==code; return ChoiceChip(label: Text(code), selected: isSel, onSelected: (v)=> setS(()=> selected=v?code:null)); }).toList()),
-      const SizedBox(height:12),
-      TextField(controller: noteC, decoration: const InputDecoration(labelText:"記事")),
-      const SizedBox(height:8),
-      Row(children:[
-        Expanded(child: TextField(controller: otC, decoration: const InputDecoration(labelText:"OT時數"), keyboardType: TextInputType.number)),
-        const SizedBox(width:12),
-        Expanded(child: TextField(controller: extraHC, decoration: const InputDecoration(labelText:"額外工時"), keyboardType: TextInputType.number)),
-      ]),
-      const SizedBox(height:8),
-      Row(children:[
-        DropdownButton<String>(value: selectedAllowType, items: allowanceTypes.map((t)=> DropdownMenuItem(value:t, child:Text(t))).toList(), onChanged:(v)=> setS(()=> selectedAllowType=v!)),
-        IconButton(icon: const Icon(Icons.edit), onPressed: ()=> _editAllowanceTypes()),
-        Expanded(child: TextField(controller: extraAC, decoration: const InputDecoration(labelText:"額外津貼 \$"), keyboardType: TextInputType.number)),
-      ]),
-      const SizedBox(height:16),
-      Row(children:[
-        Expanded(child: OutlinedButton(onPressed: (){ entries.remove(key); _saveAll(); Navigator.pop(ctx); }, child:const Text("清除班次"))),
-        const SizedBox(width:12),
-        Expanded(child: FilledButton(onPressed: (){ entries[key]=DayEntry(shiftCode:selected, note:noteC.text, ot:double.tryParse(otC.text)??0, extraHours:double.tryParse(extraHC.text)??0, extraAllowance:double.tryParse(extraAC.text)??0, allowanceType:selectedAllowType); _saveAll(); Navigator.pop(ctx); syncSingleDay(date); }, child:const Text("儲存")))
-      ])
-    ])))));
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled:true,
+      builder: (ctx){
+        return StatefulBuilder(builder: (ctx2,setS){
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx2).viewInsets.bottom),
+            child: Container(
+              padding:const EdgeInsets.all(16),
+              child: Column(mainAxisSize: MainAxisSize.min, children:[
+                Text(DateFormat('yyyy-MM-dd EEE').format(date), style:const TextStyle(fontSize:18,fontWeight: FontWeight.bold)),
+                const SizedBox(height:12),
+                Wrap(spacing:8, children: shifts.keys.map((code){
+                  return ChoiceChip(label: Text(code), selected: selected==code, onSelected: (v){ setS((){ selected=v?code:null; }); });
+                }).toList()),
+                TextField(controller: noteC, decoration: const InputDecoration(labelText:"記事")),
+                Row(children:[
+                  Expanded(child: TextField(controller: otC, decoration: const InputDecoration(labelText:"OT時數"), keyboardType: TextInputType.number)),
+                  const SizedBox(width:8),
+                  DropdownButton<String>(value: selectedAllowType, items: allowanceTypes.map((t)=>DropdownMenuItem(value:t, child:Text(t))).toList(), onChanged:(v){ if(v!=null) setS(()=>selectedAllowType=v); }),
+                  IconButton(icon: const Icon(Icons.edit), onPressed: (){ _editAllowanceTypes(); }),
+                  Expanded(child: TextField(controller: extraAC, decoration: const InputDecoration(labelText:"津貼 \$"), keyboardType: TextInputType.number)),
+                ]),
+                const SizedBox(height:16),
+                Row(children:[
+                  Expanded(child: OutlinedButton(onPressed: (){ entries.remove(key); _saveAll(); Navigator.pop(ctx2); }, child:const Text("清除"))),
+                  const SizedBox(width:12),
+                  Expanded(child: FilledButton(onPressed: (){
+                    entries[key]=DayEntry(shiftCode:selected, note:noteC.text, ot:double.tryParse(otC.text)??0, extraAllowance:double.tryParse(extraAC.text)??0, allowanceType:selectedAllowType);
+                    _saveAll();
+                    Navigator.pop(ctx2);
+                    syncSingleDay(date);
+                  }, child:const Text("儲存"))),
+                ]),
+              ]),
+            ),
+          );
+        });
+      },
+    );
   }
 
   void _editAllowanceTypes(){
     TextEditingController c = TextEditingController();
-    showDialog(context: context, builder: (ctx)=> StatefulBuilder(builder:(ctx,setS)=> AlertDialog(title:const Text("自定津貼名稱"), content: Column(mainAxisSize: MainAxisSize.min, children:[
-      Wrap(spacing:4, children: allowanceTypes.map((t)=> Chip(label:Text(t), onDeleted: (){ setS(()=> allowanceTypes.remove(t)); _saveAll();})).toList()),
-      TextField(controller: c, decoration: const InputDecoration(hintText:"新增名稱")),
-    ]), actions:[
-      TextButton(onPressed: (){ if(c.text.isNotEmpty){ setState(()=> allowanceTypes.add(c.text)); _saveAll(); c.clear(); setS((){});} }, child:const Text("新增")),
-      FilledButton(onPressed: ()=> Navigator.pop(ctx), child:const Text("完成"))
-    ])));
+    showDialog(
+      context: context,
+      builder: (ctx){
+        return StatefulBuilder(builder: (ctx2,setS){
+          return AlertDialog(
+            title:const Text("自定津貼名稱"),
+            content: Column(mainAxisSize: MainAxisSize.min, children:[
+              Wrap(spacing:4, children: allowanceTypes.map((t)=>Chip(label:Text(t), onDeleted: (){ setS((){ allowanceTypes.remove(t); }); _saveAll();})).toList()),
+              TextField(controller: c, decoration: const InputDecoration(hintText:"新增名稱")),
+            ]),
+            actions:[
+              TextButton(onPressed: (){
+                if(c.text.isNotEmpty){ setState(()=>allowanceTypes.add(c.text)); _saveAll(); c.clear(); setS((){}); }
+              }, child:const Text("新增")),
+              FilledButton(onPressed: ()=>Navigator.pop(ctx2), child:const Text("完成")),
+            ],
+          );
+        });
+      },
+    );
   }
 
   void _openShiftEdit([Shift? s]){
-    bool isEdit = s!=null;
     TextEditingController codeC = TextEditingController(text:s?.code??"");
     TextEditingController nameC = TextEditingController(text:s?.name??"");
-    TextEditingController startC = TextEditingController(text:s?.start??"00:00");
-    TextEditingController endC = TextEditingController(text:s?.end??"00:00");
-    TextEditingController workC = TextEditingController(text:s?.workHours.toString()??"0.0");
-    TextEditingController otC = TextEditingController(text:s?.otHours.toString()??"0.0");
+    TextEditingController startC = TextEditingController(text:s?.start??"07:00");
+    TextEditingController endC = TextEditingController(text:s?.end??"15:00");
+    TextEditingController workC = TextEditingController(text:s?.workHours.toString()??"8");
     bool isAllDay = s?.isAllDay??false;
     Color selColor = s?.color??Colors.orange;
-    showDialog(context: context, builder: (ctx)=> StatefulBuilder(builder:(ctx,setS)=> AlertDialog(title:Text(isEdit?"編輯 ${s!.code}":"新增班次"), content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children:[
-      TextField(controller: codeC, decoration: const InputDecoration(labelText:"代號")),
-      TextField(controller: nameC, decoration: const InputDecoration(labelText:"名稱")),
-      const SizedBox(height:8),
-      Row(children:[
-        Expanded(child: TextField(controller: startC, decoration: const InputDecoration(labelText:"開始 HH:mm", border:OutlineInputBorder()))),
-        const SizedBox(width:8),
-        Expanded(child: TextField(controller: endC, decoration: const InputDecoration(labelText:"結束 HH:mm", border:OutlineInputBorder()))),
-      ]),
-      const SizedBox(height:12),
-      Container(padding:const EdgeInsets.all(8), decoration: BoxDecoration(border:Border.all(color:Colors.greenAccent,width:2), borderRadius: BorderRadius.circular(12)), child: Column(children:[
-        Row(children:[Checkbox(value: isAllDay, onChanged:(v)=> setS(()=> isAllDay=v!),), const Text("全天"), const SizedBox(width:8), const Expanded(child: Text("全天後時間變00:00", style:TextStyle(fontSize:10,color:Colors.grey), overflow: TextOverflow.ellipsis))]),
-        const SizedBox(height:8),
-        SizedBox(height:56, child: Row(children:[
-          Expanded(child: TextField(controller: workC, decoration: const InputDecoration(labelText:"工時", border:OutlineInputBorder(), isDense:true))),
-          const SizedBox(width:12),
-          Expanded(child: TextField(controller: otC, decoration: const InputDecoration(labelText:"OT", border:OutlineInputBorder(), isDense:true))),
-        ])),
-      ])),
-      const SizedBox(height:8),
-      Wrap(children: [Colors.orange,Colors.blue,Colors.purple,Colors.green,Colors.red,Colors.teal,Colors.brown,Colors.pink].map((co)=> GestureDetector(onTap: ()=> setS(()=> selColor=co), child: Container(margin:const EdgeInsets.all(4), width:36,height:36, decoration: BoxDecoration(color:co, shape:BoxShape.circle, border: selColor==co?Border.all(width:3):null)))).toList())
-    ])), actions:[
-      TextButton(onPressed: ()=> Navigator.pop(ctx), child:const Text("取消")),
-      FilledButton(onPressed: (){ final ns=Shift(code:codeC.text,name:nameC.text,start:startC.text,end:endC.text,isAllDay:isAllDay,workHours:double.tryParse(workC.text)??0,otHours:double.tryParse(otC.text)??0,color:selColor); setState(()=> shifts[ns.code]=ns); _saveAll(); Navigator.pop(ctx);}, child:const Text("儲存"))
-    ]))));
+
+    showDialog(
+      context: context,
+      builder: (ctx){
+        return StatefulBuilder(builder: (ctx2,setS){
+          return AlertDialog(
+            title:Text(s==null?"新增班次":"編輯 ${s.code}"),
+            content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children:[
+              TextField(controller: codeC, decoration: const InputDecoration(labelText:"代號")),
+              TextField(controller: nameC, decoration: const InputDecoration(labelText:"名稱")),
+              const SizedBox(height:8),
+              Row(children:[
+                Expanded(child: TextField(controller: startC, decoration: const InputDecoration(labelText:"開始", border:OutlineInputBorder()))),
+                const SizedBox(width:8),
+                Expanded(child: TextField(controller: endC, decoration: const InputDecoration(labelText:"結束", border:OutlineInputBorder()))),
+              ]),
+              const SizedBox(height:8),
+              Container(
+                padding:const EdgeInsets.all(8),
+                decoration: BoxDecoration(border:Border.all(color:Colors.greenAccent,width:2), borderRadius: BorderRadius.circular(12)),
+                child: Column(children:[
+                  Row(children:[
+                    Checkbox(value: isAllDay, onChanged:(v){ setS(()=>isAllDay=v!); }),
+                    const Text("全天"),
+                  ]),
+                  SizedBox(height:56, child: Row(children:[
+                    Expanded(child: TextField(controller: workC, decoration: const InputDecoration(labelText:"工時", border:OutlineInputBorder(), isDense:true))),
+                  ])),
+                ]),
+              ),
+            ])),
+            actions:[
+              TextButton(onPressed: ()=>Navigator.pop(ctx2), child:const Text("取消")),
+              FilledButton(onPressed: (){
+                final ns=Shift(code:codeC.text, name:nameC.text, start:startC.text, end:endC.text, isAllDay:isAllDay, workHours:double.tryParse(workC.text)??0, color:selColor);
+                setState(()=>shifts[ns.code]=ns);
+                _saveAll();
+                Navigator.pop(ctx2);
+              }, child:const Text("儲存")),
+            ],
+          );
+        });
+      },
+    );
   }
 
   Widget buildRosterMode(){
@@ -230,28 +326,42 @@ class _RosterAppState extends State<RosterApp> {
     return Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children:[
       const Center(child: Text("排班模式", style:TextStyle(fontSize:20,fontWeight: FontWeight.bold))),
       const SizedBox(height:8),
-      Wrap(spacing:8, children:[FilledButton.tonal(onPressed: (){}, child: const Text("已存模式(1)")), FilledButton.tonal(onPressed: (){}, child: const Text("另存")), FilledButton.tonal(onPressed: ()=> setState(()=> rosterPatterns=[]), child: const Text("清空"))]),
-      const SizedBox(height:12),
-      Row(children:[
-        const Text("一次加 "), SizedBox(width:50, child: TextField(controller: rowCountC, keyboardType:TextInputType.number, decoration: const InputDecoration(border:OutlineInputBorder(), isDense:true))), const Text(" 行 "),
-        ElevatedButton(onPressed: (){ int n=int.tryParse(rowCountC.text)??1; setState(()=> rosterPatterns.addAll(List.generate(n, (_)=> List.filled(7,"T")))); _saveAll();}, child:const Text("添加"))
+      Wrap(spacing:8, children:[
+        FilledButton.tonal(onPressed: (){}, child: const Text("已存模式")),
+        FilledButton.tonal(onPressed: ()=>setState(()=>rosterPatterns=[]), child: const Text("清空")),
       ]),
       const SizedBox(height:12),
-      Expanded(child: ListView.builder(itemCount: rosterPatterns.length, itemBuilder: (c,i)=> Row(children:[
-        Text("${i+1} "),
-        Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: rosterPatterns[i].map((code)=> Container(margin:const EdgeInsets.all(2), padding:const EdgeInsets.symmetric(horizontal:12,vertical:8), color:shifts[code]?.color??Colors.grey.shade300, child:Text(code))).toList()))),
-        IconButton(icon:const Icon(Icons.delete), onPressed: ()=> setState(()=> rosterPatterns.removeAt(i)))
-      ]))),
+      Row(children:[
+        const Text("一次加 "),
+        SizedBox(width:50, child: TextField(controller: rowCountC, keyboardType:TextInputType.number, decoration: const InputDecoration(border:OutlineInputBorder(), isDense:true))),
+        const Text(" 行 "),
+        ElevatedButton(onPressed: (){
+          int n=int.tryParse(rowCountC.text)??1;
+          setState(()=>rosterPatterns.addAll(List.generate(n, (_)=>List.filled(7,"T"))));
+          _saveAll();
+        }, child:const Text("添加")),
+      ]),
+      const SizedBox(height:12),
+      Expanded(child: ListView.builder(itemCount: rosterPatterns.length, itemBuilder: (c,i){
+        return Row(children:[
+          Text("${i+1} "),
+          Expanded(child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: rosterPatterns[i].map((code)=>Container(margin:const EdgeInsets.all(2), padding:const EdgeInsets.symmetric(horizontal:12,vertical:8), color:shifts[code]?.color??Colors.grey.shade300, child:Text(code))).toList()))),
+          IconButton(icon:const Icon(Icons.delete), onPressed: ()=>setState(()=>rosterPatterns.removeAt(i))),
+        ]);
+      })),
       const Divider(),
       const Text("所有班次代號:"),
-      SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: shifts.keys.map((k)=> Padding(padding:const EdgeInsets.all(4), child: ActionChip(label:Text(k), onPressed: (){}))).toList())),
+      SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: shifts.keys.map((k)=>Padding(padding:const EdgeInsets.all(4), child: ActionChip(label:Text(k), onPressed: (){}))).toList())),
     ]));
   }
 
   Widget buildReport(){
     double totalWork=0, totalOt=0, totalAllowance=0;
-    Map<String,double> allowanceByType={};
-    entries.forEach((k,v){ final s=shifts[v.shiftCode]; if(s!=null){ totalWork+=s.workHours+v.extraHours; totalOt+=v.ot; totalAllowance+=v.extraAllowance; allowanceByType[v.allowanceType]=(allowanceByType[v.allowanceType]??0)+v.extraAllowance; }});
+    Map<String,double> byType={};
+    entries.forEach((k,v){
+      final s=shifts[v.shiftCode];
+      if(s!=null){ totalWork+=s.workHours; totalOt+=v.ot; totalAllowance+=v.extraAllowance; byType[v.allowanceType]=(byType[v.allowanceType]??0)+v.extraAllowance; }
+    });
     return ListView(padding:const EdgeInsets.all(16), children:[
       const Text("本月統計", style:TextStyle(fontSize:20,fontWeight: FontWeight.bold)),
       ListTile(title:const Text("總工時"), trailing:Text("$totalWork h")),
@@ -259,7 +369,7 @@ class _RosterAppState extends State<RosterApp> {
       ListTile(title:const Text("總津貼"), trailing:Text("\$$totalAllowance")),
       const Divider(),
       const Text("按津貼類型:"),
-     ...allowanceByType.entries.map((e)=> ListTile(title:Text(e.key), trailing:Text("\$${e.value}"))),
+     ...byType.entries.map((e)=>ListTile(title:Text(e.key), trailing:Text("\$${e.value}"))),
     ]);
   }
 
@@ -269,11 +379,19 @@ class _RosterAppState extends State<RosterApp> {
         await Permission.calendarFullAccess.request();
         final cals = await calendarPlugin.retrieveCalendars();
         if(!mounted) return;
-        showDialog(context: context, builder: (ctx)=> SimpleDialog(title:const Text("選擇日曆"), children: cals.data!.map((cal)=> SimpleDialogOption(child:Text("${cal.name}"), onPressed: (){ setState(()=> selectedCalendarId=cal.id!); _saveAll(); Navigator.pop(ctx);})).toList()));
+        showDialog(context: context, builder: (ctx)=>SimpleDialog(title:const Text("選擇日曆"), children: cals.data!.map((cal)=>SimpleDialogOption(child:Text("${cal.name}"), onPressed: (){ setState(()=>selectedCalendarId=cal.id!); _saveAll(); Navigator.pop(ctx);})).toList()));
       }),
-      ListTile(title:const Text("管理班次"), onTap: ()=> showDialog(context: context, builder: (ctx)=> SimpleDialog(title:const Text("班次"), children: [...shifts.values.map((s)=> SimpleDialogOption(child:Text("${s.code} ${s.name}"), onPressed: ()=> _openShiftEdit(s))), SimpleDialogOption(child:const Text("+ 新增"), onPressed: ()=> _openShiftEdit())]))),
-      ListTile(title:const Text("手動同步全月"), onTap: () async { for(var i=1;i<=DateTime(focusMonth.year,focusMonth.month+1,0).day;i++){ await syncSingleDay(DateTime(focusMonth.year,focusMonth.month,i)); } }),
-      const ListTile(title:Text("桌面小工具"), subtitle:Text("長按桌面 > 小工具 > RosterPro 4x4，單擊日期顯示詳情，雙擊進入App")),
+      ListTile(title:const Text("管理班次"), onTap: (){
+        showDialog(context: context, builder: (ctx)=>SimpleDialog(title:const Text("班次"), children:[
+         ...shifts.values.map((s)=>SimpleDialogOption(child:Text("${s.code} ${s.name}"), onPressed: (){_openShiftEdit(s);})),
+          SimpleDialogOption(child:const Text("+ 新增"), onPressed: (){_openShiftEdit();}),
+        ]));
+      }),
+      ListTile(title:const Text("手動同步全月"), onTap: () async {
+        for(var i=1;i<=DateTime(focusMonth.year,focusMonth.month+1,0).day;i++){
+          await syncSingleDay(DateTime(focusMonth.year,focusMonth.month,i));
+        }
+      }),
     ]);
   }
 }
