@@ -21,33 +21,49 @@ workflows:
           flutter clean
           flutter pub get
 
-      - name: Fix Android MainActivity + Widget 4x4 (Correct Version)
+      - name: Fix Android v1 Embedding + Widget 4x4
         script: |
-          # ==========================================================
-          # 1. 自動修復 Flutter Android v1 embedding 已刪除錯誤 (Build failed 關鍵)
-          # ==========================================================
+          set -e
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          echo "Cleaning up v1 embedding references in AndroidManifest.xml..."
-          
-          # 將已被刪除的 io.flutter.app.FlutterApplication 替換為標準的 Application 佔位符
-          sed -i 's/android:name="io\.flutter\.app\.FlutterApplication"/android:name="${applicationName}"/g' "$MANIFEST"
-          
-          # 移除已失效的 SplashScreenUntilFirstFrame meta-data
-          sed -i '/io\.flutter\.app\.android\.SplashScreenUntilFirstFrame/d' "$MANIFEST"
-          
-          # 確保存在正確的 v2 embedding meta-data
-          if ! grep -q 'flutterEmbedding' "$MANIFEST"; then
-            sed -i '/<\/application>/i\        <meta-data android:name="flutterEmbedding" android:value="2" />' "$MANIFEST"
-          fi
-          echo "v1 embedding cleanup done."
-          # ==========================================================
 
-          # 2. 確保 MainActivity.kt 有 getCalendars 真ID方法 (Fix 日曆空白 0個問題)
-          # 擴大搜尋範圍，確保能找到 kotlin 或 java 目錄下的 MainActivity.kt
-          MAIN_KT=$(find android/app/src/main -name "MainActivity.kt" | head -n 1)
-          if [ -n "$MAIN_KT" ]; then
-          cat > "$MAIN_KT" <<'KT'
-          package com.example.roster_pro // <--- 如果你的包名不同，請替換這裡
+          # ==========================================================
+          # 步驟 1: 徹底清理 v1 embedding (Build failed 核心修復)
+          # ==========================================================
+          echo "=== Cleaning up v1 embedding references ==="
+          
+          # 備份
+          cp "$MANIFEST" "${MANIFEST}.bak"
+          
+          # 1a. 移除 io.flutter.app.FlutterApplication 引用（改成 ${applicationName}）
+          sed -i.bak 's|android:name="io\.flutter\.app\.FlutterApplication"|android:name="${applicationName}"|g' "$MANIFEST"
+          
+          # 1b. 移除舊的 SplashScreenUntilFirstFrame meta-data
+          sed -i.bak '/io\.flutter\.app\.android\.SplashScreenUntilFirstFrame/d' "$MANIFEST"
+          
+          # 1c. 移除舊的 FlutterActivity meta-data（如果有）
+          sed -i.bak '/io\.flutter\.app\.FlutterActivity/d' "$MANIFEST"
+          
+          # 1d. 確保 flutterEmbedding = 2 存在
+          if ! grep -q 'flutterEmbedding' "$MANIFEST"; then
+            sed -i.bak 's|</application>|        <meta-data android:name="flutterEmbedding" android:value="2" />\n    </application>|' "$MANIFEST"
+          fi
+          
+          echo "=== AndroidManifest.xml after cleanup ==="
+          cat "$MANIFEST"
+          
+          # ==========================================================
+          # 步驟 2: 強制刪除所有舊 MainActivity，重新生成 v2 版本
+          # ==========================================================
+          echo "=== Removing old MainActivity files ==="
+          find android/app/src/main -name "MainActivity.kt" -delete || true
+          find android/app/src/main -name "MainActivity.java" -delete || true
+          
+          # 決定包名資料夾路徑 (預設 com.example.roster_pro)
+          PKG_PATH="android/app/src/main/kotlin/com/example/roster_pro"
+          mkdir -p "$PKG_PATH"
+          
+          cat > "$PKG_PATH/MainActivity.kt" <<'KT'
+          package com.example.roster_pro
 
           import android.Manifest
           import android.content.pm.PackageManager
@@ -57,7 +73,7 @@ workflows:
           import io.flutter.embedding.engine.FlutterEngine
           import io.flutter.plugin.common.MethodChannel
 
-          class MainActivity: FlutterActivity() {
+          class MainActivity : FlutterActivity() {
               private val CHANNEL = "com.roster/calendar_real"
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
@@ -69,7 +85,12 @@ workflows:
                           }
                           val calendars = mutableListOf<Map<String, Any?>>()
                           val uri = CalendarContract.Calendars.CONTENT_URI
-                          val projection = arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.CALENDAR_DISPLAY_NAME, CalendarContract.Calendars.ACCOUNT_NAME, CalendarContract.Calendars.ACCOUNT_TYPE)
+                          val projection = arrayOf(
+                              CalendarContract.Calendars._ID,
+                              CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+                              CalendarContract.Calendars.ACCOUNT_NAME,
+                              CalendarContract.Calendars.ACCOUNT_TYPE
+                          )
                           val cursor = contentResolver.query(uri, projection, null, null, null)
                           cursor?.use {
                               while (it.moveToNext()) {
@@ -78,7 +99,13 @@ workflows:
                                   val accountName = it.getString(2) ?: ""
                                   val accountType = it.getString(3) ?: ""
                                   val isGoogle = accountName.contains("gmail") || accountType.contains("google") || accountName.contains("google")
-                                  calendars.add(mapOf("id" to id, "displayName" to displayName, "accountName" to accountName, "accountType" to accountType, "isGoogle" to isGoogle))
+                                  calendars.add(mapOf(
+                                      "id" to id,
+                                      "displayName" to displayName,
+                                      "accountName" to accountName,
+                                      "accountType" to accountType,
+                                      "isGoogle" to isGoogle
+                                  ))
                               }
                           }
                           result.success(calendars)
@@ -89,10 +116,27 @@ workflows:
               }
           }
           KT
-          echo "MainActivity.kt patched for real calendar ID"
-          fi
+          echo "MainActivity.kt (v2) created at $PKG_PATH"
 
-          # 3. 建立 Widget 佈局 (包含 42 個日期格子)
+          # ==========================================================
+          # 步驟 3: 建立 widget_info.xml (小工具配置，缺少會編譯失敗)
+          # ==========================================================
+          mkdir -p android/app/src/main/res/xml
+          cat > android/app/src/main/res/xml/widget_info.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:minWidth="250dp"
+              android:minHeight="250dp"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget_layout"
+              android:resizeMode="horizontal|vertical"
+              android:widgetCategory="home_screen">
+          </appwidget-provider>
+          XML
+
+          # ==========================================================
+          # 步驟 4: 建立 widget_layout.xml (42 個日期格子)
+          # ==========================================================
           mkdir -p android/app/src/main/res/layout
           cat > android/app/src/main/res/layout/widget_layout.xml <<'XML'
           <?xml version="1.0" encoding="utf-8"?>
@@ -164,7 +208,6 @@ workflows:
                   android:columnCount="7"
                   android:rowCount="6"
                   android:layout_marginTop="2dp">
-
                   <TextView android:id="@+id/day0" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day1" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day2" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
@@ -172,7 +215,6 @@ workflows:
                   <TextView android:id="@+id/day4" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day5" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day6" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
-
                   <TextView android:id="@+id/day7" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day8" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day9" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
@@ -180,7 +222,6 @@ workflows:
                   <TextView android:id="@+id/day11" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day12" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day13" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
-
                   <TextView android:id="@+id/day14" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day15" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day16" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
@@ -188,7 +229,6 @@ workflows:
                   <TextView android:id="@+id/day18" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day19" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day20" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
-
                   <TextView android:id="@+id/day21" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day22" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day23" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
@@ -196,7 +236,6 @@ workflows:
                   <TextView android:id="@+id/day25" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day26" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day27" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
-
                   <TextView android:id="@+id/day28" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day29" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day30" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
@@ -204,7 +243,6 @@ workflows:
                   <TextView android:id="@+id/day32" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day33" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day34" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
-
                   <TextView android:id="@+id/day35" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day36" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day37" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
@@ -216,25 +254,11 @@ workflows:
           </LinearLayout>
           XML
 
-          # 4. 建立 widget_info.xml (此檔案缺失會導致編譯失敗與小工具無法註冊)
-          mkdir -p android/app/src/main/res/xml
-          cat > android/app/src/main/res/xml/widget_info.xml <<'XML'
-          <?xml version="1.0" encoding="utf-8"?>
-          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-              android:minWidth="250dp"
-              android:minHeight="250dp"
-              android:updatePeriodMillis="1800000"
-              android:initialLayout="@layout/widget_layout"
-              android:resizeMode="horizontal|vertical"
-              android:widgetCategory="home_screen">
-          </appwidget-provider>
-          XML
-          echo "widget_info.xml created"
-
-          # 5. 建立 RosterWidgetProvider.kt
-          mkdir -p android/app/src/main/kotlin/com/example/roster_pro
-          cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt <<'KT'
-          package com.example.roster_pro // <--- 請替換為你的包名
+          # ==========================================================
+          # 步驟 5: 建立 RosterWidgetProvider.kt
+          # ==========================================================
+          cat > "$PKG_PATH/RosterWidgetProvider.kt" <<'KT'
+          package com.example.roster_pro
 
           import android.app.PendingIntent
           import android.appwidget.AppWidgetManager
@@ -343,32 +367,27 @@ workflows:
               }
           }
           KT
-          echo "RosterWidgetProvider.kt patched successfully"
+          echo "RosterWidgetProvider.kt created"
 
-          # 6. 修改 AndroidManifest.xml (加入權限與 Receiver)
-          if grep -q "READ_CALENDAR" "$MANIFEST"; then echo "Calendar permission exists"; else
-            sed -i '' 's/<manifest/<manifest xmlns:tools="http:\/\/schemas.android.com\/tools"/' "$MANIFEST" 2>/dev/null || sed -i 's/<manifest/<manifest xmlns:tools="http:\/\/schemas.android.com\/tools"/' "$MANIFEST"
-            sed -i '' '/<application/i\
-              <uses-permission android:name="android.permission.READ_CALENDAR" />\
-              <uses-permission android:name="android.permission.WRITE_CALENDAR" />\
-          ' "$MANIFEST" 2>/dev/null || sed -i '/<application/i <uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />\n' "$MANIFEST"
+          # ==========================================================
+          # 步驟 6: 加入日曆權限 + Receiver 註冊
+          # ==========================================================
+          if ! grep -q "READ_CALENDAR" "$MANIFEST"; then
+            sed -i.bak 's|<application|<uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />\n    <application|' "$MANIFEST"
           fi
           
-          if grep -q "RosterWidgetProvider" "$MANIFEST"; then echo "Receiver exists"; else
-            sed -i '' '/<\/application>/i\
-              <receiver android:name=".RosterWidgetProvider" android:exported="false">\
-                <intent-filter>\
-                  <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\
-                  <action android:name="PREV_MONTH" />\
-                  <action android:name="NEXT_MONTH" />\
-                  <action android:name="REFRESH_WIDGET" />\
-                </intent-filter>\
-                <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info" />\
-              </receiver>\
-          ' "$MANIFEST" 2>/dev/null || sed -i '/<\/application>/i <receiver android:name=".RosterWidgetProvider" android:exported="false">\n<intent-filter>\n<action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n<action android:name="PREV_MONTH" />\n<action android:name="NEXT_MONTH" />\n<action android:name="REFRESH_WIDGET" />\n</intent-filter>\n<meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info" />\n</receiver>\n' "$MANIFEST"
+          if ! grep -q "RosterWidgetProvider" "$MANIFEST"; then
+            sed -i.bak 's|</application>|    <receiver android:name=".RosterWidgetProvider" android:exported="false">\n        <intent-filter>\n            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n            <action android:name="PREV_MONTH" />\n            <action android:name="NEXT_MONTH" />\n            <action android:name="REFRESH_WIDGET" />\n        </intent-filter>\n        <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info" />\n    </receiver>\n</application>|' "$MANIFEST"
           fi
-          echo "AndroidManifest.xml patched successfully"
+          
+          # 清理 .bak 備份檔，避免干擾
+          rm -f "${MANIFEST}.bak"
+          
+          echo "=== Final AndroidManifest.xml ==="
           cat "$MANIFEST"
+          
+          echo "=== Files in project ==="
+          find android/app/src/main -name "*.kt" -o -name "*.xml" | head -30
 
       - name: Build APK Release 9Fix
         script: |
