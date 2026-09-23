@@ -4,21 +4,20 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:device_calendar/device_calendar.dart';
 import 'package:timezone/timezone.dart' as tz;
-import 'package:timezone/data/latest.dart' as tzData;
+import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:home_widget/home_widget.dart';
 
-void main() { tzData.initializeTimeZones(); runApp(const RosterApp()); }
+void main() { tz_data.initializeTimeZones(); runApp(const RosterApp()); }
 
 class ShiftDef {
   String code; String label; double hours; double ot; Color color; String start; String end; bool hasAllowance; double allowance; bool isAllDay;
   ShiftDef(this.code,this.label,this.hours,this.color,{this.ot=0,this.start='07:00',this.end='15:30',this.hasAllowance=false,this.allowance=0,this.isAllDay=false});
   Map<String,dynamic> toJson()=>{'code':code,'label':label,'hours':hours,'ot':ot,'color':color.value,'start':start,'end':end,'hasAllowance':hasAllowance,'allowance':allowance,'isAllDay':isAllDay};
   factory ShiftDef.fromJson(Map<String,dynamic> j)=>ShiftDef(j['code'],j['label']??j['code'],(j['hours']??8).toDouble(),Color(j['color']??0xFFFF9800),ot:(j['ot']??0).toDouble(),start:j['start']??'07:00',end:j['end']??'15:30',hasAllowance:j['hasAllowance']??((j['allowance']??0)>0),allowance:(j['allowance']??0).toDouble(),isAllDay:j['isAllDay']??false);
-  String get detailTime=>isAllDay?'全天 ${hours.toStringAsFixed(1)}h':'$start-$end ${hours.toStringAsFixed(1)}h';
 }
 class SavedPattern { String name; List<List<String>> data; SavedPattern(this.name,this.data); Map<String,dynamic> toJson()=>{'name':name,'data':data}; factory SavedPattern.fromJson(Map<String,dynamic> j)=>SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r)=>(r as List).map<String>((e)=>e.toString()).toList()).toList()); }
-class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v8.8',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
+class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v8.9',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
 
 class MainPage extends StatefulWidget { const MainPage({super.key}); @override State<MainPage> createState()=>MainPageState(); }
 class MainPageState extends State<MainPage> {
@@ -28,23 +27,23 @@ Map<String,String> rosterExtraType={};
 List<String> allowanceTypes=['夜更','辛勞','特別','額外'];
 Map<String,ShiftDef> defs={
 '早':ShiftDef('早','早更',8,Colors.orange,start:'07:00',end:'15:30',hasAllowance:true,allowance:80),
-'中':ShiftDef('中','中更',8,Colors.blue,start:'14:00',end:'22:00',hasAllowance:false,allowance:0),
+'中':ShiftDef('中','中更',8,Colors.blue,start:'14:00',end:'22:00'),
 '宵':ShiftDef('宵','宵更',8,Colors.purple,start:'22:00',end:'06:00',hasAllowance:true,allowance:60),
-'O':ShiftDef('O','休',0,Colors.green,start:'00:00',end:'00:00',hasAllowance:false,allowance:0,isAllDay:true),
+'O':ShiftDef('O','休',0,Colors.green,start:'00:00',end:'00:00',isAllDay:true),
 };
 List<List<String>> pattern=[["早","早","中","中","宵","宵","O"],["早","早","早","中","中","O","O"]];
 List<SavedPattern> savedPatterns=[]; double carry=0; String customName='我的排更-專屬日曆'; TextEditingController nameCtrl=TextEditingController();
 double standardWeeklyHours=42; double overtimeRate=80; double calendarFontSize=14;
-bool googleSyncEnabled=false; bool autoSync=false; bool isYearReport=false;
-String holidayRegion='香港';
+bool googleSyncEnabled=false; bool autoSync=false;
 GlobalKey calKey=GlobalKey();
-DeviceCalendarPlugin _calendarPlugin = DeviceCalendarPlugin();
+final DeviceCalendarPlugin _calendarPlugin = DeviceCalendarPlugin();
 String? _rosterCalendarId;
 Map<String,String> _googleEventIdMap={};
 bool _isSyncing=false;
 
 Map<String,String> getHolidays(int year, String region){ if(region=='無') return {}; return {'$year-01-01':'元旦','$year-05-01':'勞動節','$year-07-01':'回歸','$year-10-01':'國慶','$year-12-25':'聖誕'}; }
 bool isHoliday(DateTime d){ return getHolidays(d.year, holidayRegion).containsKey(DateFormat('yyyy-MM-dd').format(d)); }
+String holidayRegion='香港';
 
 @override void initState(){ super.initState(); nameCtrl.text=customName; load(); }
 Future<void> load() async{
@@ -83,8 +82,8 @@ int isoWeek(DateTime date){ DateTime thursday=date.add(Duration(days:4-date.week
 void quickJumpMonth(){ int y=focused.year; int m=focused.month; showDialog(context:context,builder:(ctx){ return StatefulBuilder(builder:(ctx2,setD){ return AlertDialog(title:const Text('快速查找年月'),content:Column(mainAxisSize:MainAxisSize.min,children:[Row(children:[IconButton(icon:const Icon(Icons.remove),onPressed:()=>setD(()=>y--)),Expanded(child:Text('$y年',textAlign:TextAlign.center,style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold))),IconButton(icon:const Icon(Icons.add),onPressed:()=>setD(()=>y++))]),Wrap(spacing:8,children:List.generate(12,(i){ int mon=i+1; return ChoiceChip(label:Text('${mon}月'),selected:mon==m,onSelected:(_)=>setD(()=>m=mon)); }))]),actions:[TextButton(onPressed:()=>Navigator.pop(ctx2),child:const Text('取消')),FilledButton(onPressed:(){ setState(()=>focused=DateTime(y,m,1)); Navigator.pop(ctx2); },child:const Text('跳轉'))]); }); }); }
 
 Future<bool> handleCalendarPermission({bool silent=false}) async {
-try { await Permission.calendar.request(); } catch(_){}
 try { await Permission.calendarFullAccess.request(); } catch(_){}
+try { await Permission.calendar.request(); } catch(_){}
 var devHas = await _calendarPlugin.hasPermissions();
 if (devHas.isSuccess && devHas.data==true) return true;
 var devReq = await _calendarPlugin.requestPermissions();
@@ -138,14 +137,14 @@ DateTime endDt=DateTime(date.year,date.month,date.day,int.parse(def.end.split(':
 if(endDt.isBefore(startDt) || (def.start=='00:00' && def.end=='00:00')) { endDt=endDt.add(const Duration(days:1)); }
 String note=rosterNote[entry.key]??''; String exType=rosterExtraType[entry.key]??'津貼';
 String tag='[RosterPro]${entry.key}';
-String title = def.isAllDay? '$code 全天 ${note.isNotEmpty?'| $note':''}' : '$code ${def.start}-${def.end} ${note.isNotEmpty?'| $note':''}';
+String title = def.isAllDay? '$code 全天' : '$code ${def.start}-${def.end} ${note.isNotEmpty?'| $note':''}';
 String desc = '$tag|$customName\n排更: $code (${def.label})\n時間: ${def.isAllDay?'全天':'${def.start}-${def.end}'} ${def.hours}h\nOT: ${rosterOt[entry.key]??0}h\n津貼: $exType \$${rosterExtra[entry.key]??0}\n記事: ${note.isEmpty?'無':note}\n日期: ${entry.key}';
 var ev=Event(_rosterCalendarId!, title:title, description:desc, start:tz.TZDateTime.from(startDt, tz.local), end:tz.TZDateTime.from(endDt, tz.local), allDay: def.isAllDay);
 var res=await _calendarPlugin.createOrUpdateEvent(ev);
 if(res!=null && res.isSuccess && res.data!=null) { _googleEventIdMap[entry.key]=res.data!; }
 }
 var sp=await SharedPreferences.getInstance(); sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
-if(!silent && mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已同步到 [$customName] ${roster.length}項，刪舊${del}項，全天已用allDay'))); }
+if(!silent && mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('已同步到 [$customName] ${roster.length}項，刪舊${del}項'))); }
 }catch(e){ if(!silent && mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('同步失敗 $e'))); } }
 finally { _isSyncing=false; }
 }
@@ -169,7 +168,7 @@ String note=rosterNote[selKey]??'無';
 DateTime today=DateTime.now();
 return SafeArea(child:Column(children:[
 Padding(padding:const EdgeInsets.fromLTRB(12,8,12,4),child:Row(children:[InkWell(onTap:()=>quickJumpMonth(),child:Row(children:[Text('${focused.year}年${focused.month}月',style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold)),const Icon(Icons.arrow_drop_down)])),const Spacer(),IconButton(icon:const Icon(Icons.chevron_left),onPressed:(){ setState(()=>focused=DateTime(focused.year,focused.month-1,1)); }),IconButton(icon:const Icon(Icons.chevron_right),onPressed:(){ setState(()=>focused=DateTime(focused.year,focused.month+1,1)); }),FilledButton.tonal(onPressed:(){ setState((){ focused=DateTime(today.year,today.month,1); selectedDay=DateTime(today.year,today.month,today.day); }); },child:const Text('今天')),])),
-Expanded(child: Column(children:[Padding(padding:const EdgeInsets.symmetric(horizontal:6),child:Row(children:[Container(width:32,child:const Text('週',textAlign:TextAlign.center,style:TextStyle(fontWeight:FontWeight.bold,fontSize:11,color:Colors.deepPurple))),Expanded(child:Row(children:["一","二","三","四","五","六","日"].map((w)=>Expanded(child:Text(w,textAlign:TextAlign.center,style:const TextStyle(fontSize:11)))).toList()))])),Expanded(child: ListView.builder(shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),padding:EdgeInsets.zero,itemCount:weeks,itemBuilder:(ctx,row){ return Row(children:[Container(width:32,alignment:Alignment.center,child:Text('W${isoWeek(days[row*7])}',style:const TextStyle(fontSize:11,color:Colors.deepPurple,fontWeight:FontWeight.bold))),Expanded(child:GridView.builder(shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),padding:const EdgeInsets.all(3),gridDelegate:const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount:7,childAspectRatio:0.78,mainAxisSpacing:4,crossAxisSpacing:4),itemCount:7,itemBuilder:(ctx2,col){ int idx=row*7+col; DateTime day=days[idx]; bool inM=day.month==focused.month; String k=DateFormat('yyyy-MM-dd').format(day); String? code=roster[k]; var def=code!=null?defs[code]:null; bool sel=k==selKey; bool isToday = day.year==today.year && day.month==today.month && day.day==today.day; return GestureDetector(onTap:(){ setState(()=>selectedDay=day); },onLongPress:(){ setState(()=>selectedDay=day); showDetail(day); },child:Container(decoration:BoxDecoration(color:isToday?const Color(0xFFFFF9C4):!inM?const Color(0xFFF5F5F0):def!=null?def.color.withOpacity(0.18):const Color(0xFFFFF0D0),borderRadius:BorderRadius.circular(12),border:isToday?Border.all(width:2.5,color:Colors.orange):sel?Border.all(width:2,color:Colors.deepPurple):null),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[Text('${day.day}',style:TextStyle(fontWeight:FontWeight.bold,fontSize:calendarFontSize-1)),if(code!=null) Container(padding:const EdgeInsets.symmetric(horizontal:4,vertical:1),decoration:BoxDecoration(color:def?.color??Colors.orange,borderRadius:BorderRadius.circular(8)),child:Text(code,style:TextStyle(color:Colors.white,fontSize:calendarFontSize-2))),]))); })),]); })) ])),
+Expanded(child: Column(children:[Padding(padding:const EdgeInsets.symmetric(horizontal:6),child:Row(children:[SizedBox(width:32,child:const Text('週',textAlign:TextAlign.center,style:TextStyle(fontWeight:FontWeight.bold,fontSize:11,color:Colors.deepPurple))),Expanded(child:Row(children:["一","二","三","四","五","六","日"].map((w)=>Expanded(child:Text(w,textAlign:TextAlign.center,style:const TextStyle(fontSize:11)))).toList()))])),Expanded(child: ListView.builder(shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),padding:EdgeInsets.zero,itemCount:weeks,itemBuilder:(ctx,row){ return Row(children:[Container(width:32,alignment:Alignment.center,child:Text('W${isoWeek(days[row*7])}',style:const TextStyle(fontSize:11,color:Colors.deepPurple,fontWeight:FontWeight.bold))),Expanded(child:GridView.builder(shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),padding:const EdgeInsets.all(3),gridDelegate:const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount:7,childAspectRatio:0.78,mainAxisSpacing:4,crossAxisSpacing:4),itemCount:7,itemBuilder:(ctx2,col){ int idx=row*7+col; DateTime day=days[idx]; bool inM=day.month==focused.month; String k=DateFormat('yyyy-MM-dd').format(day); String? code=roster[k]; var def=code!=null?defs[code]:null; bool sel=k==selKey; bool isToday = day.year==today.year && day.month==today.month && day.day==today.day; return GestureDetector(onTap:(){ setState(()=>selectedDay=day); },onLongPress:(){ setState(()=>selectedDay=day); showDetail(day); },child:Container(decoration:BoxDecoration(color:isToday?const Color(0xFFFFF9C4):!inM?const Color(0xFFF5F5F0):def!=null?def.color.withOpacity(0.18):const Color(0xFFFFF0D0),borderRadius:BorderRadius.circular(12),border:isToday?Border.all(width:2.5,color:Colors.orange):sel?Border.all(width:2,color:Colors.deepPurple):null),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[Text('${day.day}',style:TextStyle(fontWeight:FontWeight.bold,fontSize:calendarFontSize-1)),if(code!=null) Container(padding:const EdgeInsets.symmetric(horizontal:4,vertical:1),decoration:BoxDecoration(color:def?.color??Colors.orange,borderRadius:BorderRadius.circular(8)),child:Text(code,style:TextStyle(color:Colors.white,fontSize:calendarFontSize-2))),]))); })),]); })) ])),
 Container(width:double.infinity,padding:const EdgeInsets.fromLTRB(12,10,12,12),decoration:const BoxDecoration(color:Colors.white,border:Border(top:BorderSide(color:Color(0xFFE0E0E0)))),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text('${DateFormat('MM/dd EEE').format(selectedDay)} ${roster[selKey]??'未排班'}',style:const TextStyle(fontSize:16,fontWeight:FontWeight.bold)),Text('時間：${selDef!=null?(selDef.isAllDay?'全天':'${selDef.start}-${selDef.end}'):'無'} | 津貼：${rosterExtraType[selKey]??'津貼'} \$${rosterExtra[selKey]??0} | 記事：$note'),])),
 ]));
 }
@@ -274,12 +273,28 @@ void editShiftDialog({ShiftDef? oldDef}){
         actions:[
           TextButton(onPressed:()=>Navigator.pop(ctx2),child:const Text('取消')),
           FilledButton(onPressed:(){
-            String newCode=codeCtrl.text.trim(); if(newCode.isEmpty) return;
+            String newCode=codeCtrl.text.trim();
+            if(newCode.isEmpty) return;
+            double h=double.tryParse(hoursCtrl.text)??8;
+            double al=double.tryParse(allowCtrl.text)??0;
             setState((){
-              if(oldKey.isNotEmpty && oldKey!=newCode) defs.remove(oldKey);
-              defs[newCode]=ShiftDef(newCode,labelCtrl.text.isEmpty?newCode:labelCtrl.text,double.tryParse(hoursCtrl.text)??8,picked,start:startCtrl.text,end:endCtrl.text,hasAllowance:hasAllow,allowance:double.tryParse(allowCtrl.text)??0,isAllDay:isAllDay);
+              if(oldKey.isNotEmpty && oldKey!=newCode){
+                defs.remove(oldKey);
+              }
+              defs[newCode]=ShiftDef(
+                newCode,
+                labelCtrl.text.isEmpty?newCode:labelCtrl.text,
+                h,
+                picked,
+                start:startCtrl.text,
+                end:endCtrl.text,
+                hasAllowance:hasAllow,
+                allowance:al,
+                isAllDay:isAllDay,
+              );
             });
-            save(); Navigator.pop(ctx2);
+            save();
+            Navigator.pop(ctx2);
           },child:const Text('儲存')),
         ],
       );
@@ -321,8 +336,8 @@ const SizedBox(height:12),
 }
 
 Widget reportTab(){
-int dim=DateTime(focused.year,focused.month+1,0).day; double hrs=0,ot=0; double allow=0; Map<String,int> shiftCount={}; Map<String,double> allowByType={};
-for(int i=1;i<=dim;i++){ DateTime dt=DateTime(focused.year,focused.month,i); String k=DateFormat('yyyy-MM-dd').format(dt); String? c=roster[k]; if(c==null) continue; var d=defs[c]; if(d!=null){ hrs+=d.hours; shiftCount[c]=(shiftCount[c]??0)+1; if(d.hasAllowance) allow+=d.allowance; } ot+=(rosterOt[k]??0); allow+=(rosterExtra[k]??0); String t=rosterExtraType[k]??'津貼'; allowByType[t]=(allowByType[t]??0)+(rosterExtra[k]??0); }
+int dim=DateTime(focused.year,focused.month+1,0).day; double hrs=0; double allow=0; Map<String,int> shiftCount={}; Map<String,double> allowByType={};
+for(int i=1;i<=dim;i++){ DateTime dt=DateTime(focused.year,focused.month,i); String k=DateFormat('yyyy-MM-dd').format(dt); String? c=roster[k]; if(c==null) continue; var d=defs[c]; if(d!=null){ hrs+=d.hours; shiftCount[c]=(shiftCount[c]??0)+1; if(d.hasAllowance) allow+=d.allowance; } allow+=(rosterExtra[k]??0); String t=rosterExtraType[k]??'津貼'; allowByType[t]=(allowByType[t]??0)+(rosterExtra[k]??0); }
 return ListView(padding:const EdgeInsets.all(12),children:[
 Text('${focused.year}年${focused.month}月 報表',style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),
 ...shiftCount.entries.map((e)=>ListTile(title:Text(e.key), trailing:Text('${e.value}次'))),
@@ -339,7 +354,7 @@ SwitchListTile(title:const Text('啟用日曆同步'), value:googleSyncEnabled, 
 ListTile(title:const Text('管理班次'), onTap: ()=> showDialog(context:context, builder:(ctx)=>SimpleDialog(title:const Text('班次'), children:[...defs.values.map((d)=>SimpleDialogOption(child:Text('${d.code} ${d.label}'), onPressed: ()=>editShiftDialog(oldDef:d))), SimpleDialogOption(child:const Text('+ 新增'), onPressed: ()=>editShiftDialog())]))),
 ListTile(title:const Text('手動同步去重'), subtitle:const Text('全天用allDay:true 含記事'), onTap: ()=>_syncToGoogle()),
 ListTile(title:const Text('按範圍清除'), onTap: ()=>clearRosterByRange()),
-const ListTile(title:Text('額外津貼名稱管理'), subtitle:Text('在日編輯頁可選')),
+const ListTile(title:Text('額外津貼名稱管理')),
 Wrap(spacing:6, children: allowanceTypes.map((t)=>Chip(label:Text(t), onDeleted: (){ setState(()=>allowanceTypes.remove(t)); save(); })).toList()),
 ]);
 }
