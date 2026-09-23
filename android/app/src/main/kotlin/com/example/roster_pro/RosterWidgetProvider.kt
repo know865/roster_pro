@@ -1,4 +1,4 @@
-package com.example.roster_pro // <--- 請替換為你的包名
+package com.example.roster_pro // <--- 如果你的包名不同，請替換這裡
 
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
@@ -53,25 +53,28 @@ class RosterWidgetProvider : AppWidgetProvider() {
         fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
             val views = RemoteViews(context.packageName, R.layout.widget_layout)
 
-            // 獲取當前顯示的月份
+            // 獲取當前顯示的月份 (優先讀取 widget 自己記住的年月，預設為當前月)
             val widgetPrefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
             val cal = Calendar.getInstance()
-            var year = widgetPrefs.getInt("year", cal.get(Calendar.YEAR))
-            var month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH))
-
-            // 讀取 Flutter 傳來的數據
-            val flutterPrefs: SharedPreferences = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-            val rosterJsonStr = flutterPrefs.getString("flutter.roster_json", "{}")
-            val defsJsonStr = flutterPrefs.getString("flutter.defs_json", "{}")
-            val todayBgColor = flutterPrefs.getLong("flutter.today_bg", 0xFFFFF9C4)
-            val todayBorderColor = flutterPrefs.getLong("flutter.today_border", 0xFFFF9800)
-
-            val rosterJson = try { JSONObject(rosterJsonStr) } catch (e: Exception) { JSONObject() }
-            val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
+            val year = widgetPrefs.getInt("year", cal.get(Calendar.YEAR))
+            val month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH)) // 0-11
 
             // 更新標題
             val monthNames = arrayOf("1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月")
             views.setTextViewText(R.id.tv_month_title, "${year}年 ${monthNames[month]}")
+
+            // 讀取 Flutter 傳來的數據
+            // 注意：Flutter 在 Android 原生存儲 SharedPreferences 時會加上 "flutter." 前綴
+            val flutterPrefs: SharedPreferences = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            val rosterJsonStr = flutterPrefs.getString("flutter.roster_json", "{}")
+            val defsJsonStr = flutterPrefs.getString("flutter.defs_json", "{}")
+            
+            // 讀取今日高亮顏色 (從 Flutter 傳過來的 int)
+            val todayBgColor = flutterPrefs.getLong("flutter.today_bg", 0xFFFFF9C4).toInt()
+            val todayBorderColor = flutterPrefs.getLong("flutter.today_border", 0xFFFF9800).toInt()
+
+            val rosterJson = try { JSONObject(rosterJsonStr) } catch (e: Exception) { JSONObject() }
+            val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
 
             // 計算日曆格子
             val calendar = Calendar.getInstance()
@@ -86,6 +89,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
             for (i in 0 until 42) {
                 val dayIndex = i - startOffset + 1
                 val textViewId = context.resources.getIdentifier("day$i", "id", context.packageName)
+                
                 if (textViewId != 0) {
                     if (dayIndex in 1..maxDaysInMonth) {
                         // 這是本月的日期
@@ -100,23 +104,25 @@ class RosterWidgetProvider : AppWidgetProvider() {
                         views.setTextViewText(textViewId, displayText)
                         views.setTextColor(textViewId, Color.parseColor("#333333"))
                         views.setViewVisibility(textViewId, View.VISIBLE)
-                        
-                        // 設置班次顏色（如果有的話）
+
+                        // 如果有班次，嘗試根據班次顏色設定背景色 (可選)
                         if (shiftCode.isNotEmpty()) {
                             val defObj = defsJson.optJSONObject(shiftCode)
                             if (defObj != null) {
                                 val colorInt = defObj.optLong("color", 0).toInt()
-                                // 這裡可以根據需要設置背景色或文字顏色，為簡單起見，我們只設置文字顏色
-                                // views.setInt(textViewId, "setBackgroundColor", Color.argb(50, Color.red(colorInt), Color.green(colorInt), Color.blue(colorInt)))
+                                // 將原色調淡一點作為背景
+                                val r = (Color.red(colorInt) * 0.3 + 255 * 0.7).toInt()
+                                val g = (Color.green(colorInt) * 0.3 + 255 * 0.7).toInt()
+                                val b = (Color.blue(colorInt) * 0.3 + 255 * 0.7).toInt()
+                                views.setInt(textViewId, "setBackgroundColor", Color.rgb(r, g, b))
                             }
+                        } else {
+                            views.setInt(textViewId, "setBackgroundColor", Color.TRANSPARENT)
                         }
 
                         // 高亮今天
                         if (dateStr == todayStr) {
-                            views.setInt(textViewId, "setBackgroundColor", todayBgColor.toInt())
-                            views.setInt(textViewId, "setBorderColor", todayBorderColor.toInt()) // 需要自定義 TextView 才能支持 border
-                        } else {
-                            views.setInt(textViewId, "setBackgroundColor", Color.TRANSPARENT)
+                            views.setInt(textViewId, "setBackgroundColor", todayBgColor)
                         }
 
                         // 點擊日期打開 App
@@ -126,6 +132,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
                         views.setOnClickPendingIntent(textViewId, pendingIntent)
 
                     } else {
+                        // 非本月的日期，隱藏或顯示空白
                         views.setTextViewText(textViewId, "")
                         views.setViewVisibility(textViewId, View.INVISIBLE)
                     }
@@ -145,6 +152,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
             val refreshPendingIntent = PendingIntent.getBroadcast(context, 2, refreshIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             views.setOnClickPendingIntent(R.id.btn_refresh, refreshPendingIntent)
 
+            // 更新 Widget
             appWidgetManager.updateAppWidget(appWidgetId, views)
         }
     }
