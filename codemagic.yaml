@@ -1,28 +1,123 @@
 workflows:
   Default Workflow:
-    name: RosterPro v7.0 FULL 6Fix
+    name: RosterPro v7.0 FULL 9Fix
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
       flutter: 3.22.2
       java: 17
+      groups:
+        - google_play
     scripts:
-      - name: Fix Kotlin
+      - name: Fix Kotlin + Restore Android + Permissions + Widgets (7.0原版方法)
         script: |
           set -e
           rm -rf test
           flutter config --no-analytics
-          flutter create . --platforms=android --project-name roster_pro --org com.example --no-pub
+          # 1. 冇 android 就自動生返，用返你7.0原版 package
+          if [ ! -f "android/app/src/main/AndroidManifest.xml" ]; then
+            flutter create . --platforms=android --project-name roster_pro --org com.example --no-pub
+          fi
+
+          # 2. Fix Kotlin 1.9.22 (你原本Fix)
           python3 << 'PY'
-          import pathlib
-          for fp in [pathlib.Path("android/build.gradle"), pathlib.Path("android/settings.gradle")]:
+          import pathlib, re
+          for fp in [pathlib.Path("android/build.gradle"), pathlib.Path("android/settings.gradle"), pathlib.Path("android/app/build.gradle")]:
             if not fp.exists(): continue
             t=fp.read_text()
             t=t.replace("1.7.10","1.9.22").replace("1.7.1","1.9.22").replace("1.8.22","1.9.22").replace("1.9.220","1.9.22")
+            t=re.sub(r'ext.kotlin_version\s*=\s*.*', "ext.kotlin_version = '1.9.22'", t)
             fp.write_text(t)
           PY
+
+          # 3. 注入日曆權限 - 解決你 (0) 空白同新裝唔彈權限 (Fix 5+6) - 用返你7.0原版所需權限
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q "READ_CALENDAR" "$MANIFEST"; then
+            sed -i '' '/<manifest/a\
+              <uses-permission android:name="android.permission.READ_CALENDAR" />\
+              <uses-permission android:name="android.permission.WRITE_CALENDAR" />\
+              <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />\
+            ' "$MANIFEST" || sed -i '/<manifest/a\    <uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />' "$MANIFEST"
+          fi
+
+          # 4. 注入你7.0原版 com.roster/calendar_real 通道 MainActivity.kt
+          MAIN_KT=$(find android -name "MainActivity.kt" | head -n 1)
+          echo "Inject calendar channel to $MAIN_KT"
+          cat > "$MAIN_KT" << 'KT'
+          package com.example.roster_pro
+          import android.database.Cursor
+          import android.provider.CalendarContract
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+          class MainActivity: FlutterActivity() {
+            private val CHANNEL = "com.roster/calendar_real"
+            override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+              super.configureFlutterEngine(flutterEngine)
+              MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+                if (call.method == "getCalendars") {
+                  try {
+                    val calendars = mutableListOf<Map<String, Any>>()
+                    val uri = CalendarContract.Calendars.CONTENT_URI
+                    val projection = arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.CALENDAR_DISPLAY_NAME, CalendarContract.Calendars.ACCOUNT_NAME, CalendarContract.Calendars.ACCOUNT_TYPE)
+                    val cursor: Cursor? = contentResolver.query(uri, projection, null, null, null)
+                    cursor?.use {
+                      while (it.moveToNext()) {
+                        val id = it.getLong(0).toString()
+                        val displayName = it.getString(1) ?: "未命名"
+                        val accountName = it.getString(2) ?: ""
+                        val accountType = it.getString(3) ?: ""
+                        val isGoogle = accountType.contains("google") || accountName.contains("gmail") || accountType.contains("com.google")
+                        calendars.add(mapOf("id" to id, "displayName" to displayName, "accountName" to accountName, "accountType" to accountType, "isGoogle" to isGoogle))
+                      }
+                    }
+                    result.success(calendars)
+                  } catch (e: Exception) { result.error("ERR", e.message, null) }
+                } else { result.notImplemented() }
+              }
+            }
+          }
+          KT
+
+          # 5. 注入 4x4 Widget - 解決你搵唔到小工具 (Fix 9)
+          mkdir -p android/app/src/main/res/xml
+          mkdir -p android/app/src/main/res/layout
+          cat > android/app/src/main/res/xml/roster_widget_info.xml << 'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:minWidth="250dp"
+              android:minHeight="250dp"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget_layout"
+              android:resizeMode="horizontal|vertical"
+              android:widgetCategory="home_screen" />
+          XML
+          cat > android/app/src/main/res/layout/widget_layout.xml << 'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="match_parent"
+              android:orientation="vertical" android:background="#FFFFFF" android:padding="12dp">
+              <TextView android:id="@+id/today_code" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="RosterPro" android:textSize="18sp" android:textStyle="bold" />
+              <TextView android:id="@+id/note" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" />
+          </LinearLayout>
+          XML
+
+          # 6. 確保 receiver 註冊 (冇就加)
+          if ! grep -q "RosterWidgetProvider" "$MANIFEST"; then
+            sed -i '' '/<\/application>/i\
+                  <receiver android:name=".RosterWidgetProvider" android:exported="true">\
+                      <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>\
+                      <meta-data android:name="android.appwidget.provider" android:resource="@xml\/roster_widget_info" />\
+                  </receiver>\
+            ' "$MANIFEST" || echo "Need manual inject"
+          fi
+
           flutter pub get
+
       - name: Build APK
         script: flutter build apk --release --no-tree-shake-icons
+
     artifacts:
       - build/**/outputs/**/*.apk
+      - build/**/outputs/**/mapping.txt
+      - flutter_*.log
