@@ -1,4 +1,4 @@
-package roster_pro // <--- 請替換為你的包名
+package com.example.roster_pro // <--- 請替換為你的包名
 
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
