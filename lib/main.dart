@@ -10,14 +10,15 @@ import 'package:device_calendar/device_calendar.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzData;
 import 'package:permission_handler/permission_handler.dart';
+import 'package:home_widget/home_widget.dart'; // <-- Widget
 
-void main() { tzData.initializeTimeZones(); runApp(const RosterApp()); }
+void main() { tzData.initializeTimeZones(); WidgetsFlutterBinding.ensureInitialized(); HomeWidget.setAppGroupId('group.rosterPro'); runApp(const RosterApp()); }
 
 class ShiftDef {
-  String code; String label; double hours; double ot; Color color; String start; String end; bool hasAllowance; double allowance;
-  ShiftDef(this.code,this.label,this.hours,this.color,{this.ot=0,this.start='07:00',this.end='15:30',this.hasAllowance=false,this.allowance=0});
-  Map<String,dynamic> toJson()=>{'code':code,'label':label,'hours':hours,'ot':ot,'color':color.value,'start':start,'end':end,'hasAllowance':hasAllowance,'allowance':allowance};
-  factory ShiftDef.fromJson(Map<String,dynamic> j)=>ShiftDef(j['code'],j['label']??j['code'],(j['hours']??8).toDouble(),Color(j['color']??0xFFFF9800),ot:(j['ot']??0).toDouble(),start:j['start']??'07:00',end:j['end']??'15:30',hasAllowance:j['hasAllowance']??((j['allowance']??0)>0),allowance:(j['allowance']??0).toDouble());
+  String code; String label; double hours; double ot; Color color; String start; String end; bool hasAllowance; double allowance; bool isAllDay;
+  ShiftDef(this.code,this.label,this.hours,this.color,{this.ot=0,this.start='07:00',this.end='15:30',this.hasAllowance=false,this.allowance=0,this.isAllDay=false});
+  Map<String,dynamic> toJson()=>{'code':code,'label':label,'hours':hours,'ot':ot,'color':color.value,'start':start,'end':end,'hasAllowance':hasAllowance,'allowance':allowance,'isAllDay':isAllDay};
+  factory ShiftDef.fromJson(Map<String,dynamic> j)=>ShiftDef(j['code'],j['label']??j['code'],(j['hours']??8).toDouble(),Color(j['color']??0xFFFF9800),ot:(j['ot']??0).toDouble(),start:j['start']??'07:00',end:j['end']??'15:30',hasAllowance:j['hasAllowance']??((j['allowance']??0)>0),allowance:(j['allowance']??0).toDouble(),isAllDay:j['isAllDay']??false);
 }
 class ExtraAllowance { String name; double amount; ExtraAllowance(this.name,this.amount); Map<String,dynamic> toJson()=>{'name':name,'amount':amount}; factory ExtraAllowance.fromJson(Map<String,dynamic> j)=>ExtraAllowance(j['name'],(j['amount'] as num).toDouble()); }
 class SavedPattern { String name; List<List<String>> data; SavedPattern(this.name,this.data); Map<String,dynamic> toJson()=>{'name':name,'data':data}; factory SavedPattern.fromJson(Map<String,dynamic> j)=>SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r)=>(r as List).map<String>((e)=>e.toString()).toList()).toList()); }
@@ -31,7 +32,7 @@ Map<String,ShiftDef> defs={
 '早':ShiftDef('早','早更',8,Colors.orange,start:'07:00',end:'15:30',hasAllowance:true,allowance:80),
 '中':ShiftDef('中','中更',8,Colors.blue,start:'14:00',end:'22:00'),
 '宵':ShiftDef('宵','宵更',8,Colors.purple,start:'22:00',end:'06:00',hasAllowance:true,allowance:60),
-'O':ShiftDef('O','休',0,Colors.green,start:'00:00',end:'00:00'),
+'O':ShiftDef('O','休',0,Colors.green,start:'00:00',end:'00:00',isAllDay:true),
 };
 List<List<String>> pattern=[["早","早","中","中","宵","宵","O"],["早","早","早","中","中","O","O"]];
 List<SavedPattern> savedPatterns=[]; double carry=0; String customName='我的排更-專屬日曆'; TextEditingController nameCtrl=TextEditingController();
@@ -41,6 +42,20 @@ String? editingPatternName; int? editingPatternIndex; String holidayRegion='香�
 GlobalKey calKey=GlobalKey();
 DeviceCalendarPlugin _calendarPlugin = DeviceCalendarPlugin();
 String? _rosterCalendarId; Map<String,String> _googleEventIdMap={}; bool _isSyncing=false;
+
+Future<void> updateWidget() async {
+  String todayKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
+  String tomorrowKey = DateFormat('yyyy-MM-dd').format(DateTime.now().add(const Duration(days:1)));
+  String todayCode = roster[todayKey]?? '休';
+  String tomorrowCode = roster[tomorrowKey]?? '休';
+  var def = defs[todayCode];
+  await HomeWidget.saveWidgetData('today_code', todayCode);
+  await HomeWidget.saveWidgetData('today_label', def?.label?? todayCode);
+  await HomeWidget.saveWidgetData('today_time', def!=null? '${def.start}-${def.end}' : '');
+  await HomeWidget.saveWidgetData('tomorrow_code', tomorrowCode);
+  await HomeWidget.saveWidgetData('note', rosterNote[todayKey]?? '');
+  await HomeWidget.updateWidget(name: 'RosterWidgetProvider', androidName: 'RosterWidgetProvider');
+}
 
 Map<String,String> getHolidays(int year, String region){
 if(region=='無') return {};
@@ -55,16 +70,18 @@ Future<void> load() async{
 var sp=await SharedPreferences.getInstance();
 var r=sp.getString('roster'); if(r!=null) roster=Map<String,String>.from(jsonDecode(r));
 var rn=sp.getString('note'); if(rn!=null) rosterNote=Map<String,String>.from(jsonDecode(rn));
-setState((){ carry=sp.getDouble('carry')??0; customName=sp.getString('cName')??'我的排更-專屬日曆'; nameCtrl.text=customName; _rosterCalendarId=sp.getString('rosterCalId'); googleSyncEnabled=sp.getBool('gSync')??false; });
+var ro=sp.getString('roOt'); if(ro!=null) try{ rosterOt=Map<String,double>.from((jsonDecode(ro) as Map).map((k,v)=>MapEntry(k as String,(v as num).toDouble()))); }catch(_){}
+setState((){ customName=sp.getString('cName')??'我的排更-專屬日曆'; nameCtrl.text=customName; _rosterCalendarId=sp.getString('rosterCalId'); googleSyncEnabled=sp.getBool('gSync')??false; });
+updateWidget();
 }
 Future<void> save() async{
 var sp=await SharedPreferences.getInstance();
 sp.setString('roster',jsonEncode(roster)); sp.setString('note',jsonEncode(rosterNote));
 sp.setString('roOt',jsonEncode(rosterOt)); sp.setString('roEx',jsonEncode(rosterExtra)); sp.setString('roExH',jsonEncode(rosterExtraHrs));
 sp.setString('defs',jsonEncode(defs.map((k,v)=>MapEntry(k,v.toJson())))); sp.setString('pattern',jsonEncode(pattern));
-sp.setDouble('carry',carry); sp.setString('cName',customName);
 if(_rosterCalendarId!=null) sp.setString('rosterCalId', _rosterCalendarId!);
 sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap)); sp.setBool('gSync', googleSyncEnabled);
+updateWidget();
 }
 
 int isoWeek(DateTime date){ DateTime th=date.add(Duration(days:4-date.weekday)); DateTime jan1=DateTime(th.year,1,1); return 1+(th.difference(jan1).inDays/7).floor(); }
@@ -136,6 +153,6 @@ int dim=DateTime(focused.year,focused.month+1,0).day; double hrs=0,allow=0; Map<
 for(int i=1;i<=dim;i++){ String k=DateFormat('yyyy-MM-dd').format(DateTime(focused.year,focused.month,i)); var code=roster[k]; if(code==null) continue; var d=defs[code]; if(d!=null){ hrs+=d.hours; if(d.hasAllowance) allow+=d.allowance; cnt[code]=(cnt[code]??0)+1; } allow+=rosterExtra[k]??0; }
 return ListView(padding:const EdgeInsets.all(12),children:[Text('${focused.year}年${focused.month}月報表',style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),...cnt.entries.map((e)=>ListTile(title:Text(e.key),trailing:Text('${e.value}次'))),const Divider(),ListTile(title:const Text('總工時'),trailing:Text('$hrs')),ListTile(title:const Text('總津貼'),trailing:Text('\$$allow'))]);
 }
-Widget settingsTab(){ return ListView(padding:const EdgeInsets.all(16),children:[SwitchListTile(title:const Text('啟用日曆同步'),value:googleSyncEnabled,onChanged:(v) async { if(v){ await _requestGooglePerm(); } else { setState(()=>googleSyncEnabled=false); save(); } }),ListTile(title:const Text('手動同步去重'),onTap:()=>_syncToGoogle()),ListTile(title:const Text('備份'),onTap:() async { var sp=await SharedPreferences.getInstance(); String data=sp.getString('roster')??'{}'; String? dir=await FilePicker.platform.getDirectoryPath(); if(dir==null) return; await File('$dir/roster_${DateFormat('yyyyMMdd').format(DateTime.now())}.json').writeAsString(data); }),]); }
+Widget settingsTab(){ return ListView(padding:const EdgeInsets.all(16),children:[SwitchListTile(title:const Text('啟用日曆同步'),value:googleSyncEnabled,onChanged:(v) async { if(v){ await _requestGooglePerm(); } else { setState(()=>googleSyncEnabled=false); save(); } }),ListTile(title:const Text('手動同步去重'),onTap:()=>_syncToGoogle()),ListTile(title:const Text('桌面Widget已啟用'),subtitle:const Text('今日/明日更份會自動更新到桌面')),]); }
 @override Widget build(BuildContext context){ return Scaffold(body:[calTab(),patternTab(),reportTab(),settingsTab()][tab],bottomNavigationBar:NavigationBar(selectedIndex:tab,onDestinationSelected:(i)=>setState(()=>tab=i),destinations:const[NavigationDestination(icon:Icon(Icons.calendar_month),label:'月曆'),NavigationDestination(icon:Icon(Icons.pattern),label:'模式'),NavigationDestination(icon:Icon(Icons.bar_chart),label:'報表'),NavigationDestination(icon:Icon(Icons.settings),label:'設定')])); }
 }
