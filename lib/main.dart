@@ -233,56 +233,63 @@ FilledButton(onPressed: ()=>Navigator.pop(ctx2), child:const Text('完成')),
 });
 }
 
+// === 已修復 310 行括號 ===
 void editShiftDialog({ShiftDef? oldDef}){
-var codeCtrl=TextEditingController(text:oldDef?.code??'');
-var labelCtrl=TextEditingController(text:oldDef?.label??'');
-var hoursCtrl=TextEditingController(text:oldDef?.hours.toString()??'8');
-var startCtrl=TextEditingController(text:oldDef?.start??'07:00');
-var endCtrl=TextEditingController(text:oldDef?.end??'15:30');
-var allowCtrl=TextEditingController(text:oldDef?.allowance.toString()??'0');
-bool hasAllow=oldDef?.hasAllowance??false;
-bool isAllDay=oldDef?.isAllDay??false;
-Color picked=oldDef?.color??Colors.orange;
-String oldKey=oldDef?.code??'';
-showDialog(context:context,builder:(ctx){
-return StatefulBuilder(builder:(ctx2,setS){
-return AlertDialog(
-title:Text(oldDef==null?'新增班次':'編輯 ${oldDef.code}'),
-content:SingleChildScrollView(child:Column(children:[
-TextField(controller:codeCtrl,decoration:const InputDecoration(labelText:'代號')),
-TextField(controller:labelCtrl,decoration:const InputDecoration(labelText:'名稱')),
-Row(children:[
-Expanded(child: TextField(controller:startCtrl, decoration:const InputDecoration(labelText:'開始 HH:mm', border:OutlineInputBorder(), isDense:true))),
-const SizedBox(width:8),
-Expanded(child: TextField(controller:endCtrl, decoration:const InputDecoration(labelText:'結束 HH:mm', border:OutlineInputBorder(), isDense:true))),
-]),
-Container(padding:const EdgeInsets.all(8), decoration:BoxDecoration(border:Border.all(color:Colors.greenAccent,width:2), borderRadius:BorderRadius.circular(12)), child:Column(children:[
-Row(children:[
-Checkbox(value:isAllDay, onChanged:(v){ setS((){ isAllDay=v??false; }); },),
-const Text('全天'),
-]),
-SizedBox(height:56, child: TextField(controller:hoursCtrl, decoration:const InputDecoration(labelText:'工時', border:OutlineInputBorder(), isDense:true))),
-])),
-Row(children:[
-Checkbox(value:hasAllow, onChanged:(v){ setS((){ hasAllow=v??false; }); },),
-const Text('有津貼核實'),
-]),
-if(hasAllow) TextField(controller:allowCtrl,decoration:const InputDecoration(labelText:'津貼金額', border:OutlineInputBorder(), isDense:true)),
-])),
-actions:[
-TextButton(onPressed:()=>Navigator.pop(ctx2),child:const Text('取消')),
-FilledButton(onPressed:(){
-String newCode=codeCtrl.text.trim(); if(newCode.isEmpty) return;
-setState((){
-if(oldKey.isNotEmpty && oldKey!=newCode){ defs.remove(oldKey); }
-defs[newCode]=ShiftDef(newCode,labelCtrl.text.isEmpty?newCode:labelCtrl.text,double.tryParse(hoursCtrl.text)??8,picked,start:startCtrl.text,end:endCtrl.text,hasAllowance:hasAllow,allowance:double.tryParse(allowCtrl.text)??0,isAllDay:isAllDay);
-});
-save(); Navigator.pop(ctx2);
-},child:const Text('儲存')),
-],
-);
-});
-});
+  var codeCtrl=TextEditingController(text:oldDef?.code??'');
+  var labelCtrl=TextEditingController(text:oldDef?.label??'');
+  var hoursCtrl=TextEditingController(text:oldDef?.hours.toString()??'8');
+  var startCtrl=TextEditingController(text:oldDef?.start??'07:00');
+  var endCtrl=TextEditingController(text:oldDef?.end??'15:30');
+  var allowCtrl=TextEditingController(text:oldDef?.allowance.toString()??'0');
+  bool hasAllow=oldDef?.hasAllowance??false;
+  bool isAllDay=oldDef?.isAllDay??false;
+  Color picked=oldDef?.color??Colors.orange;
+  String oldKey=oldDef?.code??'';
+  showDialog(context:context,builder:(ctx){
+    return StatefulBuilder(builder:(ctx2,setS){
+      return AlertDialog(
+        title:Text(oldDef==null?'新增班次':'編輯 ${oldDef.code}'),
+        content:SingleChildScrollView(
+          child:Column(children:[
+            TextField(controller:codeCtrl,decoration:const InputDecoration(labelText:'代號')),
+            TextField(controller:labelCtrl,decoration:const InputDecoration(labelText:'名稱')),
+            Row(children:[
+              Expanded(child:TextField(controller:startCtrl,decoration:const InputDecoration(labelText:'開始 HH:mm',border:OutlineInputBorder(),isDense:true))),
+              const SizedBox(width:8),
+              Expanded(child:TextField(controller:endCtrl,decoration:const InputDecoration(labelText:'結束 HH:mm',border:OutlineInputBorder(),isDense:true))),
+            ]),
+            Container(
+              padding:const EdgeInsets.all(8),
+              decoration:BoxDecoration(border:Border.all(color:Colors.greenAccent,width:2),borderRadius:BorderRadius.circular(12)),
+              child:Column(children:[
+                Row(children:[
+                  Checkbox(value:isAllDay,onChanged:(v){ setS(()=>isAllDay=v??false); }),
+                  const Text('全天'),
+                ]),
+                SizedBox(height:56,child:TextField(controller:hoursCtrl,decoration:const InputDecoration(labelText:'工時',border:OutlineInputBorder(),isDense:true))),
+              ]),
+            ),
+            Row(children:[
+              Checkbox(value:hasAllow,onChanged:(v){ setS(()=>hasAllow=v??false); }),
+              const Text('有津貼核實'),
+            ]),
+            if(hasAllow) TextField(controller:allowCtrl,decoration:const InputDecoration(labelText:'津貼金額',border:OutlineInputBorder(),isDense:true)),
+          ]),
+        ),
+        actions:[
+          TextButton(onPressed:()=>Navigator.pop(ctx2),child:const Text('取消')),
+          FilledButton(onPressed:(){
+            String newCode=codeCtrl.text.trim(); if(newCode.isEmpty) return;
+            setState((){
+              if(oldKey.isNotEmpty && oldKey!=newCode) defs.remove(oldKey);
+              defs[newCode]=ShiftDef(newCode,labelCtrl.text.isEmpty?newCode:labelCtrl.text,double.tryParse(hoursCtrl.text)??8,picked,start:startCtrl.text,end:endCtrl.text,hasAllowance:hasAllow,allowance:double.tryParse(allowCtrl.text)??0,isAllDay:isAllDay);
+            });
+            save(); Navigator.pop(ctx2);
+          },child:const Text('儲存')),
+        ],
+      );
+    });
+  });
 }
 
 Widget patternTab(){
