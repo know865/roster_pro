@@ -1,6 +1,6 @@
 workflows:
   Default Workflow:
-    name: RosterPro v8.0 Build
+    name: RosterPro v8.1 Kotlin1.9 Fix
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
@@ -15,27 +15,36 @@ workflows:
           rm -f pubspec.lock || true
           flutter create --platforms=android --project-name roster_pro --org com.example . --no-pub
 
-      - name: 2. Fix Kotlin Duplicate
+      - name: 2. Upgrade Kotlin to 1.9.22 to match home_widget
         script: |
           set -e
-          sed -i.bak "s/ext.kotlin_version = '.*'/ext.kotlin_version = '1.8.10'/" android/build.gradle || true
-          APP="android/app/build.gradle"
-          if ! grep -q "resolutionStrategy" "$APP"; then
-            python3 << 'PY'
-          path="android/app/build.gradle"
+          echo "=== 強制升級 Kotlin 1.9.22 ==="
+          python3 << 'PY'
+          path="android/build.gradle"
           txt=open(path).read()
-          txt=txt.replace("android {","android {\n    configurations.all {\n        resolutionStrategy {\n            force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.10'\n            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.10'\n            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.10'\n        }\n    }")
+          # 1. 改 ext.kotlin_version
+          import re
+          txt=re.sub(r"ext.kotlin_version\s*=\s*'[^']+'", "ext.kotlin_version = '1.9.22'", txt)
+          # 2. 確保用 1.9.22 的 gradle plugin
+          if "kotlin_version" not in txt:
+              txt=txt.replace("buildscript {", "buildscript {\n    ext.kotlin_version = '1.9.22'")
           open(path,"w").write(txt)
-          PY
-          fi
+          print(open(path).read())
 
-      - name: 3. Inject Permissions + Widget v8.0
+          # 3. app/build.gradle 強制 stdlib 1.9.0
+          app="android/app/build.gradle"
+          txt=open(app).read()
+          if "resolutionStrategy" not in txt:
+              txt=txt.replace("android {","android {\n    configurations.all {\n        resolutionStrategy {\n            force 'org.jetbrains.kotlin:kotlin-stdlib:1.9.0'\n            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.0'\n            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.0'\n            force 'org.jetbrains.kotlin:kotlin-stdlib-common:1.9.0'\n        }\n    }")
+          open(app,"w").write(txt)
+          PY
+
+      - name: 3. Inject Permissions + Widget
         script: |
           set -e
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           mkdir -p android/app/src/main/res/layout android/app/src/main/res/xml android/app/src/main/kotlin/com/example/roster_pro
 
-          # 1. 寫 Widget 佈局
           cat > android/app/src/main/res/layout/roster_widget_layout.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#FFFFFF" android:padding="8dp">
@@ -49,7 +58,6 @@ workflows:
           <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android" android:minWidth="180dp" android:minHeight="180dp" android:updatePeriodMillis="3600000" android:initialLayout="@layout/roster_widget_layout" android:resizeMode="horizontal|vertical" android:widgetCategory="home_screen"/>
           EOF
 
-          # 2. 寫 Widget Provider
           cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt << 'EOF'
           package com.example.roster_pro
           import android.app.PendingIntent
@@ -72,31 +80,20 @@ workflows:
           }
           EOF
 
-          # 3. 用 Python 安全修改 Manifest，唔會爛 XML
           python3 << 'PY'
           import re
           path="android/app/src/main/AndroidManifest.xml"
           xml=open(path,encoding='utf-8').read()
-
-          # 清舊權限避免重複
           xml=re.sub(r'\s*<uses-permission[^>]*READ_CALENDAR[^>]*/?>\s*',"",xml)
           xml=re.sub(r'\s*<uses-permission[^>]*WRITE_CALENDAR[^>]*/?>\s*',"",xml)
-          xml=re.sub(r'\s*<uses-permission[^>]*READ_MEDIA_IMAGES[^>]*/?>\s*',"",xml)
           xml=re.sub(r'\s*<receiver[^>]*RosterWidgetProvider.*?</receiver>\s*',"",xml,flags=re.DOTALL)
-
-          perms='    <uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />\n    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />\n'
-
+          perms='    <uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />\n    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />\n'
           xml=xml.replace("<application", perms+"<application",1)
-
           receiver='        <receiver android:name=".RosterWidgetProvider" android:exported="true">\n            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>\n            <meta-data android:name="android.appwidget.provider" android:resource="@xml/roster_widget_info" />\n        </receiver>\n'
-
           xml=xml.replace("</application>", receiver+"</application>",1)
-
           open(path,"w",encoding='utf-8').write(xml)
-          print("Manifest fixed OK")
           PY
 
-          # 4. 注入 MainActivity 真ID讀取
           cat > android/app/src/main/kotlin/com/example/roster_pro/MainActivity.kt << 'EOF'
           package com.example.roster_pro
           import android.content.ContentResolver
@@ -131,9 +128,6 @@ workflows:
               }
           }
           EOF
-
-          echo "=== Manifest 檢查 ==="
-          cat "$MANIFEST"
           flutter clean
           flutter pub get
 
