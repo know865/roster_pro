@@ -1,13 +1,13 @@
 workflows:
   Default Workflow:
-    name: RosterPro v8.2 Fix All Kotlin
+    name: RosterPro v8.3 Final
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
       flutter: 3.22.2
       java: 17
     scripts:
-      - name: 1. Recreate Android
+      - name: 1. Recreate Android + Fix pubspec
         script: |
           set -e
           git rm -rf --cached android --ignore-unmatch || true
@@ -15,41 +15,61 @@ workflows:
           rm -rf ~/.gradle/caches || true
           rm -f pubspec.lock || true
           flutter create --platforms=android --project-name roster_pro --org com.example . --no-pub
+          cat > pubspec.yaml << 'YAML'
+          name: roster_pro
+          description: Roster Pro
+          publish_to: 'none'
+          version: 7.7.0+77
+          environment:
+            sdk: ">=3.0.0 <4.0.0"
+          dependencies:
+            flutter:
+              sdk: flutter
+            intl: any
+            shared_preferences: any
+            device_calendar: any
+            timezone: any
+            permission_handler: any
+            file_picker: any
+            home_widget: ^0.6.0
+            path_provider: any
+          flutter:
+            uses-material-design: true
+          YAML
+          flutter pub get
 
       - name: 2. Force Kotlin 1.9.22 Everywhere
         script: |
           set -e
           python3 << 'PY'
           import re, pathlib
-          # 1. 改 android/settings.gradle - 呢個先係關鍵
-          sp = pathlib.Path("android/settings.gradle").read_text()
-          print("=== 原 settings.gradle ===")
-          print(sp[:1000])
-          sp = re.sub(r"id\s+\"org.jetbrains.kotlin.android\"\s+version\s+\"[^\"]+\"", 'id "org.jetbrains.kotlin.android" version "1.9.22" apply false', sp)
-          sp = re.sub(r"org.jetbrains.kotlin.android.*1\.7\.10", 'org.jetbrains.kotlin.android" version "1.9.22" apply false', sp)
-          # 舊版可能係 ext.kotlin_version
-          pathlib.Path("android/settings.gradle").write_text(sp)
-          
-          # 2. 改 android/build.gradle
-          bg = pathlib.Path("android/build.gradle").read_text()
-          bg = re.sub(r"ext.kotlin_version\s*=\s*'[^']+'", "ext.kotlin_version = '1.9.22'", bg)
-          pathlib.Path("android/build.gradle").write_text(bg)
-
-          # 3. 強制 app/build.gradle 用 1.9.0 stdlib
-          app = pathlib.Path("android/app/build.gradle").read_text()
-          if "resolutionStrategy" not in app:
-              app = app.replace("android {", "android {\n    configurations.all {\n        resolutionStrategy {\n            force 'org.jetbrains.kotlin:kotlin-stdlib:1.9.22'\n            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.22'\n            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.22'\n        }\n    }")
-          pathlib.Path("android/app/build.gradle").write_text(app)
-          print("=== 已改 settings.gradle ===")
-          print(pathlib.Path("android/settings.gradle").read_text()[:1500])
+          for p in ["android/settings.gradle","android/settings.gradle.kts"]:
+              fp=pathlib.Path(p)
+              if not fp.exists(): continue
+              t=fp.read_text()
+              t=re.sub(r'version\s*\(\s*"[^"]*"\s*\)\s*//\s*kotlin', 'version("1.9.22") // kotlin', t)
+              t=re.sub(r'id\s*\(\s*"org.jetbrains.kotlin.android"\s*\)\s*version\s*"[^"]+"', 'id("org.jetbrains.kotlin.android") version "1.9.22"', t)
+              t=re.sub(r'id\s+"org.jetbrains.kotlin.android"\s+version\s+"[^"]+"', 'id "org.jetbrains.kotlin.android" version "1.9.22" apply false', t)
+              fp.write_text(t)
+          bg=pathlib.Path("android/build.gradle")
+          if bg.exists():
+              t=bg.read_text()
+              t=re.sub(r"ext.kotlin_version\s*=\s*'[^']+'", "ext.kotlin_version = '1.9.22'", t)
+              if "ext.kotlin_version" not in t:
+                  t=t.replace("buildscript {", "buildscript {\n    ext.kotlin_version = '1.9.22'\n")
+              bg.write_text(t)
+          app=pathlib.Path("android/app/build.gradle")
+          t=app.read_text()
+          if "resolutionStrategy" not in t:
+              t=t.replace("android {", "android {\n    configurations.all {\n        resolutionStrategy {\n            force 'org.jetbrains.kotlin:kotlin-stdlib:1.9.22'\n            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.22'\n            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.22'\n        }\n    }")
+          app.write_text(t)
           PY
 
-      - name: 3. Inject Widget + Manifest
+      - name: 3. Inject Widget + Manifest + MainActivity
         script: |
           set -e
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           mkdir -p android/app/src/main/res/layout android/app/src/main/res/xml android/app/src/main/kotlin/com/example/roster_pro
-
           cat > android/app/src/main/res/layout/roster_widget_layout.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#FFFFFF" android:padding="8dp">
@@ -75,7 +95,6 @@ workflows:
             }
           }
           EOF
-
           python3 << 'PY'
           import re
           path="android/app/src/main/AndroidManifest.xml"
@@ -89,7 +108,6 @@ workflows:
           xml=xml.replace("</application>", receiver+"</application>",1)
           open(path,"w",encoding='utf-8').write(xml)
           PY
-
           cat > android/app/src/main/kotlin/com/example/roster_pro/MainActivity.kt << 'EOF'
           package com.example.roster_pro
           import android.content.ContentResolver; import android.database.Cursor; import android.provider.CalendarContract
