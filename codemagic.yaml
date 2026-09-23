@@ -1,6 +1,6 @@
 workflows:
   Default Workflow:
-    name: RosterPro v8.1 Kotlin1.9 Fix
+    name: RosterPro v8.2 Fix All Kotlin
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
@@ -12,34 +12,39 @@ workflows:
           set -e
           git rm -rf --cached android --ignore-unmatch || true
           rm -rf android || true
+          rm -rf ~/.gradle/caches || true
           rm -f pubspec.lock || true
           flutter create --platforms=android --project-name roster_pro --org com.example . --no-pub
 
-      - name: 2. Upgrade Kotlin to 1.9.22 to match home_widget
+      - name: 2. Force Kotlin 1.9.22 Everywhere
         script: |
           set -e
-          echo "=== 強制升級 Kotlin 1.9.22 ==="
           python3 << 'PY'
-          path="android/build.gradle"
-          txt=open(path).read()
-          # 1. 改 ext.kotlin_version
-          import re
-          txt=re.sub(r"ext.kotlin_version\s*=\s*'[^']+'", "ext.kotlin_version = '1.9.22'", txt)
-          # 2. 確保用 1.9.22 的 gradle plugin
-          if "kotlin_version" not in txt:
-              txt=txt.replace("buildscript {", "buildscript {\n    ext.kotlin_version = '1.9.22'")
-          open(path,"w").write(txt)
-          print(open(path).read())
+          import re, pathlib
+          # 1. 改 android/settings.gradle - 呢個先係關鍵
+          sp = pathlib.Path("android/settings.gradle").read_text()
+          print("=== 原 settings.gradle ===")
+          print(sp[:1000])
+          sp = re.sub(r"id\s+\"org.jetbrains.kotlin.android\"\s+version\s+\"[^\"]+\"", 'id "org.jetbrains.kotlin.android" version "1.9.22" apply false', sp)
+          sp = re.sub(r"org.jetbrains.kotlin.android.*1\.7\.10", 'org.jetbrains.kotlin.android" version "1.9.22" apply false', sp)
+          # 舊版可能係 ext.kotlin_version
+          pathlib.Path("android/settings.gradle").write_text(sp)
+          
+          # 2. 改 android/build.gradle
+          bg = pathlib.Path("android/build.gradle").read_text()
+          bg = re.sub(r"ext.kotlin_version\s*=\s*'[^']+'", "ext.kotlin_version = '1.9.22'", bg)
+          pathlib.Path("android/build.gradle").write_text(bg)
 
-          # 3. app/build.gradle 強制 stdlib 1.9.0
-          app="android/app/build.gradle"
-          txt=open(app).read()
-          if "resolutionStrategy" not in txt:
-              txt=txt.replace("android {","android {\n    configurations.all {\n        resolutionStrategy {\n            force 'org.jetbrains.kotlin:kotlin-stdlib:1.9.0'\n            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.0'\n            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.0'\n            force 'org.jetbrains.kotlin:kotlin-stdlib-common:1.9.0'\n        }\n    }")
-          open(app,"w").write(txt)
+          # 3. 強制 app/build.gradle 用 1.9.0 stdlib
+          app = pathlib.Path("android/app/build.gradle").read_text()
+          if "resolutionStrategy" not in app:
+              app = app.replace("android {", "android {\n    configurations.all {\n        resolutionStrategy {\n            force 'org.jetbrains.kotlin:kotlin-stdlib:1.9.22'\n            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.22'\n            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.22'\n        }\n    }")
+          pathlib.Path("android/app/build.gradle").write_text(app)
+          print("=== 已改 settings.gradle ===")
+          print(pathlib.Path("android/settings.gradle").read_text()[:1500])
           PY
 
-      - name: 3. Inject Permissions + Widget
+      - name: 3. Inject Widget + Manifest
         script: |
           set -e
           MANIFEST="android/app/src/main/AndroidManifest.xml"
@@ -48,33 +53,24 @@ workflows:
           cat > android/app/src/main/res/layout/roster_widget_layout.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#FFFFFF" android:padding="8dp">
-            <TextView android:id="@+id/widget_month" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Roster Pro" android:gravity="center" android:textStyle="bold" android:textSize="14sp"/>
-            <TextView android:id="@+id/widget_hint" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="點擊進入App" android:gravity="center" android:textSize="10sp"/>
+            <TextView android:id="@+id/widget_month" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Roster Pro" android:gravity="center" android:textStyle="bold"/>
           </LinearLayout>
           EOF
-
           cat > android/app/src/main/res/xml/roster_widget_info.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android" android:minWidth="180dp" android:minHeight="180dp" android:updatePeriodMillis="3600000" android:initialLayout="@layout/roster_widget_layout" android:resizeMode="horizontal|vertical" android:widgetCategory="home_screen"/>
           EOF
-
           cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt << 'EOF'
           package com.example.roster_pro
-          import android.app.PendingIntent
-          import android.appwidget.AppWidgetManager
-          import android.appwidget.AppWidgetProvider
-          import android.content.Context
-          import android.content.Intent
-          import android.widget.RemoteViews
+          import android.app.PendingIntent; import android.appwidget.AppWidgetManager; import android.appwidget.AppWidgetProvider; import android.content.Context; import android.content.Intent; import android.widget.RemoteViews
           class RosterWidgetProvider : AppWidgetProvider() {
             override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
-              for (appWidgetId in appWidgetIds) {
+              for (id in appWidgetIds) {
                 val views = RemoteViews(context.packageName, R.layout.roster_widget_layout)
                 val intent = Intent(context, MainActivity::class.java)
-                val pendingIntent = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-                views.setOnClickPendingIntent(R.id.widget_month, pendingIntent)
-                views.setOnClickPendingIntent(R.id.widget_hint, pendingIntent)
-                appWidgetManager.updateAppWidget(appWidgetId, views)
+                val pi = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                views.setOnClickPendingIntent(R.id.widget_month, pi)
+                appWidgetManager.updateAppWidget(id, views)
               }
             }
           }
@@ -87,7 +83,7 @@ workflows:
           xml=re.sub(r'\s*<uses-permission[^>]*READ_CALENDAR[^>]*/?>\s*',"",xml)
           xml=re.sub(r'\s*<uses-permission[^>]*WRITE_CALENDAR[^>]*/?>\s*',"",xml)
           xml=re.sub(r'\s*<receiver[^>]*RosterWidgetProvider.*?</receiver>\s*',"",xml,flags=re.DOTALL)
-          perms='    <uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />\n    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />\n'
+          perms='    <uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />\n'
           xml=xml.replace("<application", perms+"<application",1)
           receiver='        <receiver android:name=".RosterWidgetProvider" android:exported="true">\n            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>\n            <meta-data android:name="android.appwidget.provider" android:resource="@xml/roster_widget_info" />\n        </receiver>\n'
           xml=xml.replace("</application>", receiver+"</application>",1)
@@ -96,12 +92,8 @@ workflows:
 
           cat > android/app/src/main/kotlin/com/example/roster_pro/MainActivity.kt << 'EOF'
           package com.example.roster_pro
-          import android.content.ContentResolver
-          import android.database.Cursor
-          import android.provider.CalendarContract
-          import io.flutter.embedding.android.FlutterActivity
-          import io.flutter.embedding.engine.FlutterEngine
-          import io.flutter.plugin.common.MethodChannel
+          import android.content.ContentResolver; import android.database.Cursor; import android.provider.CalendarContract
+          import io.flutter.embedding.android.FlutterActivity; import io.flutter.embedding.engine.FlutterEngine; import io.flutter.plugin.common.MethodChannel
           class MainActivity: FlutterActivity() {
               private val CHANNEL = "com.roster/calendar_real"
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -111,16 +103,9 @@ workflows:
                           try {
                               val cr: ContentResolver = contentResolver
                               val uri = CalendarContract.Calendars.CONTENT_URI
-                              val projection = arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.CALENDAR_DISPLAY_NAME, CalendarContract.Calendars.ACCOUNT_NAME, CalendarContract.Calendars.ACCOUNT_TYPE, CalendarContract.Calendars.OWNER_ACCOUNT, CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
-                              val cur: Cursor? = cr.query(uri, projection, null, null, null)
+                              val cur: Cursor? = cr.query(uri, arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.CALENDAR_DISPLAY_NAME, CalendarContract.Calendars.ACCOUNT_NAME, CalendarContract.Calendars.ACCOUNT_TYPE), null, null, null)
                               val list = mutableListOf<Map<String, Any?>>()
-                              if (cur != null) {
-                                  while (cur.moveToNext()) {
-                                      val id = cur.getLong(0); val displayName = cur.getString(1) ?: ""; val accName = cur.getString(2) ?: ""; val accType = cur.getString(3) ?: ""; val owner = cur.getString(4) ?: ""; val access = cur.getInt(5)
-                                      list.add(mapOf("id" to id.toString(), "displayName" to displayName, "accountName" to accName, "accountType" to accType, "owner" to owner, "access" to access, "isGoogle" to (accType == "com.google" || accName.contains("@gmail.com"))))
-                                  }
-                                  cur.close()
-                              }
+                              if (cur != null) { while (cur.moveToNext()) { list.add(mapOf("id" to cur.getLong(0).toString(), "displayName" to (cur.getString(1) ?: ""), "accountName" to (cur.getString(2) ?: ""), "accountType" to (cur.getString(3) ?: ""), "isGoogle" to ((cur.getString(3) ?: "") == "com.google"))) } ; cur.close() }
                               result.success(list)
                           } catch (e: Exception) { result.error("ERR", e.message, null) }
                       } else { result.notImplemented() }
@@ -128,11 +113,11 @@ workflows:
               }
           }
           EOF
-          flutter clean
-          flutter pub get
+          flutter clean; flutter pub get
 
       - name: 4. Build APK
-        script: flutter build apk --release --no-tree-shake-icons
+        script: |
+          flutter build apk --release --no-tree-shake-icons
 
     artifacts:
       - build/**/outputs/**/*.apk
