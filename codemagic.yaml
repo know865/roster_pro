@@ -1,6 +1,6 @@
 workflows:
   Default Workflow:
-    name: RosterPro FINAL WORKING
+    name: RosterPro Kotlin Fix
     instance_type: mac_mini_m2
     environment:
       flutter: 3.22.2
@@ -8,11 +8,15 @@ workflows:
     scripts:
       - name: Fix project
         script: |
+          set -e
           rm -rf test
           flutter config --no-analytics
           flutter create . --platforms=android --project-name roster_pro --org com.example --no-pub
+          
+          # 關鍵修正：將 Kotlin 1.7.1 升到 1.9.22
+          sed -i '' 's/ext.kotlin_version.*=.*/ext.kotlin_version = '\''1.9.22'\''/g' android/build.gradle 2>/dev/null || sed -i 's/ext.kotlin_version.*=.*/ext.kotlin_version = '\''1.9.22'\''/g' android/build.gradle
+          
           flutter pub get
-          flutter analyze || true
       - name: Build APK
         script: |
           flutter build apk --release --no-tree-shake-icons
