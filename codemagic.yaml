@@ -7,7 +7,7 @@ workflows:
       flutter: 3.24.5
       java: 17
       groups:
-        - keystore_credentials  # 如果無keystore可刪除此行，用debug簽名
+        - keystore_credentials
     triggering:
       events:
         - push
@@ -21,50 +21,81 @@ workflows:
           flutter clean
           flutter pub get
 
-      - name: Fix Android v1 Embedding + Widget 4x4
+      - name: Rewrite Android Files (v2 Embedding + Widget)
         script: |
           set -e
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          
+          # =========================================================
+          # 步驟 1: 完全重寫 AndroidManifest.xml
+          # =========================================================
+          echo "=== 重寫 AndroidManifest.xml (完整版) ==="
+          cat > android/app/src/main/AndroidManifest.xml <<'XML'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <uses-permission android:name="android.permission.READ_CALENDAR" />
+              <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+          
+              <application
+                  android:label="Roster Pro"
+                  android:name="${applicationName}"
+                  android:icon="@mipmap/ic_launcher">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:theme="@style/LaunchTheme"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+                      android:hardwareAccelerated="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <meta-data
+                        android:name="io.flutter.embedding.android.NormalTheme"
+                        android:resource="@style/NormalTheme"
+                        />
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+          
+                  <meta-data
+                      android:name="flutterEmbedding"
+                      android:value="2" />
+          
+                  <receiver android:name=".RosterWidgetProvider" android:exported="false">
+                      <intent-filter>
+                          <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                          <action android:name="PREV_MONTH" />
+                          <action android:name="NEXT_MONTH" />
+                          <action android:name="REFRESH_WIDGET" />
+                      </intent-filter>
+                      <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info" />
+                  </receiver>
+              </application>
+          
+              <queries>
+                  <intent>
+                      <action android:name="android.intent.action.PROCESS_TEXT"/>
+                      <data android:mimeType="text/plain"/>
+                  </intent>
+              </queries>
+          </manifest>
+          XML
+          echo "=== AndroidManifest.xml 完成 ==="
+          cat android/app/src/main/AndroidManifest.xml
 
-          # ==========================================================
-          # 步驟 1: 徹底清理 v1 embedding (Build failed 核心修復)
-          # ==========================================================
-          echo "=== Cleaning up v1 embedding references ==="
-          
-          # 備份
-          cp "$MANIFEST" "${MANIFEST}.bak"
-          
-          # 1a. 移除 io.flutter.app.FlutterApplication 引用（改成 ${applicationName}）
-          sed -i.bak 's|android:name="io\.flutter\.app\.FlutterApplication"|android:name="${applicationName}"|g' "$MANIFEST"
-          
-          # 1b. 移除舊的 SplashScreenUntilFirstFrame meta-data
-          sed -i.bak '/io\.flutter\.app\.android\.SplashScreenUntilFirstFrame/d' "$MANIFEST"
-          
-          # 1c. 移除舊的 FlutterActivity meta-data（如果有）
-          sed -i.bak '/io\.flutter\.app\.FlutterActivity/d' "$MANIFEST"
-          
-          # 1d. 確保 flutterEmbedding = 2 存在
-          if ! grep -q 'flutterEmbedding' "$MANIFEST"; then
-            sed -i.bak 's|</application>|        <meta-data android:name="flutterEmbedding" android:value="2" />\n    </application>|' "$MANIFEST"
-          fi
-          
-          echo "=== AndroidManifest.xml after cleanup ==="
-          cat "$MANIFEST"
-          
-          # ==========================================================
-          # 步驟 2: 強制刪除所有舊 MainActivity，重新生成 v2 版本
-          # ==========================================================
-          echo "=== Removing old MainActivity files ==="
+          # =========================================================
+          # 步驟 2: 刪除所有舊 MainActivity，重寫 v2 版本
+          # =========================================================
+          echo "=== 刪除所有舊 MainActivity ==="
           find android/app/src/main -name "MainActivity.kt" -delete || true
           find android/app/src/main -name "MainActivity.java" -delete || true
           
-          # 決定包名資料夾路徑 (預設 com.example.roster_pro)
+          # 建立 v2 版本
           PKG_PATH="android/app/src/main/kotlin/com/example/roster_pro"
           mkdir -p "$PKG_PATH"
-          
           cat > "$PKG_PATH/MainActivity.kt" <<'KT'
           package com.example.roster_pro
-
+          
           import android.Manifest
           import android.content.pm.PackageManager
           import android.provider.CalendarContract
@@ -72,7 +103,7 @@ workflows:
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
           import io.flutter.plugin.common.MethodChannel
-
+          
           class MainActivity : FlutterActivity() {
               private val CHANNEL = "com.roster/calendar_real"
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -116,11 +147,11 @@ workflows:
               }
           }
           KT
-          echo "MainActivity.kt (v2) created at $PKG_PATH"
+          echo "MainActivity.kt (v2) 建立完成"
 
-          # ==========================================================
-          # 步驟 3: 建立 widget_info.xml (小工具配置，缺少會編譯失敗)
-          # ==========================================================
+          # =========================================================
+          # 步驟 3: 建立 widget_info.xml
+          # =========================================================
           mkdir -p android/app/src/main/res/xml
           cat > android/app/src/main/res/xml/widget_info.xml <<'XML'
           <?xml version="1.0" encoding="utf-8"?>
@@ -134,9 +165,9 @@ workflows:
           </appwidget-provider>
           XML
 
-          # ==========================================================
+          # =========================================================
           # 步驟 4: 建立 widget_layout.xml (42 個日期格子)
-          # ==========================================================
+          # =========================================================
           mkdir -p android/app/src/main/res/layout
           cat > android/app/src/main/res/layout/widget_layout.xml <<'XML'
           <?xml version="1.0" encoding="utf-8"?>
@@ -254,12 +285,12 @@ workflows:
           </LinearLayout>
           XML
 
-          # ==========================================================
+          # =========================================================
           # 步驟 5: 建立 RosterWidgetProvider.kt
-          # ==========================================================
+          # =========================================================
           cat > "$PKG_PATH/RosterWidgetProvider.kt" <<'KT'
           package com.example.roster_pro
-
+          
           import android.app.PendingIntent
           import android.appwidget.AppWidgetManager
           import android.appwidget.AppWidgetProvider
@@ -272,14 +303,14 @@ workflows:
           import org.json.JSONObject
           import java.text.SimpleDateFormat
           import java.util.*
-
+          
           class RosterWidgetProvider : AppWidgetProvider() {
               override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
                   for (appWidgetId in appWidgetIds) {
                       updateAppWidget(context, appWidgetManager, appWidgetId)
                   }
               }
-
+          
               override fun onReceive(context: Context, intent: Intent) {
                   super.onReceive(context, intent)
                   val action = intent.action
@@ -296,7 +327,7 @@ workflows:
                       for (appWidgetId in allWidgetIds) { updateAppWidget(context, appWidgetManager, appWidgetId) }
                   }
               }
-
+          
               companion object {
                   fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
                       val views = RemoteViews(context.packageName, R.layout.widget_layout)
@@ -306,21 +337,21 @@ workflows:
                       val month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH))
                       val monthNames = arrayOf("1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月")
                       views.setTextViewText(R.id.tv_month_title, "${year}年 ${monthNames[month]}")
-
+          
                       val flutterPrefs: SharedPreferences = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
                       val rosterJsonStr = flutterPrefs.getString("flutter.roster_json", "{}")
                       val defsJsonStr = flutterPrefs.getString("flutter.defs_json", "{}")
                       val todayBgColor = flutterPrefs.getLong("flutter.today_bg", 0xFFFFF9C4).toInt()
                       val rosterJson = try { JSONObject(rosterJsonStr) } catch (e: Exception) { JSONObject() }
                       val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
-
+          
                       val calendar = Calendar.getInstance()
                       calendar.set(year, month, 1)
                       val firstDayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
                       val startOffset = if (firstDayOfWeek == Calendar.SUNDAY) 6 else firstDayOfWeek - 2
                       val maxDaysInMonth = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
                       val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-
+          
                       for (i in 0 until 42) {
                           val dayIndex = i - startOffset + 1
                           val textViewId = context.resources.getIdentifier("day$i", "id", context.packageName)
@@ -367,27 +398,16 @@ workflows:
               }
           }
           KT
-          echo "RosterWidgetProvider.kt created"
+          echo "RosterWidgetProvider.kt 建立完成"
 
-          # ==========================================================
-          # 步驟 6: 加入日曆權限 + Receiver 註冊
-          # ==========================================================
-          if ! grep -q "READ_CALENDAR" "$MANIFEST"; then
-            sed -i.bak 's|<application|<uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />\n    <application|' "$MANIFEST"
-          fi
-          
-          if ! grep -q "RosterWidgetProvider" "$MANIFEST"; then
-            sed -i.bak 's|</application>|    <receiver android:name=".RosterWidgetProvider" android:exported="false">\n        <intent-filter>\n            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n            <action android:name="PREV_MONTH" />\n            <action android:name="NEXT_MONTH" />\n            <action android:name="REFRESH_WIDGET" />\n        </intent-filter>\n        <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info" />\n    </receiver>\n</application>|' "$MANIFEST"
-          fi
-          
-          # 清理 .bak 備份檔，避免干擾
-          rm -f "${MANIFEST}.bak"
-          
-          echo "=== Final AndroidManifest.xml ==="
-          cat "$MANIFEST"
-          
-          echo "=== Files in project ==="
-          find android/app/src/main -name "*.kt" -o -name "*.xml" | head -30
+          # =========================================================
+          # 步驟 6: 確認最終檔案
+          # =========================================================
+          echo "=== 最終 AndroidManifest.xml ==="
+          cat android/app/src/main/AndroidManifest.xml
+          echo ""
+          echo "=== 所有產生的檔案 ==="
+          find android/app/src/main -name "*.kt" -o -name "*.xml" 2>/dev/null | grep -E "(MainActivity|RosterWidget|widget_)" || true
 
       - name: Build APK Release 9Fix
         script: |
