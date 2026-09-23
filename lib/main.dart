@@ -10,19 +10,26 @@ import 'package:device_calendar/device_calendar.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tzData;
 import 'package:permission_handler/permission_handler.dart';
-import 'package:home_widget/home_widget.dart'; // <-- Widget
+import 'package:home_widget/home_widget.dart';
 
-void main() { tzData.initializeTimeZones(); WidgetsFlutterBinding.ensureInitialized(); HomeWidget.setAppGroupId('group.rosterPro'); runApp(const RosterApp()); }
+void main() {
+  tzData.initializeTimeZones();
+  WidgetsFlutterBinding.ensureInitialized();
+  HomeWidget.setAppGroupId('group.rosterPro');
+  runApp(const RosterApp());
+}
 
 class ShiftDef {
-  String code; String label; double hours; double ot; Color color; String start; String end; bool hasAllowance; double allowance; bool isAllDay;
+  String code; String label; double hours; double ot; Color color;
+  String start; String end; bool hasAllowance; double allowance; bool isAllDay;
   ShiftDef(this.code,this.label,this.hours,this.color,{this.ot=0,this.start='07:00',this.end='15:30',this.hasAllowance=false,this.allowance=0,this.isAllDay=false});
   Map<String,dynamic> toJson()=>{'code':code,'label':label,'hours':hours,'ot':ot,'color':color.value,'start':start,'end':end,'hasAllowance':hasAllowance,'allowance':allowance,'isAllDay':isAllDay};
   factory ShiftDef.fromJson(Map<String,dynamic> j)=>ShiftDef(j['code'],j['label']??j['code'],(j['hours']??8).toDouble(),Color(j['color']??0xFFFF9800),ot:(j['ot']??0).toDouble(),start:j['start']??'07:00',end:j['end']??'15:30',hasAllowance:j['hasAllowance']??((j['allowance']??0)>0),allowance:(j['allowance']??0).toDouble(),isAllDay:j['isAllDay']??false);
 }
 class ExtraAllowance { String name; double amount; ExtraAllowance(this.name,this.amount); Map<String,dynamic> toJson()=>{'name':name,'amount':amount}; factory ExtraAllowance.fromJson(Map<String,dynamic> j)=>ExtraAllowance(j['name'],(j['amount'] as num).toDouble()); }
 class SavedPattern { String name; List<List<String>> data; SavedPattern(this.name,this.data); Map<String,dynamic> toJson()=>{'name':name,'data':data}; factory SavedPattern.fromJson(Map<String,dynamic> j)=>SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r)=>(r as List).map<String>((e)=>e.toString()).toList()).toList()); }
-class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v6.83',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
+
+class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v10 Widget',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
 
 class MainPage extends StatefulWidget { const MainPage({super.key}); @override State<MainPage> createState()=>MainPageState(); }
 class MainPageState extends State<MainPage> {
@@ -127,7 +134,39 @@ if(!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(conte
 void showDetail(DateTime day){
 String k=DateFormat('yyyy-MM-dd').format(day); String cur=roster[k]??''; var nc=TextEditingController(text:rosterNote[k]??'');
 var otc=TextEditingController(text:(rosterOt[k]??0).toString()); var exCtrl=TextEditingController(text:(rosterExtra[k]??0).toString()); var exH=TextEditingController(text:(rosterExtraHrs[k]??0).toString());
-showModalBottomSheet(context:context,isScrollControlled:true,builder:(ctx){ return StatefulBuilder(builder:(ctx2,setM){ return Padding(padding:EdgeInsets.only(bottom:MediaQuery.of(ctx2).viewInsets.bottom),child:Padding(padding:const EdgeInsets.all(16),child:Column(mainAxisSize:MainAxisSize.min,children:[Text(DateFormat('yyyy-MM-dd EEE').format(day),style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),Wrap(spacing:8,children:defs.keys.map((c)=>ChoiceChip(label:Text(c),selected:cur==c,onSelected:(_)=>setM(()=>cur=c))).toList()),TextField(controller:nc,decoration:const InputDecoration(labelText:'記事')),Row(children:[Expanded(child:TextField(controller:otc,decoration:const InputDecoration(labelText:'OT'),keyboardType:TextInputType.number)),const SizedBox(width:8),Expanded(child:TextField(controller:exH,decoration:const InputDecoration(labelText:'額外工時'),keyboardType:TextInputType.number))]),TextField(controller:exCtrl,decoration:const InputDecoration(labelText:'額外津貼'),keyboardType:TextInputType.number),const SizedBox(height:12),Row(children:[Expanded(child:OutlinedButton(onPressed:(){ setState(()=>roster.remove(k)); save(); Navigator.pop(ctx2); },child:const Text('清除'))),const SizedBox(width:8),Expanded(child:FilledButton(onPressed:(){ setState((){ if(cur.isNotEmpty) roster[k]=cur; if(nc.text.isNotEmpty) rosterNote[k]=nc.text; rosterOt[k]=double.tryParse(otc.text)??0; rosterExtra[k]=double.tryParse(exCtrl.text)??0; rosterExtraHrs[k]=double.tryParse(exH.text)??0; }); save(); Navigator.pop(ctx2); },child:const Text('儲存')))]) ))); }); });
+showModalBottomSheet(context:context,isScrollControlled:true,builder:(ctx){
+  return StatefulBuilder(builder:(ctx2,setM){
+    return Padding(
+      padding:EdgeInsets.only(bottom:MediaQuery.of(ctx2).viewInsets.bottom),
+      child:Padding(padding:const EdgeInsets.all(16),child:Column(mainAxisSize:MainAxisSize.min,children:[
+        Text(DateFormat('yyyy-MM-dd EEE').format(day),style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),
+        Wrap(spacing:8,children:defs.keys.map((c)=>ChoiceChip(label:Text(c),selected:cur==c,onSelected:(_)=>setM(()=>cur=c))).toList()),
+        TextField(controller:nc,decoration:const InputDecoration(labelText:'記事')),
+        Row(children:[
+          Expanded(child:TextField(controller:otc,decoration:const InputDecoration(labelText:'OT'),keyboardType:TextInputType.number)),
+          const SizedBox(width:8),
+          Expanded(child:TextField(controller:exH,decoration:const InputDecoration(labelText:'額外工時'),keyboardType:TextInputType.number))
+        ]),
+        TextField(controller:exCtrl,decoration:const InputDecoration(labelText:'額外津貼'),keyboardType:TextInputType.number),
+        const SizedBox(height:12),
+        Row(children:[
+          Expanded(child:OutlinedButton(onPressed:(){ setState(()=>roster.remove(k)); save(); Navigator.pop(ctx2); },child:const Text('清除'))),
+          const SizedBox(width:8),
+          Expanded(child:FilledButton(onPressed:(){
+            setState((){
+              if(cur.isNotEmpty) roster[k]=cur;
+              if(nc.text.isNotEmpty) rosterNote[k]=nc.text;
+              rosterOt[k]=double.tryParse(otc.text)??0;
+              rosterExtra[k]=double.tryParse(exCtrl.text)??0;
+              rosterExtraHrs[k]=double.tryParse(exH.text)??0;
+            });
+            save(); Navigator.pop(ctx2);
+          },child:const Text('儲存')))
+        ])
+      ]))
+    );
+  });
+});
 }
 
 Widget calTab(){
