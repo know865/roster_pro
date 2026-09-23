@@ -1,4 +1,3 @@
-
 <receiver
     android:name=".RosterWidgetProvider"
     android:exported="false">
