@@ -237,6 +237,8 @@ class MainPageState extends State<MainPage> {
     sp.setString('lastBackupPath', _lastBackupPath);
     sp.setInt('todayBg', todayBgColor.value);
     sp.setInt('todayBorder', todayBorderColor.value);
+    sp.setString('roster_json', jsonEncode(roster));
+    sp.setString('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
     updateWidget();
     if (autoSync && googleSyncEnabled && !_isSyncing) { _syncToGoogle(silent: true); }
   }
@@ -393,35 +395,61 @@ class MainPageState extends State<MainPage> {
     }
     if (_isSyncing) return;
     _isSyncing = true;
-    if (!silent) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('開始同步，只同步班次代號+時間+記事...')));
+    if (!silent) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('開始增量同步...')));
+
     try {
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) await _ensureCalendar();
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) throw '未選真 Google 日曆';
-      var existingEvents = await _calendarPlugin.retrieveEvents(_rosterCalendarId!, RetrieveEventsParams(startDate: DateTime(2023, 1, 1), endDate: DateTime(2035, 12, 31)));
-      Set<String> toDelete = {};
+
+      var existingEvents = await _calendarPlugin.retrieveEvents(
+        _rosterCalendarId!,
+        RetrieveEventsParams(startDate: DateTime(2023, 1, 1), endDate: DateTime(2035, 12, 31)),
+      );
+
+      Map<String, String> cloudEventMap = {};
+      Set<String> duplicateIds = {};
       for (var e in existingEvents.data ?? []) {
-        if ((e.description ?? '').contains('[RosterPro]') && e.eventId != null) {
-          toDelete.add(e.eventId!);
+        String desc = e.description ?? '';
+        String? eventId = e.eventId;
+        if (eventId == null) continue;
+        final match = RegExp(r'\[RosterPro\](\d{4}-\d{2}-\d{2})').firstMatch(desc);
+        if (match != null) {
+          String dateKey = match.group(1)!;
+          if (cloudEventMap.containsKey(dateKey)) {
+            duplicateIds.add(eventId);
+          } else {
+            cloudEventMap[dateKey] = eventId;
+          }
         }
       }
-      for (var eid in _googleEventIdMap.values) {
-        toDelete.add(eid);
+
+      int delDup = 0;
+      for (var dupId in duplicateIds) {
+        try {
+          await _calendarPlugin.deleteEvent(_rosterCalendarId!, dupId);
+          delDup++;
+        } catch (_) {}
       }
-      int del = 0;
-      for (var eid in toDelete) {
-        try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, eid); del++; } catch (_) {}
+
+      _googleEventIdMap.removeWhere((date, id) => !cloudEventMap.containsKey(date));
+      for (var entry in cloudEventMap.entries) {
+        _googleEventIdMap.putIfAbsent(entry.key, () => entry.value);
       }
-      await Future.delayed(const Duration(milliseconds: 400));
-      _googleEventIdMap.clear();
+
       int add = 0;
+      int upd = 0;
+
       for (var entry in roster.entries) {
         var code = entry.value;
         var def = defs[code];
         if (def == null) continue;
-        DateTime date = DateFormat('yyyy-MM-dd').parse(entry.key);
-        String note = rosterNote[entry.key] ?? '';
-        String tag = '[RosterPro]${entry.key}';
+
+        String dateKey = entry.key;
+        DateTime date = DateFormat('yyyy-MM-dd').parse(dateKey);
+        String note = rosterNote[dateKey] ?? '';
+        String tag = '[RosterPro]${dateKey}';
         bool allDayFlag = def.isAllDay || def.code == 'O';
+
         String desc;
         String title;
         if (allDayFlag) {
@@ -431,6 +459,150 @@ class MainPageState extends State<MainPage> {
           desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n時間: ${def.start}-${def.end}${note.isNotEmpty ? '\n記事: $note' : ''}';
           title = '${def.code} ${def.start}-${def.end}${note.isNotEmpty ? ' | $note' : ''}';
         }
+
+        String? existingId = _googleEventIdMap[dateKey];
+
+        tz.TZDateTime evStart;
+        tz.TZDateTime evEnd;
+        if (allDayFlag) {
+          evStart = tz.TZDateTime(tz.local, date.year, date.month, date.day);
+          evEnd = tz.TZDateTime(tz.local, date.year, date.month, date.day + 1);
+        } else {
+          DateTime s = DateTime(date.year, date.month, date.day, int.parse(def.start.split(':')[0]), int.parse(def.start.split(':')[1]));
+          DateTime ee = DateTime(date.year, date.month, date.day, int.parse(def.end.split(':')[0]), int.parse(def.end.split(':')[1]));
+          if (ee.isBefore(s)) ee = ee.add(const Duration(days: 1));
+          evStart = tz.TZDateTime.from(s, tz.local);
+          evEnd = tz.TZDateTime.from(ee, tz.local);
+        }
+
+        Event ev = Event(
+          _rosterCalendarId!,
+          eventId: existingId,
+          title: title,
+          description: desc,
+          start: evStart,
+          end: evEnd,
+          allDay: allDayFlag,
+        );
+
+        var res = await _calendarPlugin.createOrUpdateEvent(ev);
+        bool success = res != null && res.isSuccess && res.data != null;
+
+        if (!success && existingId != null) {
+          Event retryEv = Event(
+            _rosterCalendarId!,
+            title: title,
+            description: desc,
+            start: evStart,
+            end: evEnd,
+            allDay: allDayFlag,
+          );
+          res = await _calendarPlugin.createOrUpdateEvent(retryEv);
+          success = res != null && res.isSuccess && res.data != null;
+          if (success) {
+            _googleEventIdMap[dateKey] = res!.data!;
+            add++;
+          }
+        } else if (success) {
+          _googleEventIdMap[dateKey] = res!.data!;
+          if (existingId == null) { add++; } else { upd++; }
+        }
+      }
+
+      int del = delDup;
+      List<String> datesToRemove = [];
+      for (var mapEntry in _googleEventIdMap.entries) {
+        if (!roster.containsKey(mapEntry.key)) {
+          try {
+            await _calendarPlugin.deleteEvent(_rosterCalendarId!, mapEntry.value);
+            del++;
+          } catch (_) {}
+          datesToRemove.add(mapEntry.key);
+        }
+      }
+      for (var k in datesToRemove) {
+        _googleEventIdMap.remove(k);
+      }
+
+      var sp = await SharedPreferences.getInstance();
+      sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
+      updateWidget();
+
+      if (!silent && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('增量同步完成：新增$add 更新$upd 刪除$del${delDup > 0 ? '（清除歷史重複$delDup）' : ''}'),
+        ));
+      }
+    } catch (e) {
+      if (!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('同步失敗 $e')));
+    } finally {
+      _isSyncing = false;
+    }
+  }
+
+  Future<void> _forceFullResync() async {
+    bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('⚠️ 全清重建確認'),
+      content: const Text('這會刪除 Google 日曆上所有 [RosterPro] 事件並重新建立。\n\n✅ App 內的排班資料不會受影響\n✅ 你其他的 Google 行程也不會被刪除\n❌ 只會刪除本 App 建立的事件\n\n確定要執行嗎？'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('確定執行'))
+      ]
+    ));
+    if (confirm != true) return;
+
+    if (_isSyncing) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('同步進行中，請稍後再試')));
+      return;
+    }
+
+    _isSyncing = true;
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('全清重建中...')));
+
+    try {
+      if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) await _ensureCalendar();
+      if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) throw '未選真 Google 日曆';
+
+      var existingEvents = await _calendarPlugin.retrieveEvents(
+        _rosterCalendarId!,
+        RetrieveEventsParams(startDate: DateTime(2023, 1, 1), endDate: DateTime(2035, 12, 31)),
+      );
+      int del = 0;
+      for (var e in existingEvents.data ?? []) {
+        if ((e.description ?? '').contains('[RosterPro]') && e.eventId != null) {
+          try {
+            await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.eventId!);
+            del++;
+          } catch (_) {}
+        }
+      }
+
+      _googleEventIdMap.clear();
+      var sp = await SharedPreferences.getInstance();
+      sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
+
+      int add = 0;
+      for (var entry in roster.entries) {
+        var code = entry.value;
+        var def = defs[code];
+        if (def == null) continue;
+
+        String dateKey = entry.key;
+        DateTime date = DateFormat('yyyy-MM-dd').parse(dateKey);
+        String note = rosterNote[dateKey] ?? '';
+        String tag = '[RosterPro]${dateKey}';
+        bool allDayFlag = def.isAllDay || def.code == 'O';
+
+        String desc;
+        String title;
+        if (allDayFlag) {
+          desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n類型: 全天${note.isNotEmpty ? '\n記事: $note' : ''}';
+          title = '${def.code}${note.isNotEmpty ? ' | $note' : ''}';
+        } else {
+          desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n時間: ${def.start}-${def.end}${note.isNotEmpty ? '\n記事: $note' : ''}';
+          title = '${def.code} ${def.start}-${def.end}${note.isNotEmpty ? ' | $note' : ''}';
+        }
+
         Event ev;
         if (allDayFlag) {
           ev = Event(_rosterCalendarId!, title: title, description: desc, start: tz.TZDateTime(tz.local, date.year, date.month, date.day), end: tz.TZDateTime(tz.local, date.year, date.month, date.day + 1), allDay: true);
@@ -440,18 +612,22 @@ class MainPageState extends State<MainPage> {
           if (ee.isBefore(s)) ee = ee.add(const Duration(days: 1));
           ev = Event(_rosterCalendarId!, title: title, description: desc, start: tz.TZDateTime.from(s, tz.local), end: tz.TZDateTime.from(ee, tz.local), allDay: false);
         }
+
         var res = await _calendarPlugin.createOrUpdateEvent(ev);
         if (res != null && res.isSuccess && res.data != null) {
-          _googleEventIdMap[entry.key] = res.data!;
+          _googleEventIdMap[dateKey] = res.data!;
           add++;
         }
       }
-      var sp = await SharedPreferences.getInstance();
+
       sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
       updateWidget();
-      if (!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已寫入 $_rosterCalendarName 刪$del 加$add 項，已去重（只同步代號+時間+記事）')));
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('✅ 全清重建完成：刪除 $del 重建 $add')));
+      }
     } catch (e) {
-      if (!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('同步失敗 $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('全清重建失敗 $e')));
     } finally {
       _isSyncing = false;
     }
@@ -524,13 +700,17 @@ class MainPageState extends State<MainPage> {
       final img = await pic.toImage(width.toInt(), (y + 20).toInt());
       final byte = await img.toByteData(format: ui.ImageByteFormat.png);
       final png = byte!.buffer.asUint8List();
-      Directory baseDir = Directory('/storage/emulated/0/Pictures/Roster');
-      if (!await baseDir.exists()) { await baseDir.create(recursive: true); }
-      String path = '${baseDir.path}/roster_month_${focused.year}${focused.month}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.png';
+
+      Directory dcimDir = Directory('/storage/emulated/0/DCIM/Screenshots');
+      if (!await dcimDir.exists()) {
+        await dcimDir.create(recursive: true);
+      }
+      String path = '${dcimDir.path}/Roster_${focused.year}${focused.month.toString().padLeft(2, '0')}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.png';
       File f = File(path);
       await f.writeAsBytes(png);
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('截圖已保存 $path')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('截圖已保存到相冊 $path')));
         await Share.shareXFiles([XFile(path)], text: '${focused.year}年${focused.month}月 $customName');
       }
     } catch (e) {
@@ -638,6 +818,19 @@ class MainPageState extends State<MainPage> {
     }
   }
 
+  // ===== 切換月份輔助函數（給滑動手勢用）=====
+  void _goToPrevMonth() {
+    setState(() {
+      focused = DateTime(focused.year, focused.month - 1, 1);
+    });
+  }
+  void _goToNextMonth() {
+    setState(() {
+      focused = DateTime(focused.year, focused.month + 1, 1);
+    });
+  }
+  // ========================================
+
   Widget calTab() {
     DateTime first = DateTime(focused.year, focused.month, 1);
     DateTime start = first.subtract(Duration(days: first.weekday - 1));
@@ -661,83 +854,97 @@ class MainPageState extends State<MainPage> {
             InkWell(onTap: () => quickJumpMonth(), child: Row(children: [Text('${focused.year}年${focused.month}月', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)), const Icon(Icons.arrow_drop_down)])),
             const Spacer(),
             IconButton(icon: const Icon(Icons.camera_alt_outlined), tooltip: '整月截圖分享', onPressed: shareScreenshotDialog),
-            IconButton(icon: const Icon(Icons.chevron_left), onPressed: () { setState(() => focused = DateTime(focused.year, focused.month - 1, 1)); }),
-            IconButton(icon: const Icon(Icons.chevron_right), onPressed: () { setState(() => focused = DateTime(focused.year, focused.month + 1, 1)); }),
+            IconButton(icon: const Icon(Icons.chevron_left), onPressed: _goToPrevMonth),
+            IconButton(icon: const Icon(Icons.chevron_right), onPressed: _goToNextMonth),
             FilledButton.tonal(onPressed: () { setState(() { focused = DateTime(today.year, today.month, 1); selectedDay = DateTime(today.year, today.month, today.day); }); }, child: const Text('今天')),
           ]),
         ),
         Expanded(
-          child: RepaintBoundary(
-            key: calKey,
-            child: Column(children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: Row(children: [
-                  Container(width: 32, child: const Text('週', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.deepPurple))),
-                  Expanded(child: Row(children: ["一", "二", "三", "四", "五", "六", "日"].map((w) => Expanded(child: Text(w, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11)))).toList()))
-                ]),
-              ),
-              Expanded(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  padding: EdgeInsets.zero,
-                  itemCount: weeks,
-                  itemBuilder: (ctx, row) {
-                    return Row(children: [
-                      Container(width: 32, alignment: Alignment.center, child: Text('W${isoWeek(days[row * 7])}', style: const TextStyle(fontSize: 11, color: Colors.deepPurple, fontWeight: FontWeight.bold))),
-                      Expanded(
-                        child: GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          padding: const EdgeInsets.all(3),
-                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7, childAspectRatio: 0.78, mainAxisSpacing: 4, crossAxisSpacing: 4),
-                          itemCount: 7,
-                          itemBuilder: (ctx2, col) {
-                            int idx = row * 7 + col;
-                            DateTime day = days[idx];
-                            bool inM = day.month == focused.month;
-                            String k = DateFormat('yyyy-MM-dd').format(day);
-                            String? code = roster[k];
-                            var def = code != null ? defs[code] : null;
-                            bool sel = k == selKey;
-                            bool isToday = day.year == today.year && day.month == today.month && day.day == today.day;
-                            bool hasNote = rosterNote.containsKey(k) && rosterNote[k]!.isNotEmpty;
-                            bool isHol = isHoliday(day);
-                            Color bg;
-                            if (isToday) { bg = todayBgColor; }
-                            else if (!inM) { bg = const Color(0xFFF5F5F0); }
-                            else if (sel) { bg = Colors.white; }
-                            else if (def != null) { bg = def.color.withOpacity(0.18); }
-                            else { bg = const Color(0xFFFFF0D0); }
-                            return GestureDetector(
-                              onTap: () { setState(() => selectedDay = day); },
-                              onLongPress: () { setState(() => selectedDay = day); showDetail(day); },
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: bg,
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: isToday ? Border.all(width: 2.8, color: todayBorderColor) : sel ? Border.all(width: 2, color: Colors.deepPurple) : null
-                                ),
-                                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                                  Text('${day.day}', style: TextStyle(fontWeight: isToday ? FontWeight.w900 : FontWeight.bold, fontSize: calendarFontSize - 1, color: inM ? Colors.black : Colors.grey)),
-                                  if (code != null) FittedBox(child: Container(margin: const EdgeInsets.only(top: 1), padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: def?.color ?? Colors.orange, borderRadius: BorderRadius.circular(8)), child: Text(code, style: TextStyle(color: Colors.white, fontSize: calendarFontSize - 2)))),
-                                  const SizedBox(height: 2),
-                                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                                    if (isHol) Container(width: 6, height: 6, margin: const EdgeInsets.symmetric(horizontal: 1), decoration: BoxDecoration(color: holidayDotColor, shape: BoxShape.circle)),
-                                    if (hasNote) Container(width: 6, height: 6, margin: const EdgeInsets.symmetric(horizontal: 1), decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle)),
-                                  ]),
-                                ])
-                              )
-                            );
-                          }
+          // ===== 加入左右滑動手勢切換月份 =====
+          child: GestureDetector(
+            onHorizontalDragEnd: (details) {
+              if (details.primaryVelocity == null) return;
+              // primaryVelocity < 0 → 向左滑 → 下個月
+              // primaryVelocity > 0 → 向右滑 → 上個月
+              if (details.primaryVelocity! < -100) {
+                _goToNextMonth();
+              } else if (details.primaryVelocity! > 100) {
+                _goToPrevMonth();
+              }
+            },
+            behavior: HitTestBehavior.opaque,
+            child: RepaintBoundary(
+              key: calKey,
+              child: Column(children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Row(children: [
+                    Container(width: 32, child: const Text('週', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.deepPurple))),
+                    Expanded(child: Row(children: ["一", "二", "三", "四", "五", "六", "日"].map((w) => Expanded(child: Text(w, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11)))).toList()))
+                  ]),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    padding: EdgeInsets.zero,
+                    itemCount: weeks,
+                    itemBuilder: (ctx, row) {
+                      return Row(children: [
+                        Container(width: 32, alignment: Alignment.center, child: Text('W${isoWeek(days[row * 7])}', style: const TextStyle(fontSize: 11, color: Colors.deepPurple, fontWeight: FontWeight.bold))),
+                        Expanded(
+                          child: GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            padding: const EdgeInsets.all(3),
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7, childAspectRatio: 0.78, mainAxisSpacing: 4, crossAxisSpacing: 4),
+                            itemCount: 7,
+                            itemBuilder: (ctx2, col) {
+                              int idx = row * 7 + col;
+                              DateTime day = days[idx];
+                              bool inM = day.month == focused.month;
+                              String k = DateFormat('yyyy-MM-dd').format(day);
+                              String? code = roster[k];
+                              var def = code != null ? defs[code] : null;
+                              bool sel = k == selKey;
+                              bool isToday = day.year == today.year && day.month == today.month && day.day == today.day;
+                              bool hasNote = rosterNote.containsKey(k) && rosterNote[k]!.isNotEmpty;
+                              bool isHol = isHoliday(day);
+                              Color bg;
+                              if (isToday) { bg = todayBgColor; }
+                              else if (!inM) { bg = const Color(0xFFF5F5F0); }
+                              else if (sel) { bg = Colors.white; }
+                              else if (def != null) { bg = def.color.withOpacity(0.18); }
+                              else { bg = const Color(0xFFFFF0D0); }
+                              return GestureDetector(
+                                onTap: () { setState(() => selectedDay = day); },
+                                onLongPress: () { setState(() => selectedDay = day); showDetail(day); },
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: bg,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: isToday ? Border.all(width: 2.8, color: todayBorderColor) : sel ? Border.all(width: 2, color: Colors.deepPurple) : null
+                                  ),
+                                  child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                    Text('${day.day}', style: TextStyle(fontWeight: isToday ? FontWeight.w900 : FontWeight.bold, fontSize: calendarFontSize - 1, color: inM ? Colors.black : Colors.grey)),
+                                    if (code != null) FittedBox(child: Container(margin: const EdgeInsets.only(top: 1), padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: def?.color ?? Colors.orange, borderRadius: BorderRadius.circular(8)), child: Text(code, style: TextStyle(color: Colors.white, fontSize: calendarFontSize - 2)))),
+                                    const SizedBox(height: 2),
+                                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                      if (isHol) Container(width: 6, height: 6, margin: const EdgeInsets.symmetric(horizontal: 1), decoration: BoxDecoration(color: holidayDotColor, shape: BoxShape.circle)),
+                                      if (hasNote) Container(width: 6, height: 6, margin: const EdgeInsets.symmetric(horizontal: 1), decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle)),
+                                    ]),
+                                  ])
+                                )
+                              );
+                            }
+                          )
                         )
-                      )
-                    ]);
-                  }
+                      ]);
+                    }
+                  )
                 )
-              )
-            ])
+              ])
+            )
           )
         ),
         Container(
@@ -1288,9 +1495,9 @@ class MainPageState extends State<MainPage> {
       const Text('日曆同步 - 已恢復存取所有日曆權限', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
         SwitchListTile(title: const Text('啟用日曆同步'), subtitle: Text(googleSyncEnabled ? '已授權 只同步代號+時間+記事' : '未授權 - 首次會詢問權限'), value: googleSyncEnabled, onChanged: (v) async { if (v) { await _requestGooglePerm(); } else { setState(() => googleSyncEnabled = false); save(); } }),
-        SwitchListTile(title: const Text('自動同步(去重)'), value: autoSync, onChanged: googleSyncEnabled ? (v) { setState(() => autoSync = v); save(); } : null),
+        SwitchListTile(title: const Text('自動同步(增量去重)'), value: autoSync, onChanged: googleSyncEnabled ? (v) { setState(() => autoSync = v); save(); } : null),
         Row(children: [
-          Expanded(child: OutlinedButton.icon(onPressed: googleSyncEnabled ? () => _syncToGoogle() : null, icon: const Icon(Icons.sync), label: const Text('手動同步去重'))),
+          Expanded(child: OutlinedButton.icon(onPressed: googleSyncEnabled ? () => _syncToGoogle() : null, icon: const Icon(Icons.sync), label: const Text('手動增量同步'))),
           const SizedBox(width: 8),
           Expanded(child: OutlinedButton.icon(onPressed: () { setState(() => googleSyncEnabled = false); save(); }, icon: const Icon(Icons.link_off), label: const Text('取消')))
         ]),
@@ -1298,6 +1505,24 @@ class MainPageState extends State<MainPage> {
         const SizedBox(height: 8),
         SizedBox(width: double.infinity, child: OutlinedButton.icon(icon: const Icon(Icons.list), label: const Text('選擇日曆 (已恢復權限)'), onPressed: () async { await _pickGoogleCalendarDialog(); })),
         SizedBox(width: double.infinity, child: OutlinedButton.icon(icon: const Icon(Icons.security), label: const Text('重新請求日曆權限 (修復空白)'), onPressed: () async { await handleCalendarPermission(silent: false); setState(() {}); })),
+        const Divider(),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(color: Colors.red.withOpacity(0.08), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.withOpacity(0.3))),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('⚠️ 全清重建（救援用）', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 13)),
+            const SizedBox(height: 4),
+            const Text('• 刪除 Google 日曆上所有 [RosterPro] 事件\n• App 排班資料不受影響\n• 你其他 Google 行程不受影響\n• 用於：換手機、地圖損壞、發現重複', style: TextStyle(fontSize: 10, color: Colors.black54)),
+            const SizedBox(height: 8),
+            SizedBox(width: double.infinity, child: FilledButton.icon(
+              onPressed: googleSyncEnabled ? _forceFullResync : null,
+              icon: const Icon(Icons.cleaning_services, size: 18),
+              label: const Text('執行全清重建'),
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            )),
+          ])
+        ),
       ]))),
       const SizedBox(height: 16),
       const Text('清除排更 - 按日期範圍 (保留記事)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red)),
