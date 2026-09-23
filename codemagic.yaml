@@ -7,7 +7,7 @@ workflows:
       flutter: 3.24.5
       java: 17
       groups:
-        - keystore_credentials  # 如果無keystore可刪此行，用debug簽名
+        - keystore_credentials  # 如果無keystore可刪除此行，用debug簽名
     triggering:
       events:
         - push
@@ -23,8 +23,28 @@ workflows:
 
       - name: Fix Android MainActivity + Widget 4x4 (Correct Version)
         script: |
-          # 1. 確保 MainActivity.kt 有 getCalendars 真ID方法 (Fix 日曆空白 0個問題)
-          MAIN_KT=$(find android/app/src/main/kotlin -name "MainActivity.kt" | head -n 1)
+          # ==========================================================
+          # 1. 自動修復 Flutter Android v1 embedding 已刪除錯誤 (Build failed 關鍵)
+          # ==========================================================
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          echo "Cleaning up v1 embedding references in AndroidManifest.xml..."
+          
+          # 將已被刪除的 io.flutter.app.FlutterApplication 替換為標準的 Application 佔位符
+          sed -i 's/android:name="io\.flutter\.app\.FlutterApplication"/android:name="${applicationName}"/g' "$MANIFEST"
+          
+          # 移除已失效的 SplashScreenUntilFirstFrame meta-data
+          sed -i '/io\.flutter\.app\.android\.SplashScreenUntilFirstFrame/d' "$MANIFEST"
+          
+          # 確保存在正確的 v2 embedding meta-data
+          if ! grep -q 'flutterEmbedding' "$MANIFEST"; then
+            sed -i '/<\/application>/i\        <meta-data android:name="flutterEmbedding" android:value="2" />' "$MANIFEST"
+          fi
+          echo "v1 embedding cleanup done."
+          # ==========================================================
+
+          # 2. 確保 MainActivity.kt 有 getCalendars 真ID方法 (Fix 日曆空白 0個問題)
+          # 擴大搜尋範圍，確保能找到 kotlin 或 java 目錄下的 MainActivity.kt
+          MAIN_KT=$(find android/app/src/main -name "MainActivity.kt" | head -n 1)
           if [ -n "$MAIN_KT" ]; then
           cat > "$MAIN_KT" <<'KT'
           package com.example.roster_pro // <--- 如果你的包名不同，請替換這裡
@@ -72,7 +92,7 @@ workflows:
           echo "MainActivity.kt patched for real calendar ID"
           fi
 
-          # 2. 建立 Widget 佈局 (包含 42 個日期格子)
+          # 3. 建立 Widget 佈局 (包含 42 個日期格子)
           mkdir -p android/app/src/main/res/layout
           cat > android/app/src/main/res/layout/widget_layout.xml <<'XML'
           <?xml version="1.0" encoding="utf-8"?>
@@ -196,7 +216,22 @@ workflows:
           </LinearLayout>
           XML
 
-          # 3. 建立 RosterWidgetProvider.kt (使用 AppWidgetProvider，直接讀取 SharedPreferences)
+          # 4. 建立 widget_info.xml (此檔案缺失會導致編譯失敗與小工具無法註冊)
+          mkdir -p android/app/src/main/res/xml
+          cat > android/app/src/main/res/xml/widget_info.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:minWidth="250dp"
+              android:minHeight="250dp"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget_layout"
+              android:resizeMode="horizontal|vertical"
+              android:widgetCategory="home_screen">
+          </appwidget-provider>
+          XML
+          echo "widget_info.xml created"
+
+          # 5. 建立 RosterWidgetProvider.kt
           mkdir -p android/app/src/main/kotlin/com/example/roster_pro
           cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt <<'KT'
           package com.example.roster_pro // <--- 請替換為你的包名
@@ -310,8 +345,7 @@ workflows:
           KT
           echo "RosterWidgetProvider.kt patched successfully"
 
-          # 4. 修改 AndroidManifest.xml (加入權限與 Receiver)
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          # 6. 修改 AndroidManifest.xml (加入權限與 Receiver)
           if grep -q "READ_CALENDAR" "$MANIFEST"; then echo "Calendar permission exists"; else
             sed -i '' 's/<manifest/<manifest xmlns:tools="http:\/\/schemas.android.com\/tools"/' "$MANIFEST" 2>/dev/null || sed -i 's/<manifest/<manifest xmlns:tools="http:\/\/schemas.android.com\/tools"/' "$MANIFEST"
             sed -i '' '/<application/i\
@@ -320,7 +354,6 @@ workflows:
           ' "$MANIFEST" 2>/dev/null || sed -i '/<application/i <uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />\n' "$MANIFEST"
           fi
           
-          # 確保有 Receiver 註冊
           if grep -q "RosterWidgetProvider" "$MANIFEST"; then echo "Receiver exists"; else
             sed -i '' '/<\/application>/i\
               <receiver android:name=".RosterWidgetProvider" android:exported="false">\
@@ -334,6 +367,7 @@ workflows:
               </receiver>\
           ' "$MANIFEST" 2>/dev/null || sed -i '/<\/application>/i <receiver android:name=".RosterWidgetProvider" android:exported="false">\n<intent-filter>\n<action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n<action android:name="PREV_MONTH" />\n<action android:name="NEXT_MONTH" />\n<action android:name="REFRESH_WIDGET" />\n</intent-filter>\n<meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info" />\n</receiver>\n' "$MANIFEST"
           fi
+          echo "AndroidManifest.xml patched successfully"
           cat "$MANIFEST"
 
       - name: Build APK Release 9Fix
