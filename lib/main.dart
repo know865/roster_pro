@@ -23,7 +23,7 @@ class ShiftDef {
 }
 class ExtraAllowance { String name; double amount; ExtraAllowance(this.name,this.amount); Map<String,dynamic> toJson()=>{'name':name,'amount':amount}; factory ExtraAllowance.fromJson(Map<String,dynamic> j)=>ExtraAllowance(j['name'],(j['amount'] as num).toDouble()); }
 class SavedPattern { String name; List<List<String>> data; SavedPattern(this.name,this.data); Map<String,dynamic> toJson()=>{'name':name,'data':data}; factory SavedPattern.fromJson(Map<String,dynamic> j)=>SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r)=>(r as List).map<String>((e)=>e.toString()).toList()).toList()); }
-class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v7.5',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
+class RosterApp extends StatelessWidget { const RosterApp({super.key}); @override Widget build(BuildContext context){ return MaterialApp(title:'Roster Pro v7.6',theme:ThemeData(useMaterial3:true,colorSchemeSeed:Colors.deepPurple),home:const MainPage()); } }
 
 class MainPage extends StatefulWidget { const MainPage({super.key}); @override State<MainPage> createState()=>MainPageState(); }
 class MainPageState extends State<MainPage> {
@@ -48,11 +48,7 @@ String? _rosterCalendarId;
 Map<String,String> _googleEventIdMap={};
 bool _isSyncing=false;
 
-Map<String,String> getHolidays(int year, String region){
-if(region=='無') return {};
-if(region=='香港'){ return {'$year-01-01':'元旦','$year-01-29':'農曆年初一','$year-05-01':'勞動節','$year-07-01':'香港回歸','$year-10-01':'國慶','$year-12-25':'聖誕節'}; }
-return {};
-}
+Map<String,String> getHolidays(int year, String region){ if(region=='無') return {}; if(region=='香港'){ return {'$year-01-01':'元旦','$year-05-01':'勞動節','$year-07-01':'香港回歸','$year-10-01':'國慶','$year-12-25':'聖誕節'}; } return {}; }
 bool isHoliday(DateTime d){ var map=getHolidays(d.year, holidayRegion); return map.containsKey(DateFormat('yyyy-MM-dd').format(d)); }
 String holidayName(DateTime d){ var map=getHolidays(d.year, holidayRegion); return map[DateFormat('yyyy-MM-dd').format(d)]??''; }
 
@@ -257,10 +253,13 @@ const SizedBox(width:8),
 Expanded(child: TextField(controller:endCtrl, decoration:const InputDecoration(labelText:'結束 HH:mm', border:OutlineInputBorder(), isDense:true))),
 ]),
 Container(padding:const EdgeInsets.all(8), decoration:BoxDecoration(border:Border.all(color:Colors.greenAccent,width:2), borderRadius:BorderRadius.circular(12)), child:Column(children:[
-Row(children:[Checkbox(value:isAllDay,onChanged:(v){ setS(()=>isAllDay=v??false; }), const Text('全天')]),
+Row(children:[
+Checkbox(value:isAllDay, onChanged:(v){ setS(()=>isAllDay=v??false; },),
+const Text('全天'),
+]),
 SizedBox(height:56, child: TextField(controller:hoursCtrl, decoration:const InputDecoration(labelText:'工時', border:OutlineInputBorder(), isDense:true))),
 ])),
-Row(children:[Checkbox(value:hasAllow,onChanged:(v)=>setS(()=>hasAllow=v??false)),const Text('有津貼核實')]), if(hasAllow) TextField(controller:allowCtrl,decoration:const InputDecoration(labelText:'津貼金額', border:OutlineInputBorder(), isDense:true)),
+Row(children:[Checkbox(value:hasAllow,onChanged:(v)=>setS(()=>hasAllow=v??false),),const Text('有津貼核實')]), if(hasAllow) TextField(controller:allowCtrl,decoration:const InputDecoration(labelText:'津貼金額', border:OutlineInputBorder(), isDense:true)),
 ])),
 actions:[TextButton(onPressed:()=>Navigator.pop(ctx2),child:const Text('取消')),FilledButton(onPressed:(){ String newCode=codeCtrl.text.trim(); if(newCode.isEmpty) return; setState((){ if(oldKey.isNotEmpty && oldKey!=newCode){ defs.remove(oldKey); } defs[newCode]=ShiftDef(newCode,labelCtrl.text.isEmpty?newCode:labelCtrl.text,double.tryParse(hoursCtrl.text)??8,picked,start:startCtrl.text,end:endCtrl.text,hasAllowance:hasAllow,allowance:double.tryParse(allowCtrl.text)??0,isAllDay:isAllDay); }); save(); Navigator.pop(ctx2); },child:const Text('儲存'))]);
 }); }); }
