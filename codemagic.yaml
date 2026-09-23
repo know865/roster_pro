@@ -1,38 +1,30 @@
 workflows:
   Default Workflow:
-    name: RosterPro Kotlin 1.9.22 FIX
+    name: RosterPro v10 Complete
+    max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
       flutter: 3.22.2
       java: 17
     scripts:
-      - name: Fix project + Kotlin
+      - name: Fix + Kotlin 1.9.22
         script: |
           set -e
           rm -rf test ~/.gradle/caches
           flutter config --no-analytics
-          flutter create . --platforms=android --project-name roster_pro --org com.example --no-pub
-
+          flutter create. --platforms=android --project-name roster_pro --org com.example --no-pub
           python3 << 'PY'
           import pathlib, re
           for fp in [pathlib.Path("android/build.gradle"), pathlib.Path("android/settings.gradle")]:
-              if not fp.exists(): continue
-              txt = fp.read_text()
-              txt = re.sub(r"ext\.kotlin_version\s*=\s*['\"][^'\"]+['\"]", "ext.kotlin_version = '1.9.22'", txt)
-              txt = re.sub(r'org\.jetbrains\.kotlin\.android.*version\s*["\'][^"\']+["\']', 'id "org.jetbrains.kotlin.android" version "1.9.22" apply false', txt)
-              txt = re.sub(r'kotlin_version\s*=\s*["\'][^"\']+["\']', 'kotlin_version = "1.9.22"', txt)
-              # 如果仲係舊格式，強制寫入
-              if "1.7.1" in txt:
-                  txt = txt.replace("1.7.1", "1.9.22")
-              fp.write_text(txt)
-              print(f"patched {fp}")
+            if not fp.exists(): continue
+            t=fp.read_text()
+            t=re.sub(r"ext\.kotlin_version\s*=\s*['\"][^'\"]+['\"]", "ext.kotlin_version = '1.9.22'", t)
+            t=t.replace("1.7.1","1.9.22").replace("1.8.22","1.9.22")
+            t=re.sub(r'version\s*"1\.\d+\.\d+"', 'version "1.9.22"', t)
+            fp.write_text(t)
           PY
-
           flutter pub get
-
       - name: Build APK
-        script: |
-          flutter build apk --release --no-tree-shake-icons --verbose
-
+        script: flutter build apk --release --no-tree-shake-icons
     artifacts:
       - build/**/outputs/**/*.apk
