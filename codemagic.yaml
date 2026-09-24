@@ -8,6 +8,12 @@ workflows:
       java: 17
       groups:
         - keystore_credentials
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
     scripts:
       - name: Set up Flutter
         script: |
@@ -41,17 +47,21 @@ workflows:
         script: |
           set -e
 
-          echo "=== 覆寫 AndroidManifest.xml (含權限與 Receiver) ==="
+          echo "=== 覆寫 AndroidManifest.xml ==="
           cat > android/app/src/main/AndroidManifest.xml <<'MANIFEST_EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET"/>
               <uses-permission android:name="android.permission.READ_CALENDAR" />
               <uses-permission android:name="android.permission.WRITE_CALENDAR" />
-          
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
               <application
                   android:label="Roster Pro"
                   android:name="${applicationName}"
-                  android:icon="@mipmap/ic_launcher">
+                  android:icon="@mipmap/ic_launcher"
+                  android:requestLegacyExternalStorage="true">
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
@@ -68,11 +78,11 @@ workflows:
                           <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
                   </activity>
-          
+
                   <meta-data
                       android:name="flutterEmbedding"
                       android:value="2" />
-          
+
                   <receiver android:name=".RosterWidgetProvider" android:exported="false">
                       <intent-filter>
                           <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
@@ -83,7 +93,7 @@ workflows:
                       <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info" />
                   </receiver>
               </application>
-          
+
               <queries>
                   <intent>
                       <action android:name="android.intent.action.PROCESS_TEXT"/>
@@ -93,58 +103,113 @@ workflows:
           </manifest>
           MANIFEST_EOF
 
-          echo "=== 建立 MainActivity.kt ==="
+          echo "=== 建立 MainActivity.kt (含日曆方法 + 相冊掃描) ==="
           mkdir -p android/app/src/main/kotlin/com/example/roster_pro
           cat > android/app/src/main/kotlin/com/example/roster_pro/MainActivity.kt <<'MAIN_EOF'
           package com.example.roster_pro
 
           import android.Manifest
+          import android.content.Intent
           import android.content.pm.PackageManager
+          import android.media.MediaScannerConnection
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Environment
           import android.provider.CalendarContract
+          import android.provider.Settings
           import androidx.core.content.ContextCompat
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
           import io.flutter.plugin.common.MethodChannel
+          import java.io.File
 
           class MainActivity : FlutterActivity() {
               private val CHANNEL = "com.roster/calendar_real"
+
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
-                      if (call.method == "getCalendars") {
-                          if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
-                              result.error("PERMISSION", "No calendar permission", null)
-                              return@setMethodCallHandler
-                          }
-                          val calendars = mutableListOf<Map<String, Any?>>()
-                          val uri = CalendarContract.Calendars.CONTENT_URI
-                          val projection = arrayOf(
-                              CalendarContract.Calendars._ID,
-                              CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
-                              CalendarContract.Calendars.ACCOUNT_NAME,
-                              CalendarContract.Calendars.ACCOUNT_TYPE
-                          )
-                          val cursor = contentResolver.query(uri, projection, null, null, null)
-                          cursor?.use {
-                              while (it.moveToNext()) {
-                                  val id = it.getLong(0).toString()
-                                  val displayName = it.getString(1) ?: "Unnamed"
-                                  val accountName = it.getString(2) ?: ""
-                                  val accountType = it.getString(3) ?: ""
-                                  val isGoogle = accountName.contains("gmail") || accountType.contains("google") || accountName.contains("google")
-                                  calendars.add(mapOf(
-                                      "id" to id,
-                                      "displayName" to displayName,
-                                      "accountName" to accountName,
-                                      "accountType" to accountType,
-                                      "isGoogle" to isGoogle
-                                  ))
-                              }
-                          }
-                          result.success(calendars)
-                      } else {
-                          result.notImplemented()
+                      when (call.method) {
+                          "getCalendars" -> handleGetCalendars(result)
+                          "scanImage" -> handleScanImage(call.argument<String>("path"), result)
+                          "requestManageStorage" -> handleRequestManageStorage(result)
+                          else -> result.notImplemented()
                       }
+                  }
+              }
+
+              private fun handleGetCalendars(result: MethodChannel.Result) {
+                  if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+                      result.error("PERMISSION", "No calendar permission", null)
+                      return
+                  }
+                  val calendars = mutableListOf<Map<String, Any?>>()
+                  val uri = CalendarContract.Calendars.CONTENT_URI
+                  val projection = arrayOf(
+                      CalendarContract.Calendars._ID,
+                      CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+                      CalendarContract.Calendars.ACCOUNT_NAME,
+                      CalendarContract.Calendars.ACCOUNT_TYPE
+                  )
+                  val cursor = contentResolver.query(uri, projection, null, null, null)
+                  cursor?.use {
+                      while (it.moveToNext()) {
+                          val id = it.getLong(0).toString()
+                          val displayName = it.getString(1) ?: "Unnamed"
+                          val accountName = it.getString(2) ?: ""
+                          val accountType = it.getString(3) ?: ""
+                          val isGoogle = accountName.contains("gmail") || accountType.contains("google") || accountName.contains("google")
+                          calendars.add(mapOf(
+                              "id" to id,
+                              "displayName" to displayName,
+                              "accountName" to accountName,
+                              "accountType" to accountType,
+                              "isGoogle" to isGoogle
+                          ))
+                      }
+                  }
+                  result.success(calendars)
+              }
+
+              private fun handleScanImage(path: String?, result: MethodChannel.Result) {
+                  if (path == null) {
+                      result.error("NO_PATH", "Path is null", null)
+                      return
+                  }
+                  try {
+                      val file = File(path)
+                      if (!file.exists()) {
+                          result.error("NO_FILE", "File does not exist: $path", null)
+                          return
+                      }
+                      MediaScannerConnection.scanFile(
+                          applicationContext,
+                          arrayOf(file.absolutePath),
+                          arrayOf("image/jpeg", "image/jpg", "image/png")
+                      ) { _, uri ->
+                          result.success(uri?.toString() ?: path)
+                      }
+                  } catch (e: Exception) {
+                      result.error("SCAN_FAIL", e.message, null)
+                  }
+              }
+
+              private fun handleRequestManageStorage(result: MethodChannel.Result) {
+                  try {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                          if (!Environment.isExternalStorageManager()) {
+                              val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                              intent.data = Uri.parse("package:$packageName")
+                              startActivity(intent)
+                              result.success(false)
+                              return
+                          }
+                          result.success(true)
+                      } else {
+                          result.success(true)
+                      }
+                  } catch (e: Exception) {
+                      result.error("STORAGE_FAIL", e.message, null)
                   }
               }
           }
@@ -227,7 +292,7 @@ workflows:
           </LinearLayout>
           LAYOUT_EOF
 
-          echo "=== 建立 RosterWidgetProvider.kt ==="
+          echo "=== 建立 RosterWidgetProvider.kt (支援字體/顏色設定) ==="
           cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt <<'WIDGET_EOF'
           package com.example.roster_pro
 
@@ -238,6 +303,7 @@ workflows:
           import android.content.Intent
           import android.content.SharedPreferences
           import android.graphics.Color
+          import android.util.TypedValue
           import android.view.View
           import android.widget.RemoteViews
           import org.json.JSONObject
@@ -272,17 +338,29 @@ workflows:
                       val year = widgetPrefs.getInt("year", cal.get(Calendar.YEAR))
                       val month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH))
                       val monthNames = arrayOf("1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月")
-                      views.setTextViewText(R.id.tv_month_title, "${year}年 ${monthNames[month]}")
+
                       val fp: SharedPreferences = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+
+                      // ===== 讀取用戶設定的字體大小 / 顏色 / 背景色 =====
+                      val widgetFontSize = fp.getFloat("flutter.widgetFontSize", 11f)
+                      val widgetTextColor = fp.getLong("flutter.widgetTextColor", 0xFF333333).toInt()
+                      val widgetBgColor = fp.getLong("flutter.widgetBgColor", 0xFFFFFFFF).toInt()
+                      // ===================================================
+
+                      views.setTextViewText(R.id.tv_month_title, "${year}年 ${monthNames[month]}")
+                      views.setTextColor(R.id.tv_month_title, widgetTextColor)
+
                       val rosterJson = try { JSONObject(fp.getString("flutter.roster_json", "{}")) } catch (e: Exception) { JSONObject() }
                       val defsJson = try { JSONObject(fp.getString("flutter.defs_json", "{}")) } catch (e: Exception) { JSONObject() }
                       val todayBgColor = fp.getLong("flutter.today_bg", 0xFFFFF9C4).toInt()
+
                       val calendar = Calendar.getInstance()
                       calendar.set(year, month, 1)
                       val fdow = calendar.get(Calendar.DAY_OF_WEEK)
                       val startOffset = if (fdow == Calendar.SUNDAY) 6 else fdow - 2
                       val maxDays = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
                       val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+
                       for (i in 0 until 42) {
                           val dayIndex = i - startOffset + 1
                           val tvId = context.resources.getIdentifier("day$i", "id", context.packageName)
@@ -293,7 +371,9 @@ workflows:
                                   var txt = dayIndex.toString()
                                   if (shiftCode.isNotEmpty()) txt = "$dayIndex\n$shiftCode"
                                   views.setTextViewText(tvId, txt)
-                                  views.setTextColor(tvId, Color.parseColor("#333333"))
+                                  // 套用字體顏色 + 大小
+                                  views.setTextColor(tvId, widgetTextColor)
+                                  views.setTextViewTextSize(tvId, TypedValue.COMPLEX_UNIT_SP, widgetFontSize)
                                   views.setViewVisibility(tvId, View.VISIBLE)
                                   if (shiftCode.isNotEmpty()) {
                                       val defObj = defsJson.optJSONObject(shiftCode)
@@ -304,7 +384,7 @@ workflows:
                                           val b = (Color.blue(c) * 0.3 + 255 * 0.7).toInt()
                                           views.setInt(tvId, "setBackgroundColor", Color.rgb(r, g, b))
                                       }
-                                  } else views.setInt(tvId, "setBackgroundColor", Color.TRANSPARENT)
+                                  } else views.setInt(tvId, "setBackgroundColor", widgetBgColor)
                                   if (dateStr == todayStr) views.setInt(tvId, "setBackgroundColor", todayBgColor)
                                   val intent = Intent(context, MainActivity::class.java)
                                   intent.putExtra("selected_date", dateStr)
@@ -315,6 +395,10 @@ workflows:
                               }
                           }
                       }
+
+                      // 套用背景色
+                      views.setInt(R.id.widget_root, "setBackgroundColor", widgetBgColor)
+
                       val prevI = Intent(context, RosterWidgetProvider::class.java).setAction("PREV_MONTH")
                       views.setOnClickPendingIntent(R.id.btn_prev, PendingIntent.getBroadcast(context, 0, prevI, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                       val nextI = Intent(context, RosterWidgetProvider::class.java).setAction("NEXT_MONTH")
