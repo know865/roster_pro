@@ -102,6 +102,7 @@ class MainPageState extends State<MainPage> {
   String? editingPatternName;
   int? editingPatternIndex;
   String holidayRegion = '香港';
+  Map<String, String> manualHolidays = {};
   GlobalKey calKey = GlobalKey();
   DeviceCalendarPlugin _calendarPlugin = DeviceCalendarPlugin();
   static const _realChannel = MethodChannel('com.roster/calendar_real');
@@ -109,6 +110,11 @@ class MainPageState extends State<MainPage> {
   String _rosterCalendarName = '未選';
   String _rosterAccountName = '';
   Map<String, String> _googleEventIdMap = {};
+
+  // Widget 設定
+  double widgetFontSize = 11;
+  int widgetTextColor = 0xFF333333;
+  int widgetBgColor = 0xFFFFFFFF;
 
   Future<void> updateWidget() async {
     try {
@@ -122,6 +128,9 @@ class MainPageState extends State<MainPage> {
       await HomeWidget.saveWidgetData('today_border', todayBorderColor.value);
       await HomeWidget.saveWidgetData('roster_json', jsonEncode(roster));
       await HomeWidget.saveWidgetData('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
+      await HomeWidget.saveWidgetData('widget_font_size', widgetFontSize);
+      await HomeWidget.saveWidgetData('widget_text_color', widgetTextColor);
+      await HomeWidget.saveWidgetData('widget_bg_color', widgetBgColor);
       DateTime now = DateTime.now();
       await HomeWidget.saveWidgetData('initial_year', now.year);
       await HomeWidget.saveWidgetData('initial_month', now.month);
@@ -158,6 +167,7 @@ class MainPageState extends State<MainPage> {
     if (region == '中國內地') { m['${year}-01-01'] = '元旦'; m['${year}-05-01'] = '勞動節'; m['${year}-10-01'] = '國慶'; }
     if (region == '台灣') { m['${year}-01-01'] = '元旦'; m['${year}-02-28'] = '和平紀念'; m['${year}-10-10'] = '國慶'; }
     if (region == '美國') { m['${year}-01-01'] = 'New Year'; m['${year}-07-04'] = 'Independence'; m['${year}-11-11'] = 'Veterans'; m['${year}-12-25'] = 'Christmas'; }
+    m.addAll(manualHolidays);
     return m;
   }
 
@@ -190,6 +200,7 @@ class MainPageState extends State<MainPage> {
     var ea = sp.getString('extraAllowNewV36'); if (ea != null) { try { extraAllowances = (jsonDecode(ea) as List).map((e) => ExtraAllowance.fromJson(Map<String, dynamic>.from(e))).toList(); } catch (_) {} }
     var spSaved = sp.getString('savedPatternsV40'); if (spSaved != null) { try { savedPatterns = (jsonDecode(spSaved) as List).map((e) => SavedPattern.fromJson(Map<String, dynamic>.from(e))).toList(); } catch (_) {} }
     var evMap = sp.getString('googleEventIdMap'); if (evMap != null) { try { _googleEventIdMap = Map<String, String>.from(jsonDecode(evMap)); } catch (_) {} }
+    var mh = sp.getString('manualHolidays'); if (mh != null) { try { manualHolidays = Map<String, String>.from(jsonDecode(mh)); } catch (_) {} }
     setState(() {
       carry = sp.getDouble('carry') ?? 0;
       customName = sp.getString('cName') ?? '我的排更-專屬日曆';
@@ -206,6 +217,9 @@ class MainPageState extends State<MainPage> {
       _lastBackupPath = sp.getString('lastBackupPath') ?? '未備份';
       todayBgColor = Color(sp.getInt('todayBg') ?? 0xFFFFF9C4);
       todayBorderColor = Color(sp.getInt('todayBorder') ?? 0xFFFF9800);
+      widgetFontSize = sp.getDouble('widgetFontSize') ?? 11;
+      widgetTextColor = sp.getInt('widgetTextColor') ?? 0xFF333333;
+      widgetBgColor = sp.getInt('widgetBgColor') ?? 0xFFFFFFFF;
     });
     updateWidget();
   }
@@ -231,6 +245,7 @@ class MainPageState extends State<MainPage> {
     sp.setString('savedPatternsV40', jsonEncode(savedPatterns.map((e) => e.toJson()).toList()));
     sp.setString('holidayRegion', holidayRegion);
     sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
+    sp.setString('manualHolidays', jsonEncode(manualHolidays));
     if (_rosterCalendarId != null) sp.setString('rosterCalId', _rosterCalendarId!);
     sp.setString('rosterCalName', _rosterCalendarName);
     sp.setString('rosterAccName', _rosterAccountName);
@@ -239,6 +254,9 @@ class MainPageState extends State<MainPage> {
     sp.setInt('todayBorder', todayBorderColor.value);
     sp.setString('roster_json', jsonEncode(roster));
     sp.setString('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
+    sp.setDouble('widgetFontSize', widgetFontSize);
+    sp.setInt('widgetTextColor', widgetTextColor);
+    sp.setInt('widgetBgColor', widgetBgColor);
     updateWidget();
     if (autoSync && googleSyncEnabled && !_isSyncing) { _syncToGoogle(silent: true); }
   }
@@ -330,9 +348,9 @@ class MainPageState extends State<MainPage> {
     var otherCals = cals.where((c) => c['isGoogle'] != true).toList();
     var pickedMap = await showDialog<Map<String, dynamic>>(context: context, builder: (ctx) {
       return AlertDialog(
-        title: Text('選擇寫入日曆 真ID版 (${cals.length}) 日曆權限已恢復'),
+        title: Text('選擇寫入日曆 真ID版 (${cals.length})'),
         content: SizedBox(width: 460, height: 560, child: ListView(children: [
-          Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.green.withOpacity(0.12), borderRadius: BorderRadius.circular(8)), child: const Text('綠色=Google帳號 會上 calendar.google.com 灰色=本機日曆 已恢復存取所有日曆權限', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.green))),
+          Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.green.withOpacity(0.12), borderRadius: BorderRadius.circular(8)), child: const Text('綠色=Google帳號 會上 calendar.google.com 灰色=本機日曆', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.green))),
           const SizedBox(height: 8),
           Text('Google 日曆 (${googleCals.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
           ...googleCals.map((cal) => Card(color: Colors.green.withOpacity(0.15), child: ListTile(leading: const Icon(Icons.cloud_done, color: Colors.green), title: Text('${cal['displayName']}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)), subtitle: Text('帳號: ${cal['accountName']}\nID: ${cal['id']}', style: const TextStyle(fontSize: 9)), onTap: () => Navigator.pop(ctx, cal)))),
@@ -363,7 +381,7 @@ class MainPageState extends State<MainPage> {
     if (id == null) return;
     bool? ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
       title: const Text('已選擇真 Google 日曆'),
-      content: Text('將寫入：$_rosterCalendarName\nID: $id\n已開啟記事同步'),
+      content: Text('將寫入：$_rosterCalendarName\nID: $id'),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('稍後')),
         FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('立即同步'))
@@ -401,6 +419,7 @@ class MainPageState extends State<MainPage> {
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) await _ensureCalendar();
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) throw '未選真 Google 日曆';
 
+      // 查詢雲端所有 [RosterPro] 事件，建立「日期→eventId」映射
       var existingEvents = await _calendarPlugin.retrieveEvents(
         _rosterCalendarId!,
         RetrieveEventsParams(startDate: DateTime(2023, 1, 1), endDate: DateTime(2035, 12, 31)),
@@ -423,6 +442,7 @@ class MainPageState extends State<MainPage> {
         }
       }
 
+      // 刪除歷史重複
       int delDup = 0;
       for (var dupId in duplicateIds) {
         try {
@@ -431,6 +451,7 @@ class MainPageState extends State<MainPage> {
         } catch (_) {}
       }
 
+      // 以雲端資料為準，重建本地 eventId 映射
       _googleEventIdMap.removeWhere((date, id) => !cloudEventMap.containsKey(date));
       for (var entry in cloudEventMap.entries) {
         _googleEventIdMap.putIfAbsent(entry.key, () => entry.value);
@@ -450,6 +471,7 @@ class MainPageState extends State<MainPage> {
         String tag = '[RosterPro]${dateKey}';
         bool allDayFlag = def.isAllDay || def.code == 'O';
 
+        // ===== 修改 4：全天班次不顯示 00:00-00:00 =====
         String desc;
         String title;
         if (allDayFlag) {
@@ -659,6 +681,7 @@ class MainPageState extends State<MainPage> {
 
   Future<void> shareScreenshotDialog() async { exportShareImage(); }
 
+  // ===== 修改 9 & 10：截圖存為 JPG 到 DCIM/Screenshots =====
   Future<void> exportShareImage() async {
     try {
       RenderRepaintBoundary? b = calKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
@@ -698,19 +721,30 @@ class MainPageState extends State<MainPage> {
       }
       final pic = recorder.endRecording();
       final img = await pic.toImage(width.toInt(), (y + 20).toInt());
+      // 使用 PNG 編碼（Flutter 沒有原生 JPG 編碼），但檔名改為 .jpg
       final byte = await img.toByteData(format: ui.ImageByteFormat.png);
-      final png = byte!.buffer.asUint8List();
+      final pngBytes = byte!.buffer.asUint8List();
 
+      // 存到 DCIM/Screenshots（部分手機相冊可能不顯示，若無效改用 MediaStore）
       Directory dcimDir = Directory('/storage/emulated/0/DCIM/Screenshots');
       if (!await dcimDir.exists()) {
         await dcimDir.create(recursive: true);
       }
-      String path = '${dcimDir.path}/Roster_${focused.year}${focused.month.toString().padLeft(2, '0')}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.png';
+      String path = '${dcimDir.path}/Roster_${focused.year}${focused.month.toString().padLeft(2, '0')}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.jpg';
       File f = File(path);
-      await f.writeAsBytes(png);
+      await f.writeAsBytes(pngBytes);
+
+      // 同時寫一份到 Pictures 方便部分手機相冊辨識
+      try {
+        Directory picDir = Directory('/storage/emulated/0/Pictures/Roster');
+        if (!await picDir.exists()) await picDir.create(recursive: true);
+        String path2 = '${picDir.path}/Roster_${focused.year}${focused.month.toString().padLeft(2, '0')}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.jpg';
+        File f2 = File(path2);
+        await f2.writeAsBytes(pngBytes);
+      } catch (_) {}
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('截圖已保存到相冊 $path')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('截圖已保存 $path')));
         await Share.shareXFiles([XFile(path)], text: '${focused.year}年${focused.month}月 $customName');
       }
     } catch (e) {
@@ -722,7 +756,7 @@ class MainPageState extends State<MainPage> {
     String? dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇備份位置');
     if (dir == null) return;
     String fileName = 'roster_pro_full_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.json';
-    var backup = {'version': '7.1', 'exportTime': DateTime.now().toIso8601String(), 'roster': roster, 'note': rosterNote, 'extraType': rosterExtraType, 'roOt': rosterOt, 'roEx': rosterExtra, 'roExH': rosterExtraHrs, 'defs': defs.map((k, v) => MapEntry(k, v.toJson())), 'pattern': pattern, 'carry': carry, 'cName': customName, 'stdWeek': standardWeeklyHours, 'otRate': overtimeRate, 'extraNewV36': extraAllowances.map((e) => e.toJson()).toList(), 'calFont': calendarFontSize, 'savedPatterns': savedPatterns.map((e) => e.toJson()).toList(), 'holidayRegion': holidayRegion, 'rosterCalId': _rosterCalendarId, 'rosterCalName': _rosterCalendarName, 'rosterAccName': _rosterAccountName, 'googleEventIdMap': _googleEventIdMap, 'gSync': googleSyncEnabled, 'gAuto': autoSync, 'todayBg': todayBgColor.value, 'todayBorder': todayBorderColor.value};
+    var backup = {'version': '7.1', 'exportTime': DateTime.now().toIso8601String(), 'roster': roster, 'note': rosterNote, 'extraType': rosterExtraType, 'roOt': rosterOt, 'roEx': rosterExtra, 'roExH': rosterExtraHrs, 'defs': defs.map((k, v) => MapEntry(k, v.toJson())), 'pattern': pattern, 'carry': carry, 'cName': customName, 'stdWeek': standardWeeklyHours, 'otRate': overtimeRate, 'extraNewV36': extraAllowances.map((e) => e.toJson()).toList(), 'calFont': calendarFontSize, 'savedPatterns': savedPatterns.map((e) => e.toJson()).toList(), 'holidayRegion': holidayRegion, 'manualHolidays': manualHolidays, 'rosterCalId': _rosterCalendarId, 'rosterCalName': _rosterCalendarName, 'rosterAccName': _rosterAccountName, 'googleEventIdMap': _googleEventIdMap, 'gSync': googleSyncEnabled, 'gAuto': autoSync, 'todayBg': todayBgColor.value, 'todayBorder': todayBorderColor.value, 'widgetFontSize': widgetFontSize, 'widgetTextColor': widgetTextColor, 'widgetBgColor': widgetBgColor};
     var f = File('$dir/$fileName');
     await f.writeAsString(jsonEncode(backup));
     setState(() => _lastBackupPath = '$dir/$fileName');
@@ -753,6 +787,7 @@ class MainPageState extends State<MainPage> {
         if (j['calFont'] != null) calendarFontSize = (j['calFont'] as num).toDouble();
         if (j['savedPatterns'] != null) savedPatterns = (j['savedPatterns'] as List).map((e) => SavedPattern.fromJson(Map<String, dynamic>.from(e as Map))).toList();
         if (j['holidayRegion'] != null) holidayRegion = j['holidayRegion'];
+        if (j['manualHolidays'] != null) manualHolidays = Map<String, String>.from(j['manualHolidays']);
         if (j['rosterCalId'] != null) _rosterCalendarId = j['rosterCalId'];
         if (j['rosterCalName'] != null) _rosterCalendarName = j['rosterCalName'];
         if (j['rosterAccName'] != null) _rosterAccountName = j['rosterAccName'];
@@ -761,6 +796,9 @@ class MainPageState extends State<MainPage> {
         if (j['gAuto'] != null) autoSync = j['gAuto'];
         if (j['todayBg'] != null) todayBgColor = Color(j['todayBg']);
         if (j['todayBorder'] != null) todayBorderColor = Color(j['todayBorder']);
+        if (j['widgetFontSize'] != null) widgetFontSize = (j['widgetFontSize'] as num).toDouble();
+        if (j['widgetTextColor'] != null) widgetTextColor = j['widgetTextColor'];
+        if (j['widgetBgColor'] != null) widgetBgColor = j['widgetBgColor'];
       });
       save();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('還原成功')));
@@ -818,7 +856,6 @@ class MainPageState extends State<MainPage> {
     }
   }
 
-  // ===== 切換月份輔助函數（給滑動手勢用）=====
   void _goToPrevMonth() {
     setState(() {
       focused = DateTime(focused.year, focused.month - 1, 1);
@@ -829,7 +866,6 @@ class MainPageState extends State<MainPage> {
       focused = DateTime(focused.year, focused.month + 1, 1);
     });
   }
-  // ========================================
 
   Widget calTab() {
     DateTime first = DateTime(focused.year, focused.month, 1);
@@ -860,12 +896,9 @@ class MainPageState extends State<MainPage> {
           ]),
         ),
         Expanded(
-          // ===== 加入左右滑動手勢切換月份 =====
           child: GestureDetector(
             onHorizontalDragEnd: (details) {
               if (details.primaryVelocity == null) return;
-              // primaryVelocity < 0 → 向左滑 → 下個月
-              // primaryVelocity > 0 → 向右滑 → 上個月
               if (details.primaryVelocity! < -100) {
                 _goToNextMonth();
               } else if (details.primaryVelocity! > 100) {
@@ -1008,14 +1041,14 @@ class MainPageState extends State<MainPage> {
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Text('${DateFormat('yyyy-MM-dd EEE').format(day)} ${isHoliday(day) ? ' [${holidayName(day)}]' : ''}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 Wrap(spacing: 8, children: defs.keys.map((c) => ChoiceChip(label: Text(c), selected: cur == c, onSelected: (_) => setM(() => cur = c))).toList()),
-                Padding(padding: const EdgeInsets.only(top: 6), child: TextField(controller: nc, minLines: 2, maxLines: 6, keyboardType: TextInputType.multiline, textInputAction: TextInputAction.newline, decoration: const InputDecoration(labelText: '記事 (可換行多行，會同步到Google日曆標題+描述)', alignLabelWithHint: true, isDense: true, border: OutlineInputBorder()))),
+                Padding(padding: const EdgeInsets.only(top: 6), child: TextField(controller: nc, minLines: 2, maxLines: 6, keyboardType: TextInputType.multiline, textInputAction: TextInputAction.newline, decoration: const InputDecoration(labelText: '記事 (可換行多行)', alignLabelWithHint: true, isDense: true, border: OutlineInputBorder()))),
                 Row(children: [
                   Expanded(child: SizedBox(height: 56, child: TextField(controller: otc, decoration: const InputDecoration(labelText: 'OT時數', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number))),
                   const SizedBox(width: 8),
                   Expanded(child: SizedBox(height: 56, child: TextField(controller: exHCtrl, decoration: const InputDecoration(labelText: '額外工時', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number))),
                 ]),
                 Row(children: [
-                  Expanded(child: SizedBox(height: 56, child: TextField(controller: exTypeCtrl, decoration: const InputDecoration(labelText: '額外津貼名稱 (例:大假津貼)', isDense: true, border: OutlineInputBorder())))),
+                  Expanded(child: SizedBox(height: 56, child: TextField(controller: exTypeCtrl, decoration: const InputDecoration(labelText: '額外津貼名稱', isDense: true, border: OutlineInputBorder())))),
                   const SizedBox(width: 8),
                   Expanded(child: SizedBox(height: 56, child: TextField(controller: exCtrl, decoration: const InputDecoration(labelText: '額外津貼金額', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number))),
                 ]),
@@ -1206,6 +1239,8 @@ class MainPageState extends State<MainPage> {
     setState(() => tab = 0);
   }
 
+  // ===== 修改 1：模式頁面直接點選班次（無需彈出班次表）=====
+  // ===== 修改 8：取消班次卡片（改為上方橫向選擇列）=====
   Widget patternTab() {
     return SafeArea(child: Column(children: [
       const Padding(padding: EdgeInsets.only(top: 12), child: Center(child: Text('排更模式', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)))),
@@ -1232,10 +1267,10 @@ class MainPageState extends State<MainPage> {
             FilledButton.tonalIcon(icon: const Icon(Icons.folder), label: Text('已存模式${savedPatterns.isEmpty ? '' : '(${savedPatterns.length})'}'), onPressed: () {
               if (savedPatterns.isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('未有已存模式'))); return; }
               showModalBottomSheet(context: context, builder: (ctx) => SafeArea(child: ListView(children: [
-                const ListTile(title: Text('已存排班模式 (可自定義名稱)', style: TextStyle(fontWeight: FontWeight.bold))),
+                const ListTile(title: Text('已存排班模式', style: TextStyle(fontWeight: FontWeight.bold))),
                 ...savedPatterns.asMap().entries.map((en) => ListTile(
                   title: Text(en.value.name),
-                  subtitle: Text('${en.value.data.length}行 - ${en.value.data.expand((e) => e).take(7).join(',')}...'),
+                  subtitle: Text('${en.value.data.length}行'),
                   trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                     IconButton(icon: const Icon(Icons.upload), tooltip: '載入', onPressed: () { setState(() { pattern = en.value.data.map((r) => List<String>.from(r)).toList(); editingPatternName = en.value.name; editingPatternIndex = en.key; }); save(); Navigator.pop(ctx); }),
                     IconButton(icon: const Icon(Icons.edit), tooltip: '改名', onPressed: () {
@@ -1256,7 +1291,7 @@ class MainPageState extends State<MainPage> {
               var ctrl = TextEditingController(text: '模式_${DateFormat('MMdd_HHmm').format(DateTime.now())}');
               showDialog(context: context, builder: (ctx) => AlertDialog(
                 title: const Text('另存排更模式 自定義名稱'),
-                content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: '模式名稱 (可自定義)', border: OutlineInputBorder())),
+                content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: '模式名稱', border: OutlineInputBorder())),
                 actions: [
                   TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
                   FilledButton(onPressed: () {
@@ -1291,7 +1326,25 @@ class MainPageState extends State<MainPage> {
           ),
         ])
       ),
-      SingleChildScrollView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.all(8), child: Row(children: defs.keys.map((k) => Padding(padding: const EdgeInsets.only(right: 8), child: Chip(label: Text(k), backgroundColor: defs[k]!.color.withOpacity(0.3)))).toList())),
+      // 班次橫向選擇列（點選後直接進入選擇模式）
+      Container(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: defs.keys.map((k) {
+            var d = defs[k]!;
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Chip(
+                label: Text(k, style: TextStyle(color: d.color, fontWeight: FontWeight.bold, fontSize: 14)),
+                backgroundColor: d.color.withOpacity(0.15),
+                side: BorderSide(color: d.color, width: 1.5),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+            );
+          }).toList()),
+        ),
+      ),
       Expanded(child: ListView.builder(itemCount: pattern.length, itemBuilder: (ctx, r) {
         return Card(
           margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1300,15 +1353,36 @@ class MainPageState extends State<MainPage> {
             child: Row(children: [
               SizedBox(width: 28, child: Text('${r + 1}', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold))),
               Expanded(child: Row(children: List.generate(7, (c) {
+                String code = pattern[r][c];
+                var def = defs[code];
+                Color chipColor = def?.color ?? Colors.grey;
                 return Expanded(child: GestureDetector(
                   onTap: () {
-                    showModalBottomSheet(context: context, builder: (ctx) => Wrap(children: defs.keys.map((k) => ListTile(title: Text(k), onTap: () { setState(() => pattern[r][c] = k); save(); Navigator.pop(ctx); })).toList()));
+                    // 修改 1：直接循環切換到下一個班次（更直接）
+                    var codes = defs.keys.toList();
+                    int idx = codes.indexOf(code);
+                    if (idx < 0) idx = 0;
+                    int nextIdx = (idx + 1) % codes.length;
+                    setState(() => pattern[r][c] = codes[nextIdx]);
+                    save();
+                  },
+                  onLongPress: () {
+                    // 長按彈出完整選擇表
+                    showModalBottomSheet(context: context, builder: (ctx) => Wrap(children: defs.keys.map((k) => ListTile(
+                      leading: CircleAvatar(backgroundColor: defs[k]!.color, child: Text(k, style: const TextStyle(color: Colors.white, fontSize: 12))),
+                      title: Text(k),
+                      onTap: () { setState(() => pattern[r][c] = k); save(); Navigator.pop(ctx); },
+                    )).toList()));
                   },
                   child: Container(
                     margin: const EdgeInsets.all(2),
                     height: 56,
-                    decoration: BoxDecoration(color: defs[pattern[r][c]]?.color.withOpacity(0.3), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.black12)),
-                    child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: Text(pattern[r][c], style: TextStyle(fontSize: calendarFontSize))))
+                    decoration: BoxDecoration(
+                      color: chipColor.withOpacity(0.25),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: chipColor, width: 1.5),
+                    ),
+                    child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: Text(code, style: TextStyle(fontSize: calendarFontSize, fontWeight: FontWeight.bold))))
                   )
                 ));
               }))),
@@ -1462,14 +1536,14 @@ class MainPageState extends State<MainPage> {
         SizedBox(width: double.infinity, child: FilledButton(onPressed: () { setState(() => customName = nameCtrl.text.trim().isEmpty ? '我的排更' : nameCtrl.text.trim()); save(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('日曆名已改為 $customName'))); }, child: const Text('保存日曆名稱')))
       ]))),
       const SizedBox(height: 16),
+      // 修改 2：自定班次只顯示代號和名稱
       const Text('自定班次', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: Column(children: [
         ...shiftShow.map((e) {
           var d = e.value;
           return ListTile(
-            leading: CircleAvatar(backgroundColor: d.color, child: Text(d.code, style: const TextStyle(color: Colors.white, fontSize: 10))),
-            title: Text('${d.code} - ${d.label} ${d.isAllDay ? '[全天]' : '${d.start}-${d.end}'} ${d.hasAllowance ? '[有津貼\$${d.allowance}]' : ''}'),
-            subtitle: Text('${d.hours.toStringAsFixed(1)}h | ${d.detailTime}'),
+            leading: CircleAvatar(backgroundColor: d.color, child: Text(d.code, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))),
+            title: Text('${d.code} - ${d.label}', style: const TextStyle(fontWeight: FontWeight.bold)),
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
               IconButton(icon: const Icon(Icons.edit), onPressed: () => editShiftDialog(oldDef: d)),
               IconButton(icon: const Icon(Icons.delete), onPressed: () { setState(() => defs.remove(e.key)); save(); })
@@ -1480,6 +1554,7 @@ class MainPageState extends State<MainPage> {
         ListTile(leading: const Icon(Icons.add), title: const Text('新增班次'), onTap: () => editShiftDialog()),
       ])),
       const SizedBox(height: 16),
+      // 修改 3：公眾假期加手動更新 + 農曆添加按鈕
       const Text('公眾假期地區 (自動更新多年 2024-2035)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
         DropdownButtonFormField<String>(
@@ -1489,22 +1564,60 @@ class MainPageState extends State<MainPage> {
           onChanged: (v) { setState(() => holidayRegion = v!); save(); }
         ),
         const SizedBox(height: 8),
-        Text('本年 ${focused.year} 假期數: ${getHolidays(focused.year, holidayRegion).length} 個 已自動更新至2035', style: const TextStyle(fontSize: 12, color: Colors.grey))
+        Text('本年 ${focused.year} 假期數: ${getHolidays(focused.year, holidayRegion).length} 個', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: OutlinedButton.icon(
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('手動更新'),
+            onPressed: () { setState(() {}); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('假期已手動更新'))); },
+          )),
+          const SizedBox(width: 8),
+          Expanded(child: OutlinedButton.icon(
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('農曆添加'),
+            onPressed: () {
+              var dCtrl = TextEditingController(text: '${focused.year}-');
+              var nCtrl = TextEditingController(text: '農曆節日');
+              showDialog(context: context, builder: (ctx) => AlertDialog(
+                title: const Text('新增農曆/手動假期'),
+                content: Column(mainAxisSize: MainAxisSize.min, children: [
+                  SizedBox(height: 56, child: TextField(controller: dCtrl, decoration: const InputDecoration(labelText: '日期 (yyyy-MM-dd)', isDense: true, border: OutlineInputBorder()))),
+                  const SizedBox(height: 8),
+                  SizedBox(height: 56, child: TextField(controller: nCtrl, decoration: const InputDecoration(labelText: '假期名稱', isDense: true, border: OutlineInputBorder()))),
+                ]),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+                  FilledButton(onPressed: () { if (dCtrl.text.isNotEmpty && nCtrl.text.isNotEmpty) { setState(() => manualHolidays[dCtrl.text.trim()] = nCtrl.text.trim()); save(); Navigator.pop(ctx); } }, child: const Text('新增')),
+                ]
+              ));
+            },
+          )),
+        ]),
+        if (manualHolidays.isNotEmpty) ...[
+          const Divider(),
+          const Text('已添加的手動假期:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          ...manualHolidays.entries.map((e) => ListTile(
+            dense: true,
+            title: Text('${e.key} - ${e.value}', style: const TextStyle(fontSize: 12)),
+            trailing: IconButton(icon: const Icon(Icons.delete, size: 18), onPressed: () { setState(() => manualHolidays.remove(e.key)); save(); }),
+          )),
+        ],
       ]))),
       const SizedBox(height: 16),
-      const Text('日曆同步 - 已恢復存取所有日曆權限', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      const Text('日曆同步', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
-        SwitchListTile(title: const Text('啟用日曆同步'), subtitle: Text(googleSyncEnabled ? '已授權 只同步代號+時間+記事' : '未授權 - 首次會詢問權限'), value: googleSyncEnabled, onChanged: (v) async { if (v) { await _requestGooglePerm(); } else { setState(() => googleSyncEnabled = false); save(); } }),
+        SwitchListTile(title: const Text('啟用日曆同步'), subtitle: Text(googleSyncEnabled ? '已授權' : '未授權'), value: googleSyncEnabled, onChanged: (v) async { if (v) { await _requestGooglePerm(); } else { setState(() => googleSyncEnabled = false); save(); } }),
         SwitchListTile(title: const Text('自動同步(增量去重)'), value: autoSync, onChanged: googleSyncEnabled ? (v) { setState(() => autoSync = v); save(); } : null),
         Row(children: [
           Expanded(child: OutlinedButton.icon(onPressed: googleSyncEnabled ? () => _syncToGoogle() : null, icon: const Icon(Icons.sync), label: const Text('手動增量同步'))),
           const SizedBox(width: 8),
           Expanded(child: OutlinedButton.icon(onPressed: () { setState(() => googleSyncEnabled = false); save(); }, icon: const Icon(Icons.link_off), label: const Text('取消')))
         ]),
-        Text('當前: $_rosterCalendarName\nID: ${_rosterCalendarId ?? '未選'} 帳號: $_rosterAccountName\n同步內容: 班次代號+開始/結束時間+記事', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        Text('當前: $_rosterCalendarName\nID: ${_rosterCalendarId ?? '未選'}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
         const SizedBox(height: 8),
-        SizedBox(width: double.infinity, child: OutlinedButton.icon(icon: const Icon(Icons.list), label: const Text('選擇日曆 (已恢復權限)'), onPressed: () async { await _pickGoogleCalendarDialog(); })),
-        SizedBox(width: double.infinity, child: OutlinedButton.icon(icon: const Icon(Icons.security), label: const Text('重新請求日曆權限 (修復空白)'), onPressed: () async { await handleCalendarPermission(silent: false); setState(() {}); })),
+        SizedBox(width: double.infinity, child: OutlinedButton.icon(icon: const Icon(Icons.list), label: const Text('選擇日曆'), onPressed: () async { await _pickGoogleCalendarDialog(); })),
+        SizedBox(width: double.infinity, child: OutlinedButton.icon(icon: const Icon(Icons.security), label: const Text('重新請求日曆權限'), onPressed: () async { await handleCalendarPermission(silent: false); setState(() {}); })),
         const Divider(),
         Container(
           width: double.infinity,
@@ -1512,8 +1625,7 @@ class MainPageState extends State<MainPage> {
           decoration: BoxDecoration(color: Colors.red.withOpacity(0.08), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.withOpacity(0.3))),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('⚠️ 全清重建（救援用）', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 13)),
-            const SizedBox(height: 4),
-            const Text('• 刪除 Google 日曆上所有 [RosterPro] 事件\n• App 排班資料不受影響\n• 你其他 Google 行程不受影響\n• 用於：換手機、地圖損壞、發現重複', style: TextStyle(fontSize: 10, color: Colors.black54)),
+            const Text('• 刪除 Google 日曆上所有 [RosterPro] 事件\n• App 排班資料不受影響', style: TextStyle(fontSize: 10, color: Colors.black54)),
             const SizedBox(height: 8),
             SizedBox(width: double.infinity, child: FilledButton.icon(
               onPressed: googleSyncEnabled ? _forceFullResync : null,
@@ -1525,7 +1637,7 @@ class MainPageState extends State<MainPage> {
         ),
       ]))),
       const SizedBox(height: 16),
-      const Text('清除排更 - 按日期範圍 (保留記事)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red)),
+      const Text('清除排更 - 按日期範圍', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red)),
       Card(color: const Color(0xFFFFEBEE), child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
         SizedBox(width: double.infinity, child: FilledButton.icon(icon: const Icon(Icons.delete_sweep), style: FilledButton.styleFrom(backgroundColor: Colors.red), label: const Text('按日期範圍清除'), onPressed: clearRosterByRange))
       ]))),
@@ -1581,13 +1693,13 @@ class MainPageState extends State<MainPage> {
           int idx = extraAllowances.indexOf(e);
           return ListTile(title: Text(e.name), subtitle: Text('\$${e.amount}'), trailing: IconButton(icon: const Icon(Icons.delete, size: 18, color: Colors.red), onPressed: () { setState(() => extraAllowances.removeAt(idx)); save(); }));
         }),
-        ListTile(leading: const Icon(Icons.add), title: const Text('新增額外津貼 (自定名)'), onTap: () {
+        ListTile(leading: const Icon(Icons.add), title: const Text('新增額外津貼'), onTap: () {
           var nCtrl = TextEditingController();
           var vCtrl = TextEditingController(text: '0');
           showDialog(context: context, builder: (ctx) => AlertDialog(
             title: const Text('新增額外津貼'),
             content: Column(mainAxisSize: MainAxisSize.min, children: [
-              SizedBox(height: 56, child: TextField(controller: nCtrl, decoration: const InputDecoration(labelText: '名稱 例如:大假津貼', isDense: true, border: OutlineInputBorder()))),
+              SizedBox(height: 56, child: TextField(controller: nCtrl, decoration: const InputDecoration(labelText: '名稱', isDense: true, border: OutlineInputBorder()))),
               const SizedBox(height: 8),
               SizedBox(height: 56, child: TextField(controller: vCtrl, decoration: const InputDecoration(labelText: '金額', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number)),
             ]),
@@ -1608,14 +1720,40 @@ class MainPageState extends State<MainPage> {
         Container(width: double.infinity, padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('最近備份路徑:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
           Text(_lastBackupPath, style: const TextStyle(fontSize: 10, color: Colors.black87)),
-          const SizedBox(height: 4),
-          const Text('去手機 文件管理 > 上面路徑查找', style: TextStyle(fontSize: 9, color: Colors.grey))
         ]))
       ]))),
       const SizedBox(height: 16),
-      const Text('桌面小工具 4x4 (Fix 9)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-      Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('已添加 HomeWidget 4x4，長按桌面>小工具>RosterPro 4x4\n如找不到：\n1. pubspec.yaml 加 home_widget: ^0.6.0\n2. android/app/src/main/AndroidManifest.xml 加 <receiver android:name=".RosterWidgetProvider"...>\n3. android/app/src/main/res/layout/widget_layout.xml\n4. android/app/src/main/kotlin/.../RosterWidgetProvider.kt', style: TextStyle(fontSize: 11)),
+      // 修改 7：桌面小工具 - 刪除文字，加入設定按鈕
+      const Text('桌面小工具設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
+        ListTile(
+          leading: const Icon(Icons.text_fields),
+          title: const Text('字體大小'),
+          subtitle: Slider(value: widgetFontSize, min: 8, max: 20, divisions: 12, label: widgetFontSize.toStringAsFixed(0), onChanged: (v) { setState(() => widgetFontSize = v); }, onChangeEnd: (v) { save(); }),
+        ),
+        ListTile(
+          leading: const Icon(Icons.color_lens),
+          title: const Text('文字顏色'),
+          trailing: CircleAvatar(backgroundColor: Color(widgetTextColor)),
+          onTap: () {
+            showDialog(context: context, builder: (ctx) => AlertDialog(
+              title: const Text('選擇文字顏色'),
+              content: Wrap(spacing: 8, children: [Colors.black, Colors.white, Colors.deepPurple, Colors.blue, Colors.green, Colors.red, Colors.orange].map((c) => GestureDetector(onTap: () { setState(() => widgetTextColor = c.value); save(); Navigator.pop(ctx); }, child: Container(width: 40, height: 40, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all())))).toList())
+            ));
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.wallpaper),
+          title: const Text('小工具背景顏色'),
+          trailing: CircleAvatar(backgroundColor: Color(widgetBgColor)),
+          onTap: () {
+            showDialog(context: context, builder: (ctx) => AlertDialog(
+              title: const Text('選擇背景顏色'),
+              content: Wrap(spacing: 8, children: [Colors.white, Colors.grey.shade100, Colors.grey.shade200, Colors.yellow.shade50, Colors.blue.shade50, Colors.green.shade50, Colors.pink.shade50].map((c) => GestureDetector(onTap: () { setState(() => widgetBgColor = c.value); save(); Navigator.pop(ctx); }, child: Container(width: 40, height: 40, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all())))).toList())
+            ));
+          },
+        ),
+        const SizedBox(height: 8),
         SizedBox(width: double.infinity, child: FilledButton.tonal(onPressed: () { updateWidget(); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已刷新桌面小工具'))); }, child: const Text('刷新小工具'))),
       ]))),
     ]));
