@@ -21,7 +21,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 void main() {
   tzData.initializeTimeZones();
-  // 【關鍵修復】設定本地時區為香港，避免 Google 日曆同步出現 8 小時時差
+  // 設定本地時區為香港，避免 Google 日曆同步出現 8 小時時差（跨天問題）
   tz.setLocalLocation(tz.getLocation('Asia/Hong_Kong'));
   
   WidgetsFlutterBinding.ensureInitialized();
@@ -187,12 +187,12 @@ class MainPageState extends State<MainPage> {
   String _rosterAccountName = '';
   Map<String, String> _googleEventIdMap = {};
 
-  // 【問題3 & 4】桌面小工具設定，預設字體加大到 55（原本11，加大5倍）
+  // 桌面小工具設定
   double widgetFontSize = 55;
   int widgetTextColor = 0xFF333333;
   int widgetBgColor = 0xFFFFFFFF;
 
-  // 【問題1】防抖定時器，解決重複同步問題
+  // 防抖定時器，解決重複同步問題
   Timer? _autoSyncTimer;
 
   String appVersion = '載入中...';
@@ -210,9 +210,9 @@ class MainPageState extends State<MainPage> {
       await HomeWidget.saveWidgetData('roster_json', jsonEncode(roster));
       await HomeWidget.saveWidgetData('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
       
-      // 傳遞桌面小工具的字體大小與顏色設定
-      await HomeWidget.saveWidgetData('widget_font_size', widgetFontSize);
-      await HomeWidget.saveWidgetData('widget_text_color', widgetTextColor);
+      // 傳遞 Widget 字體與顏色設定 (注意：鍵名對應原本的 Android 程式碼)
+      await HomeWidget.saveWidgetData('widgetFontSize', widgetFontSize);
+      await HomeWidget.saveWidgetData('widgetTextColor', widgetTextColor);
       
       DateTime now = DateTime.now();
       await HomeWidget.saveWidgetData('initial_year', now.year);
@@ -316,7 +316,7 @@ class MainPageState extends State<MainPage> {
       todayBorderColor = Color(sp.getInt('todayBorder') ?? 0xFFFF9800);
       showLunar = sp.getBool('showLunar') ?? true;
       
-      // 【問題4】載入桌面小工具設定
+      // 載入桌面小工具設定
       widgetFontSize = sp.getDouble('widgetFontSize') ?? 55;
       widgetTextColor = sp.getInt('widgetTextColor') ?? 0xFF333333;
     });
@@ -355,14 +355,13 @@ class MainPageState extends State<MainPage> {
     sp.setString('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
     sp.setBool('showLunar', showLunar);
     
-    // 【問題4】儲存桌面小工具設定
+    // 儲存桌面小工具設定
     sp.setDouble('widgetFontSize', widgetFontSize);
     sp.setInt('widgetTextColor', widgetTextColor);
     
     updateWidget();
 
-    // 【問題1】防抖機制：取消舊的定時器，重新計時 2 秒
-    // 這樣短時間內連續儲存，只會觸發最後一次同步，徹底解決重複同步
+    // 防抖機制：取消舊的定時器，重新計時 2 秒 (解決重複同步問題)
     if (autoSync && googleSyncEnabled && !_isSyncing) {
       _autoSyncTimer?.cancel();
       _autoSyncTimer = Timer(const Duration(seconds: 2), () {
@@ -511,7 +510,7 @@ class MainPageState extends State<MainPage> {
     await _pickGoogleCalendarDialog();
   }
 
-  // ===== 【問題1 & 時間修復】同步邏輯：無差別掃描刪除 + 強制轉UTC =====
+  // ===== 同步邏輯：無差別掃描刪除 + 強制轉UTC (徹底解決重複與時間偏移) =====
   Future<void> _syncToGoogle({bool silent = false}) async {
     if (!googleSyncEnabled && !silent) {
       bool? en = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
@@ -539,7 +538,7 @@ class MainPageState extends State<MainPage> {
       final sp = await SharedPreferences.getInstance();
       int del = 0;
 
-      // 步驟 1：無差別掃描 2020-2035 所有 [RosterPro] 事件並刪除，徹底防止重複
+      // 步驟 1：無差別掃描 2020-2035 所有 [RosterPro] 事件並刪除
       var existingEvents = await _calendarPlugin.retrieveEvents(
         _rosterCalendarId!,
         RetrieveEventsParams(startDate: DateTime(2020, 1, 1), endDate: DateTime(2035, 12, 31)),
@@ -588,13 +587,13 @@ class MainPageState extends State<MainPage> {
             end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59).toUtc(),
             allDay: true);
         } else {
-          // 【關鍵修復】轉換為 UTC，避免 Android 插件將本地時間當作 UTC 處理
           DateTime s = DateTime(date.year, date.month, date.day,
               int.parse(def.start.split(':')[0]), int.parse(def.start.split(':')[1]));
           DateTime ee = DateTime(date.year, date.month, date.day,
               int.parse(def.end.split(':')[0]), int.parse(def.end.split(':')[1]));
           if (!ee.isAfter(s)) ee = ee.add(const Duration(days: 1));
           
+          // 關鍵：轉換為 UTC，避免 Android 插件將本地時間當作 UTC 處理
           ev = Event(_rosterCalendarId!, title: title, description: desc,
             start: tz.TZDateTime.from(s, tz.local).toUtc(),
             end: tz.TZDateTime.from(ee, tz.local).toUtc(),
@@ -715,8 +714,8 @@ class MainPageState extends State<MainPage> {
     } finally {
       _isSyncing = false;
     }
-  }  
-  Future<void> clearRosterByRange() async {
+  }
+    Future<void> clearRosterByRange() async {
     DateTimeRange? range = await showDateRangePicker(context: context, firstDate: DateTime(2023), lastDate: DateTime(2035), helpText: '選擇要清除的排更範圍');
     if (range == null) return;
     int count = 0;
@@ -1112,7 +1111,7 @@ class MainPageState extends State<MainPage> {
   void _goToPrevMonth() { setState(() { focused = DateTime(focused.year, focused.month - 1, 1); }); }
   void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.month + 1, 1); }); }
 
-  // ===== 【問題2 修改】日曆格子加大，確保農曆不被遮擋 =====
+  // ===== 日曆格子 (保留原有設計，僅優化農曆不被遮擋) =====
   Widget calTab() {
     DateTime first = DateTime(focused.year, focused.month, 1);
     DateTime start = first.subtract(Duration(days: first.weekday - 1));
@@ -1181,7 +1180,6 @@ class MainPageState extends State<MainPage> {
                         Expanded(
                           child: GridView.builder(
                             shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), padding: const EdgeInsets.all(2),
-                            // 【問題2 修改】childAspectRatio 從 0.68 調小到 0.55，讓格子變高，容納更多內容
                             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                               crossAxisCount: 7, 
                               childAspectRatio: 0.55, 
@@ -1224,7 +1222,7 @@ class MainPageState extends State<MainPage> {
                                         fit: BoxFit.scaleDown,
                                         child: Text('${day.day}', style: TextStyle(fontWeight: isToday ? FontWeight.w900 : FontWeight.bold, fontSize: calendarFontSize, color: inM ? Colors.black : Colors.grey)),
                                       ),
-                                      // 2. 班次代碼 (居中顯示，並自適應寬度，防止出界)
+                                      // 2. 班次代號
                                       if (code != null)
                                         FittedBox(
                                           fit: BoxFit.scaleDown,
@@ -1236,7 +1234,7 @@ class MainPageState extends State<MainPage> {
                                         )
                                       else
                                         const SizedBox(height: 14),
-                                      // 3. 農曆 (獨立一行，用 FittedBox 自動縮小，確保不被遮擋)
+                                      // 3. 農曆
                                       if (showLunar && lunarText.isNotEmpty && inM)
                                         FittedBox(
                                           fit: BoxFit.scaleDown,
@@ -1810,6 +1808,7 @@ class MainPageState extends State<MainPage> {
     List<MapEntry<String, ShiftDef>> shiftList = defs.entries.toList();
     List<MapEntry<String, ShiftDef>> shiftShow = showAllShift ? shiftList : shiftList.take(5).toList();
     List<ExtraAllowance> allowShow = showAllExtra ? extraAllowances : extraAllowances.take(5).toList();
+    
     return SafeArea(child: ListView(padding: const EdgeInsets.all(16), children: [
       const Text('排更日曆自定名稱', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
@@ -1921,39 +1920,6 @@ class MainPageState extends State<MainPage> {
         ),
       ]))),
       const SizedBox(height: 16),
-      // 【問題3 & 4】桌面小工具設定區塊（確保用戶能完整調教字體大小與顏色）
-      const Text('桌面小工具設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-      Card(color: const Color(0xFFE8F5E9), child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
-        Row(children: [
-          const Text('文字大小'),
-          Expanded(child: Slider(
-            value: widgetFontSize, 
-            min: 20, max: 100, divisions: 16, 
-            label: widgetFontSize.toStringAsFixed(0),
-            onChanged: (v) { setState(() => widgetFontSize = v); updateWidget(); },
-            onChangeEnd: (v) { save(); },
-          )),
-          Text(widgetFontSize.toStringAsFixed(0)),
-        ]),
-        ListTile(
-          title: const Text('文字顏色'),
-          leading: CircleAvatar(backgroundColor: Color(widgetTextColor)),
-          trailing: const Icon(Icons.color_lens),
-          onTap: () {
-            showDialog(context: context, builder: (ctx) => AlertDialog(
-              title: const Text('選擇桌面小工具文字顏色'),
-              content: Wrap(spacing: 8, runSpacing: 8, children: [
-                Colors.black, Colors.white, Colors.red, Colors.blue, Colors.green, Colors.orange, Colors.purple, Colors.grey, Colors.pink, Colors.teal
-              ].map((c) => GestureDetector(
-                onTap: () { setState(() => widgetTextColor = c.value); updateWidget(); save(); Navigator.pop(ctx); }, 
-                child: Container(width: 40, height: 40, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: Colors.black26)))
-              )).toList())
-            ));
-          },
-        ),
-        const Text('提示：修改後需等待桌面小工具重新整理 (約數秒)', style: TextStyle(fontSize: 10, color: Colors.grey)),
-      ]))),
-      const SizedBox(height: 16),
       const Text('清除排更 - 按日期範圍', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red)),
       Card(color: const Color(0xFFFFEBEE), child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
         SizedBox(width: double.infinity, child: FilledButton.icon(icon: const Icon(Icons.delete_sweep), style: FilledButton.styleFrom(backgroundColor: Colors.red), label: const Text('按日期範圍清除'), onPressed: clearRosterByRange))
@@ -2039,7 +2005,45 @@ class MainPageState extends State<MainPage> {
           Text(_lastBackupPath, style: const TextStyle(fontSize: 10, color: Colors.black87)),
         ]))
       ]))),
+      
       const SizedBox(height: 16),
+      // 桌面小工具設定 (移到應用資訊之前)
+      const Text('桌面小工具設定 (Widget)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      Card(color: const Color(0xFFE8F5E9), child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
+        Row(children: [
+          const Text('文字大小', style: TextStyle(fontWeight: FontWeight.bold)),
+          Expanded(child: Slider(
+            value: widgetFontSize, 
+            min: 20, max: 100, divisions: 16, 
+            label: widgetFontSize.toStringAsFixed(0),
+            onChanged: (v) { setState(() => widgetFontSize = v); updateWidget(); },
+            onChangeEnd: (v) { save(); },
+          )),
+          Text(widgetFontSize.toStringAsFixed(0), style: const TextStyle(fontWeight: FontWeight.bold)),
+        ]),
+        ListTile(
+          title: const Text('文字顏色', style: TextStyle(fontWeight: FontWeight.bold)),
+          leading: CircleAvatar(backgroundColor: Color(widgetTextColor)),
+          trailing: const Icon(Icons.color_lens),
+          onTap: () {
+            showDialog(context: context, builder: (ctx) => AlertDialog(
+              title: const Text('選擇桌面小工具文字顏色'),
+              content: Wrap(spacing: 8, runSpacing: 8, children: [
+                Colors.black, Colors.white, Colors.red, Colors.blue, Colors.green, Colors.orange, Colors.purple, Colors.grey, Colors.pink, Colors.teal
+              ].map((c) => GestureDetector(
+                onTap: () { setState(() => widgetTextColor = c.value); updateWidget(); save(); Navigator.pop(ctx); }, 
+                child: Container(width: 40, height: 40, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: Colors.black26)))
+              )).toList())
+            ));
+          },
+        ),
+        const Padding(
+          padding: EdgeInsets.only(top: 8),
+          child: Text('提示：修改後，桌面小工具可能需要幾秒鐘重新整理才會生效', style: TextStyle(fontSize: 11, color: Colors.grey)),
+        ),
+      ]))),
+      const SizedBox(height: 16),
+      
       const Text('應用資訊', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: ListTile(
         leading: const Icon(Icons.info_outline),
