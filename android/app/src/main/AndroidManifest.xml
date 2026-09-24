@@ -1,6 +1,7 @@
 <receiver
     android:name=".RosterWidgetProvider"
-    android:exported="false">
+    android:exported="true"
+    android:label="Roster Pro 月曆">
     <intent-filter>
         <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
         <action android:name="PREV_MONTH" />
