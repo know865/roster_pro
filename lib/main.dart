@@ -58,7 +58,6 @@ class SavedPattern {
   factory SavedPattern.fromJson(Map<String, dynamic> j) => SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r) => (r as List).map<String>((e) => e.toString()).toList()).toList());
 }
 
-// ===== 農曆演算法 =====
 class LunarHelper {
   static final List<int> lunarInfo = [
     0x04bd8, 0x04ae0, 0x0a570, 0x054d5, 0x0d260, 0x0d950, 0x16554, 0x056a0, 0x09ad0, 0x055d2,
@@ -122,7 +121,6 @@ class LunarHelper {
     }
   }
 }
-// ==========================
 
 class RosterApp extends StatelessWidget {
   const RosterApp({super.key});
@@ -176,6 +174,7 @@ class MainPageState extends State<MainPage> {
   int? editingPatternIndex;
   String holidayRegion = '香港';
   Map<String, String> manualHolidays = {};
+  String lastExportDir = '';
   GlobalKey calKey = GlobalKey();
   DeviceCalendarPlugin _calendarPlugin = DeviceCalendarPlugin();
   static const _realChannel = MethodChannel('com.roster/calendar_real');
@@ -262,6 +261,9 @@ class MainPageState extends State<MainPage> {
       try {
         await _realChannel.invokeMethod('requestManageStorage');
       } catch (_) {}
+      // 修改：啟動時主動刷新 Widget 多次，確保 Widget 拿到資料
+      await updateWidget();
+      await Future.delayed(const Duration(seconds: 1));
       await updateWidget();
     });
   }
@@ -313,6 +315,7 @@ class MainPageState extends State<MainPage> {
       widgetTextColor = sp.getInt('widgetTextColor') ?? 0xFF333333;
       widgetBgColor = sp.getInt('widgetBgColor') ?? 0xFFFFFFFF;
       showLunar = sp.getBool('showLunar') ?? true;
+      lastExportDir = sp.getString('lastExportDir') ?? '';
     });
     updateWidget();
   }
@@ -351,6 +354,7 @@ class MainPageState extends State<MainPage> {
     sp.setInt('widgetTextColor', widgetTextColor);
     sp.setInt('widgetBgColor', widgetBgColor);
     sp.setBool('showLunar', showLunar);
+    sp.setString('lastExportDir', lastExportDir);
     updateWidget();
     if (autoSync && googleSyncEnabled && !_isSyncing) { _syncToGoogle(silent: true); }
   }
@@ -520,14 +524,14 @@ class MainPageState extends State<MainPage> {
 
       Map<String, List<String>> dateToEventIds = {};
       for (var e in existingEvents.data ?? []) {
-        String desc = e.description ?? '';
         String? eventId = e.eventId;
         if (eventId == null) continue;
-        final match = RegExp(r'\[RosterPro\](\d{4}-\d{2}-\d{2})').firstMatch(desc);
-        if (match != null) {
-          String dateKey = match.group(1)!;
-          dateToEventIds.putIfAbsent(dateKey, () => []).add(eventId);
-        }
+        DateTime? start = e.start;
+        if (start == null) continue;
+        String dateKey = DateFormat('yyyy-MM-dd').format(start);
+        String desc = e.description ?? '';
+        if (!desc.contains('[RosterPro]')) continue;
+        dateToEventIds.putIfAbsent(dateKey, () => []).add(eventId);
       }
 
       Map<String, String> cloudEventMap = {};
@@ -536,7 +540,10 @@ class MainPageState extends State<MainPage> {
         List<String> ids = entry.value;
         cloudEventMap[entry.key] = ids[0];
         for (int i = 1; i < ids.length; i++) {
-          try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, ids[i]); delDup++; } catch (_) {}
+          try {
+            await _calendarPlugin.deleteEvent(_rosterCalendarId!, ids[i]);
+            delDup++;
+          } catch (_) {}
         }
       }
 
@@ -768,8 +775,14 @@ class MainPageState extends State<MainPage> {
   }
 
   Future<void> backupAnywhere() async {
-    String? dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇備份位置');
-    if (dir == null) return;
+    String? dir;
+    if (lastExportDir.isNotEmpty && await Directory(lastExportDir).exists()) {
+      dir = lastExportDir;
+    } else {
+      dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇備份位置');
+      if (dir == null) return;
+      lastExportDir = dir;
+    }
     String fileName = 'roster_pro_full_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.json';
     var backup = {'version': '7.1', 'exportTime': DateTime.now().toIso8601String(), 'roster': roster, 'note': rosterNote, 'extraType': rosterExtraType, 'roOt': rosterOt, 'roEx': rosterExtra, 'roExH': rosterExtraHrs, 'defs': defs.map((k, v) => MapEntry(k, v.toJson())), 'pattern': pattern, 'carry': carry, 'cName': customName, 'stdWeek': standardWeeklyHours, 'otRate': overtimeRate, 'extraNewV36': extraAllowances.map((e) => e.toJson()).toList(), 'calFont': calendarFontSize, 'savedPatterns': savedPatterns.map((e) => e.toJson()).toList(), 'holidayRegion': holidayRegion, 'manualHolidays': manualHolidays, 'rosterCalId': _rosterCalendarId, 'rosterCalName': _rosterCalendarName, 'rosterAccName': _rosterAccountName, 'googleEventIdMap': _googleEventIdMap, 'gSync': googleSyncEnabled, 'gAuto': autoSync, 'todayBg': todayBgColor.value, 'todayBorder': todayBorderColor.value, 'widgetFontSize': widgetFontSize, 'widgetTextColor': widgetTextColor, 'widgetBgColor': widgetBgColor, 'showLunar': showLunar};
     var f = File('$dir/$fileName');
@@ -831,13 +844,20 @@ class MainPageState extends State<MainPage> {
         double hrs = 0, ot = 0, allow = 0;
         SplayTreeMap<String, int> shiftCount = SplayTreeMap();
         SplayTreeMap<String, double> extraByType = SplayTreeMap();
+        Map<int, double> weeklyHours = {};
         for (int i = 1; i <= dim; i++) {
           DateTime dt = DateTime(focused.year, focused.month, i);
           String k = DateFormat('yyyy-MM-dd').format(dt);
           String? c = roster[k];
           if (c == null) continue;
           var d = defs[c];
-          if (d != null) { hrs += d.hours; shiftCount[c] = (shiftCount[c] ?? 0) + 1; if (d.hasAllowance) allow += d.allowance; }
+          if (d != null) {
+            hrs += d.hours;
+            shiftCount[c] = (shiftCount[c] ?? 0) + 1;
+            if (d.hasAllowance) allow += d.allowance;
+            int w = isoWeek(dt);
+            weeklyHours[w] = (weeklyHours[w] ?? 0) + d.hours;
+          }
           ot += (rosterOt[k] ?? d?.ot ?? 0);
           allow += (rosterExtra[k] ?? 0);
           if (rosterExtraType.containsKey(k) && rosterExtra.containsKey(k)) {
@@ -855,6 +875,13 @@ class MainPageState extends State<MainPage> {
         sb.writeln('總工時, $hrs');
         sb.writeln('OT, $ot');
         sb.writeln('津貼, ${allow + ot * overtimeRate}');
+        sb.writeln('');
+        sb.writeln('每週工時統計:');
+        sb.writeln('週次, 工時, 標準, 差額');
+        for (var e in weeklyHours.entries) {
+          double diff = e.value - standardWeeklyHours;
+          sb.writeln('W${e.key}, ${e.value.toStringAsFixed(1)}h, ${standardWeeklyHours}h, ${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}h');
+        }
       } else {
         sb.writeln('${focused.year}年 全年統計');
         for (int mon = 1; mon <= 12; mon++) {
@@ -872,15 +899,22 @@ class MainPageState extends State<MainPage> {
         }
       }
 
-      String? dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇匯出資料夾');
-      if (dir == null) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已取消')));
-        return;
+      String? dir;
+      if (lastExportDir.isNotEmpty && await Directory(lastExportDir).exists()) {
+        dir = lastExportDir;
+      } else {
+        dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇匯出資料夾');
+        if (dir == null) {
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已取消')));
+          return;
+        }
+        lastExportDir = dir;
       }
       String fileName = 'report_${isYearReport ? 'year${focused.year}' : '${focused.year}${focused.month.toString().padLeft(2, '0')}'}.csv';
       String path = '$dir/$fileName';
       final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(sb.toString())];
       await File(path).writeAsBytes(bytes);
+      await save();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已匯出 $path')));
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('匯出失敗 $e')));
@@ -968,11 +1002,18 @@ class MainPageState extends State<MainPage> {
                 for (var n in notes) {
                   sb.writeln('${n.key},"${n.value.replaceAll('"', '""')}"');
                 }
-                String? dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇匯出資料夾');
+                String? dir;
+                if (lastExportDir.isNotEmpty && await Directory(lastExportDir).exists()) {
+                  dir = lastExportDir;
+                } else {
+                  dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇匯出資料夾');
+                  if (dir != null) lastExportDir = dir;
+                }
                 if (dir != null) {
                   String path = '$dir/notes_${queryYear}${yearMode ? '' : queryMonth.toString().padLeft(2, '0')}.csv';
                   final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(sb.toString())];
                   await File(path).writeAsBytes(bytes);
+                  await save();
                   if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已匯出 $path')));
                 }
               } catch (_) {}
@@ -981,6 +1022,77 @@ class MainPageState extends State<MainPage> {
         );
       });
     });
+  }
+
+  Future<void> smartSchedule() async {
+    if (savedPatterns.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請先建立至少一個已存模式')));
+      return;
+    }
+    int? selectedIdx = await showDialog<int>(context: context, builder: (ctx) {
+      return AlertDialog(
+        title: const Text('選擇要使用的模式'),
+        content: SizedBox(width: 300, child: ListView(shrinkWrap: true, children: [
+          ...savedPatterns.asMap().entries.map((en) => ListTile(
+            title: Text(en.value.name),
+            subtitle: Text('${en.value.data.length}行 (週期: ${en.value.data.expand((e) => e).length}天)'),
+            leading: const Icon(Icons.folder),
+            onTap: () => Navigator.pop(ctx, en.key),
+          )),
+        ])),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消'))]
+      );
+    });
+    if (selectedIdx == null) return;
+    var selectedPattern = savedPatterns[selectedIdx].data;
+    int cycleDays = selectedPattern.expand((e) => e).length;
+    if (cycleDays == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('所選模式為空')));
+      return;
+    }
+    DateTimeRange? startRange = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2023),
+      lastDate: DateTime(2035),
+      helpText: '選擇開始日期（結束日期可忽略）',
+    );
+    if (startRange == null) return;
+    DateTime startDate = startRange.start;
+    int fourCycles = cycleDays * 4;
+    int oneYear = 365;
+    int totalDays = fourCycles >= oneYear ? fourCycles : oneYear;
+    DateTime endDate = startDate.add(Duration(days: totalDays - 1));
+    bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('智能排班確認'),
+      content: Text(
+        '模式: ${savedPatterns[selectedIdx].name}\n'
+        '週期: $cycleDays 天\n'
+        '一個週期: ${(cycleDays / 7).toStringAsFixed(1)} 週\n'
+        '開始日期: ${DateFormat('yyyy-MM-dd').format(startDate)}\n'
+        '計算方式: ${fourCycles >= oneYear ? "4 個週期 ($fourCycles 天)" : "1 年 ($oneYear 天)"}\n'
+        '結束日期: ${DateFormat('yyyy-MM-dd').format(endDate)}\n'
+        '總共排班: $totalDays 天\n\n'
+        '確定要執行嗎？',
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('確認排班')),
+      ]
+    ));
+    if (confirm != true) return;
+    var flat = selectedPattern.expand((e) => e).toList();
+    setState(() {
+      int i = 0;
+      for (DateTime d = startDate; !d.isAfter(endDate); d = d.add(const Duration(days: 1))) {
+        roster[DateFormat('yyyy-MM-dd').format(d)] = flat[i % flat.length];
+        i++;
+      }
+    });
+    save();
+    setState(() => tab = 0);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('智能排班完成：$totalDays 天')));
+    }
   }
 
   void _goToPrevMonth() { setState(() { focused = DateTime(focused.year, focused.month - 1, 1); }); }
@@ -1361,7 +1473,7 @@ class MainPageState extends State<MainPage> {
                 const ListTile(title: Text('已存排班模式', style: TextStyle(fontWeight: FontWeight.bold))),
                 ...savedPatterns.asMap().entries.map((en) => ListTile(
                   title: Text(en.value.name),
-                  subtitle: Text('${en.value.data.length}行'),
+                  subtitle: Text('${en.value.data.length}行 (週期: ${en.value.data.expand((e) => e).length}天)'),
                   trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                     IconButton(icon: const Icon(Icons.upload), tooltip: '載入', onPressed: () { setState(() { pattern = en.value.data.map((r) => List<String>.from(r)).toList(); editingPatternName = en.value.name; editingPatternIndex = en.key; }); save(); Navigator.pop(ctx); }),
                     IconButton(icon: const Icon(Icons.edit), tooltip: '改名', onPressed: () {
@@ -1400,6 +1512,15 @@ class MainPageState extends State<MainPage> {
                 ]
               ));
             }),
+          ]),
+          const SizedBox(height: 8),
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            FilledButton.tonalIcon(
+              icon: const Icon(Icons.auto_awesome),
+              label: const Text('智能排班'),
+              onPressed: smartSchedule,
+              style: FilledButton.styleFrom(backgroundColor: Colors.amber.shade200),
+            ),
           ]),
           if (editingPatternName != null) Padding(
             padding: const EdgeInsets.only(top: 8),
@@ -1543,17 +1664,31 @@ class MainPageState extends State<MainPage> {
     double otAmount = ot * overtimeRate;
     double totalAllow = allow + otAmount + extraAllowances.fold(0.0, (a, b) => a + b.amount);
     return SafeArea(child: ListView(padding: const EdgeInsets.all(12), children: [
-      Row(children: [
-        FilledButton.icon(
-          onPressed: exportReport,
-          icon: const Icon(Icons.ios_share),
-          label: const Text('匯出報表'),
-          style: FilledButton.styleFrom(backgroundColor: Colors.deepPurple),
+      Column(children: [
+        Row(children: [
+          FilledButton.icon(
+            onPressed: exportReport,
+            icon: const Icon(Icons.ios_share),
+            label: const Text('匯出報表'),
+            style: FilledButton.styleFrom(backgroundColor: Colors.deepPurple),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: InkWell(
+              onTap: () => quickJumpMonth(forReport: true),
+              child: Row(children: [
+                Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text('${year}年${isYearReport ? ' 全年' : ' ${month}月'}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)))),
+                const Icon(Icons.arrow_drop_down)
+              ]),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 4),
+        SegmentedButton<bool>(
+          segments: const [ButtonSegment(value: false, label: Text('本月')), ButtonSegment(value: true, label: Text('全年'))],
+          selected: {isYearReport},
+          onSelectionChanged: (s) { setState(() => isYearReport = s.first); },
         ),
-        const SizedBox(width: 8),
-        Flexible(child: InkWell(onTap: () => quickJumpMonth(forReport: true), child: Row(mainAxisSize: MainAxisSize.min, children: [Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text('${year}年${isYearReport ? ' 全年' : ' ${month}月'}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)))), const Icon(Icons.arrow_drop_down)]))),
-        const Spacer(),
-        SegmentedButton<bool>(segments: const [ButtonSegment(value: false, label: Text('本月')), ButtonSegment(value: true, label: Text('全年'))], selected: {isYearReport}, onSelectionChanged: (s) { setState(() => isYearReport = s.first); }),
       ]),
       const SizedBox(height: 8),
       if (isYearReport) Card(color: const Color(0xFFE3F2FD), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1844,6 +1979,16 @@ class MainPageState extends State<MainPage> {
             ));
           },
         ),
+        const SizedBox(height: 8),
+        SizedBox(width: double.infinity, child: FilledButton.tonal(
+          onPressed: () async {
+            await updateWidget();
+            await Future.delayed(const Duration(milliseconds: 500));
+            await updateWidget();
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已刷新桌面小工具')));
+          },
+          child: const Text('刷新小工具'),
+        )),
       ]))),
       const SizedBox(height: 16),
       const Text('應用資訊', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
