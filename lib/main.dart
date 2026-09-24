@@ -184,6 +184,10 @@ class MainPageState extends State<MainPage> {
       if (!ok && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('需要日曆權限才能讀取日曆，請在設定中允許')));
       }
+      // 修改 B：請求 MANAGE_EXTERNAL_STORAGE 權限（Android 11+），讓截圖能寫入 DCIM
+      try {
+        await _realChannel.invokeMethod('requestManageStorage');
+      } catch (_) {}
     });
   }
 
@@ -348,9 +352,9 @@ class MainPageState extends State<MainPage> {
     var otherCals = cals.where((c) => c['isGoogle'] != true).toList();
     var pickedMap = await showDialog<Map<String, dynamic>>(context: context, builder: (ctx) {
       return AlertDialog(
-        title: Text('選擇寫入日曆 真ID版 (${cals.length})'),
+        title: Text('選擇寫入日曆 (${cals.length})'),
         content: SizedBox(width: 460, height: 560, child: ListView(children: [
-          Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.green.withOpacity(0.12), borderRadius: BorderRadius.circular(8)), child: const Text('綠色=Google帳號 會上 calendar.google.com 灰色=本機日曆', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.green))),
+          Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.green.withOpacity(0.12), borderRadius: BorderRadius.circular(8)), child: const Text('綠色=Google帳號 灰色=本機日曆', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.green))),
           const SizedBox(height: 8),
           Text('Google 日曆 (${googleCals.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
           ...googleCals.map((cal) => Card(color: Colors.green.withOpacity(0.15), child: ListTile(leading: const Icon(Icons.cloud_done, color: Colors.green), title: Text('${cal['displayName']}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)), subtitle: Text('帳號: ${cal['accountName']}\nID: ${cal['id']}', style: const TextStyle(fontSize: 9)), onTap: () => Navigator.pop(ctx, cal)))),
@@ -419,7 +423,6 @@ class MainPageState extends State<MainPage> {
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) await _ensureCalendar();
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) throw '未選真 Google 日曆';
 
-      // 查詢雲端所有 [RosterPro] 事件，建立「日期→eventId」映射
       var existingEvents = await _calendarPlugin.retrieveEvents(
         _rosterCalendarId!,
         RetrieveEventsParams(startDate: DateTime(2023, 1, 1), endDate: DateTime(2035, 12, 31)),
@@ -442,7 +445,6 @@ class MainPageState extends State<MainPage> {
         }
       }
 
-      // 刪除歷史重複
       int delDup = 0;
       for (var dupId in duplicateIds) {
         try {
@@ -451,7 +453,6 @@ class MainPageState extends State<MainPage> {
         } catch (_) {}
       }
 
-      // 以雲端資料為準，重建本地 eventId 映射
       _googleEventIdMap.removeWhere((date, id) => !cloudEventMap.containsKey(date));
       for (var entry in cloudEventMap.entries) {
         _googleEventIdMap.putIfAbsent(entry.key, () => entry.value);
@@ -471,7 +472,6 @@ class MainPageState extends State<MainPage> {
         String tag = '[RosterPro]${dateKey}';
         bool allDayFlag = def.isAllDay || def.code == 'O';
 
-        // ===== 修改 4：全天班次不顯示 00:00-00:00 =====
         String desc;
         String title;
         if (allDayFlag) {
@@ -681,7 +681,7 @@ class MainPageState extends State<MainPage> {
 
   Future<void> shareScreenshotDialog() async { exportShareImage(); }
 
-  // ===== 修改 9 & 10：截圖存為 JPG 到 DCIM/Screenshots =====
+  // ===== 截圖存 JPG 到 DCIM/Screenshots + 通知媒體庫（修改 A）=====
   Future<void> exportShareImage() async {
     try {
       RenderRepaintBoundary? b = calKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
@@ -721,11 +721,11 @@ class MainPageState extends State<MainPage> {
       }
       final pic = recorder.endRecording();
       final img = await pic.toImage(width.toInt(), (y + 20).toInt());
-      // 使用 PNG 編碼（Flutter 沒有原生 JPG 編碼），但檔名改為 .jpg
+      // Flutter 只有 PNG 編碼，檔名改 .jpg 讓相冊辨識
       final byte = await img.toByteData(format: ui.ImageByteFormat.png);
       final pngBytes = byte!.buffer.asUint8List();
 
-      // 存到 DCIM/Screenshots（部分手機相冊可能不顯示，若無效改用 MediaStore）
+      // 存到 DCIM/Screenshots
       Directory dcimDir = Directory('/storage/emulated/0/DCIM/Screenshots');
       if (!await dcimDir.exists()) {
         await dcimDir.create(recursive: true);
@@ -734,17 +734,25 @@ class MainPageState extends State<MainPage> {
       File f = File(path);
       await f.writeAsBytes(pngBytes);
 
-      // 同時寫一份到 Pictures 方便部分手機相冊辨識
+      // 修改 A：通知媒體庫立即掃描，讓相冊能立即看到
+      try {
+        await _realChannel.invokeMethod('scanImage', {'path': path});
+      } catch (e) {
+        print("Scan image failed: $e");
+      }
+
+      // 同時寫一份到 Pictures/Roster 作為備份
       try {
         Directory picDir = Directory('/storage/emulated/0/Pictures/Roster');
         if (!await picDir.exists()) await picDir.create(recursive: true);
         String path2 = '${picDir.path}/Roster_${focused.year}${focused.month.toString().padLeft(2, '0')}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.jpg';
         File f2 = File(path2);
         await f2.writeAsBytes(pngBytes);
+        try { await _realChannel.invokeMethod('scanImage', {'path': path2}); } catch (_) {}
       } catch (_) {}
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('截圖已保存 $path')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('截圖已保存到相冊')));
         await Share.shareXFiles([XFile(path)], text: '${focused.year}年${focused.month}月 $customName');
       }
     } catch (e) {
@@ -1239,8 +1247,6 @@ class MainPageState extends State<MainPage> {
     setState(() => tab = 0);
   }
 
-  // ===== 修改 1：模式頁面直接點選班次（無需彈出班次表）=====
-  // ===== 修改 8：取消班次卡片（改為上方橫向選擇列）=====
   Widget patternTab() {
     return SafeArea(child: Column(children: [
       const Padding(padding: EdgeInsets.only(top: 12), child: Center(child: Text('排更模式', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)))),
@@ -1326,7 +1332,6 @@ class MainPageState extends State<MainPage> {
           ),
         ])
       ),
-      // 班次橫向選擇列（點選後直接進入選擇模式）
       Container(
         padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
         child: SingleChildScrollView(
@@ -1358,7 +1363,6 @@ class MainPageState extends State<MainPage> {
                 Color chipColor = def?.color ?? Colors.grey;
                 return Expanded(child: GestureDetector(
                   onTap: () {
-                    // 修改 1：直接循環切換到下一個班次（更直接）
                     var codes = defs.keys.toList();
                     int idx = codes.indexOf(code);
                     if (idx < 0) idx = 0;
@@ -1367,7 +1371,6 @@ class MainPageState extends State<MainPage> {
                     save();
                   },
                   onLongPress: () {
-                    // 長按彈出完整選擇表
                     showModalBottomSheet(context: context, builder: (ctx) => Wrap(children: defs.keys.map((k) => ListTile(
                       leading: CircleAvatar(backgroundColor: defs[k]!.color, child: Text(k, style: const TextStyle(color: Colors.white, fontSize: 12))),
                       title: Text(k),
@@ -1536,7 +1539,6 @@ class MainPageState extends State<MainPage> {
         SizedBox(width: double.infinity, child: FilledButton(onPressed: () { setState(() => customName = nameCtrl.text.trim().isEmpty ? '我的排更' : nameCtrl.text.trim()); save(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('日曆名已改為 $customName'))); }, child: const Text('保存日曆名稱')))
       ]))),
       const SizedBox(height: 16),
-      // 修改 2：自定班次只顯示代號和名稱
       const Text('自定班次', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: Column(children: [
         ...shiftShow.map((e) {
@@ -1554,7 +1556,6 @@ class MainPageState extends State<MainPage> {
         ListTile(leading: const Icon(Icons.add), title: const Text('新增班次'), onTap: () => editShiftDialog()),
       ])),
       const SizedBox(height: 16),
-      // 修改 3：公眾假期加手動更新 + 農曆添加按鈕
       const Text('公眾假期地區 (自動更新多年 2024-2035)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
         DropdownButtonFormField<String>(
@@ -1723,7 +1724,6 @@ class MainPageState extends State<MainPage> {
         ]))
       ]))),
       const SizedBox(height: 16),
-      // 修改 7：桌面小工具 - 刪除文字，加入設定按鈕
       const Text('桌面小工具設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
         ListTile(
