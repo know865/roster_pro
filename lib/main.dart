@@ -13,6 +13,7 @@ import 'package:timezone/data/latest.dart' as tzData;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:home_widget/home_widget.dart';
+import 'package:image/image.dart' as img;
 
 void main() {
   tzData.initializeTimeZones();
@@ -111,7 +112,6 @@ class MainPageState extends State<MainPage> {
   String _rosterAccountName = '';
   Map<String, String> _googleEventIdMap = {};
 
-  // Widget 設定
   double widgetFontSize = 11;
   int widgetTextColor = 0xFF333333;
   int widgetBgColor = 0xFFFFFFFF;
@@ -184,7 +184,6 @@ class MainPageState extends State<MainPage> {
       if (!ok && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('需要日曆權限才能讀取日曆，請在設定中允許')));
       }
-      // 修改 B：請求 MANAGE_EXTERNAL_STORAGE 權限（Android 11+），讓截圖能寫入 DCIM
       try {
         await _realChannel.invokeMethod('requestManageStorage');
       } catch (_) {}
@@ -403,6 +402,7 @@ class MainPageState extends State<MainPage> {
     await _pickGoogleCalendarDialog();
   }
 
+  // ===== 核心：增量同步（避免重複）=====
   Future<void> _syncToGoogle({bool silent = false}) async {
     if (!googleSyncEnabled && !silent) {
       bool? en = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
@@ -423,13 +423,15 @@ class MainPageState extends State<MainPage> {
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) await _ensureCalendar();
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) throw '未選真 Google 日曆';
 
+      // 步驟 1：查詢雲端所有 [RosterPro] 事件
       var existingEvents = await _calendarPlugin.retrieveEvents(
         _rosterCalendarId!,
         RetrieveEventsParams(startDate: DateTime(2023, 1, 1), endDate: DateTime(2035, 12, 31)),
       );
 
+      // 步驟 2：建立「日期 → eventId」映射，並標記重複
       Map<String, String> cloudEventMap = {};
-      Set<String> duplicateIds = {};
+      List<String> duplicateIds = [];
       for (var e in existingEvents.data ?? []) {
         String desc = e.description ?? '';
         String? eventId = e.eventId;
@@ -438,6 +440,7 @@ class MainPageState extends State<MainPage> {
         if (match != null) {
           String dateKey = match.group(1)!;
           if (cloudEventMap.containsKey(dateKey)) {
+            // 同一天多個事件 → 全部標記為重複（包含舊的）
             duplicateIds.add(eventId);
           } else {
             cloudEventMap[dateKey] = eventId;
@@ -445,6 +448,7 @@ class MainPageState extends State<MainPage> {
         }
       }
 
+      // 步驟 3：刪除所有重複事件
       int delDup = 0;
       for (var dupId in duplicateIds) {
         try {
@@ -453,14 +457,17 @@ class MainPageState extends State<MainPage> {
         } catch (_) {}
       }
 
+      // 步驟 4：以雲端資料為準，重建本地 eventId 映射
       _googleEventIdMap.removeWhere((date, id) => !cloudEventMap.containsKey(date));
       for (var entry in cloudEventMap.entries) {
-        _googleEventIdMap.putIfAbsent(entry.key, () => entry.value);
+        _googleEventIdMap[entry.key] = entry.value;
       }
 
       int add = 0;
       int upd = 0;
+      int failed = 0;
 
+      // 步驟 5：遍歷 roster，增量更新（有 ID 就更新，沒有就建立）
       for (var entry in roster.entries) {
         var code = entry.value;
         var def = defs[code];
@@ -510,6 +517,7 @@ class MainPageState extends State<MainPage> {
         var res = await _calendarPlugin.createOrUpdateEvent(ev);
         bool success = res != null && res.isSuccess && res.data != null;
 
+        // 如果更新失敗（雲端已刪除該 ID），改用新建
         if (!success && existingId != null) {
           Event retryEv = Event(
             _rosterCalendarId!,
@@ -524,13 +532,18 @@ class MainPageState extends State<MainPage> {
           if (success) {
             _googleEventIdMap[dateKey] = res!.data!;
             add++;
+          } else {
+            failed++;
           }
         } else if (success) {
           _googleEventIdMap[dateKey] = res!.data!;
           if (existingId == null) { add++; } else { upd++; }
+        } else {
+          failed++;
         }
       }
 
+      // 步驟 6：刪除 roster 已不存在的日期事件
       int del = delDup;
       List<String> datesToRemove = [];
       for (var mapEntry in _googleEventIdMap.entries) {
@@ -546,13 +559,14 @@ class MainPageState extends State<MainPage> {
         _googleEventIdMap.remove(k);
       }
 
+      // 步驟 7：儲存映射
       var sp = await SharedPreferences.getInstance();
       sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
       updateWidget();
 
       if (!silent && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('增量同步完成：新增$add 更新$upd 刪除$del${delDup > 0 ? '（清除歷史重複$delDup）' : ''}'),
+          content: Text('同步完成：新增$add 更新$upd 刪除$del${delDup > 0 ? '（清重複$delDup）' : ''}${failed > 0 ? ' 失敗$failed' : ''}'),
         ));
       }
     } catch (e) {
@@ -681,7 +695,7 @@ class MainPageState extends State<MainPage> {
 
   Future<void> shareScreenshotDialog() async { exportShareImage(); }
 
-  // ===== 截圖存 JPG 到 DCIM/Screenshots + 通知媒體庫（修改 A）=====
+  // ===== 截圖存真 JPG 到 DCIM/Screenshots + 通知媒體庫 =====
   Future<void> exportShareImage() async {
     try {
       RenderRepaintBoundary? b = calKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
@@ -720,39 +734,50 @@ class MainPageState extends State<MainPage> {
         y += 46;
       }
       final pic = recorder.endRecording();
-      final img = await pic.toImage(width.toInt(), (y + 20).toInt());
-      // Flutter 只有 PNG 編碼，檔名改 .jpg 讓相冊辨識
-      final byte = await img.toByteData(format: ui.ImageByteFormat.png);
+      final img0 = await pic.toImage(width.toInt(), (y + 20).toInt());
+      final byte = await img0.toByteData(format: ui.ImageByteFormat.png);
       final pngBytes = byte!.buffer.asUint8List();
 
-      // 存到 DCIM/Screenshots
+      // 用 image 套件轉為真 JPG（有損壓縮，檔案更小）
+      Uint8List jpgBytes;
+      try {
+        final decoded = img.decodeImage(pngBytes);
+        if (decoded != null) {
+          jpgBytes = Uint8List.fromList(img.encodeJpg(decoded, quality: 90));
+        } else {
+          jpgBytes = pngBytes;
+        }
+      } catch (_) {
+        jpgBytes = pngBytes;
+      }
+
       Directory dcimDir = Directory('/storage/emulated/0/DCIM/Screenshots');
       if (!await dcimDir.exists()) {
         await dcimDir.create(recursive: true);
       }
       String path = '${dcimDir.path}/Roster_${focused.year}${focused.month.toString().padLeft(2, '0')}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.jpg';
       File f = File(path);
-      await f.writeAsBytes(pngBytes);
+      await f.writeAsBytes(jpgBytes);
 
-      // 修改 A：通知媒體庫立即掃描，讓相冊能立即看到
+      // 通知媒體庫立即掃描
       try {
         await _realChannel.invokeMethod('scanImage', {'path': path});
       } catch (e) {
         print("Scan image failed: $e");
       }
 
-      // 同時寫一份到 Pictures/Roster 作為備份
+      // 同時寫一份到 Pictures/Roster 備份
       try {
         Directory picDir = Directory('/storage/emulated/0/Pictures/Roster');
         if (!await picDir.exists()) await picDir.create(recursive: true);
         String path2 = '${picDir.path}/Roster_${focused.year}${focused.month.toString().padLeft(2, '0')}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.jpg';
         File f2 = File(path2);
-        await f2.writeAsBytes(pngBytes);
+        await f2.writeAsBytes(jpgBytes);
         try { await _realChannel.invokeMethod('scanImage', {'path': path2}); } catch (_) {}
       } catch (_) {}
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('截圖已保存到相冊')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('截圖已保存到相冊')));
         await Share.shareXFiles([XFile(path)], text: '${focused.year}年${focused.month}月 $customName');
       }
     } catch (e) {
