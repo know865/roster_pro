@@ -189,6 +189,7 @@ class MainPageState extends State<MainPage> {
 
   String appVersion = '載入中...';
 
+  // 修改 2：Widget 更新加入延遲
   Future<void> updateWidget() async {
     try {
       String todayKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -207,6 +208,8 @@ class MainPageState extends State<MainPage> {
       DateTime now = DateTime.now();
       await HomeWidget.saveWidgetData('initial_year', now.year);
       await HomeWidget.saveWidgetData('initial_month', now.month);
+      // 修改：儲存後稍等再刷新，確保 Kotlin 讀到最新
+      await Future.delayed(const Duration(milliseconds: 300));
       await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
     } catch (e) {
       print("Widget update error: $e");
@@ -488,13 +491,13 @@ class MainPageState extends State<MainPage> {
     await _pickGoogleCalendarDialog();
   }
 
-  // ===== 核心：徹底重寫同步，解決所有重複 =====
+  // ===== 修改 1 + 3：同步邏輯徹底重寫 =====
   // 策略：
-  // 1. 掃描 2020-01-01 ~ 2035-12-31 全部事件（涵蓋所有 roster 可能範圍）
-  // 2. 建立「日期 → eventId 列表」映射（包含重複）
-  // 3. 每個日期只保留最新 1 個 eventId，其他全部刪除
-  // 4. 對 roster 的每一天：有 ID 就更新，沒有就建立
-  // 5. 對 roster 不存在的日期：如果有 [RosterPro] 事件，刪除
+  // 1. 查詢**全部 roster 內日期**範圍（不限今天）
+  // 2. 用 start 的時間（不依賴 description）建立「日期 → eventId 列表」
+  // 3. 每日期只保留 1 個 eventId，其他刪除
+  // 4. 對 roster 每一天，一律「先刪該日所有事件，再新建 1 個」
+  //    （不使用 createOrUpdateEvent 的 eventId 參數，因為它在 Android 上不可靠）
   Future<void> _syncToGoogle({bool silent = false}) async {
     if (!googleSyncEnabled && !silent) {
       bool? en = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
@@ -515,7 +518,7 @@ class MainPageState extends State<MainPage> {
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) await _ensureCalendar();
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) throw '未選真 Google 日曆';
 
-      // 用 roster 中最早和最晚的日期作為查詢範圍（涵蓋過去 + 未來）
+      // 用 roster 中最早和最晚日期作為範圍
       DateTime minDate = DateTime(2035, 12, 31);
       DateTime maxDate = DateTime(2020, 1, 1);
       if (roster.isNotEmpty) {
@@ -528,24 +531,15 @@ class MainPageState extends State<MainPage> {
         minDate = DateTime.now().subtract(const Duration(days: 365));
         maxDate = DateTime.now().add(const Duration(days: 365));
       }
-      // 前後多留 30 天緩衝
-      minDate = minDate.subtract(const Duration(days: 30));
-      maxDate = maxDate.add(const Duration(days: 30));
+      minDate = minDate.subtract(const Duration(days: 7));
+      maxDate = maxDate.add(const Duration(days: 7));
 
-      if (!silent) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('同步範圍：${DateFormat('yyyy-MM-dd').format(minDate)} ~ ${DateFormat('yyyy-MM-dd').format(maxDate)}'),
-          duration: const Duration(seconds: 2),
-        ));
-      }
-
-      // 步驟 1: 查詢所有事件
       var existingEvents = await _calendarPlugin.retrieveEvents(
         _rosterCalendarId!,
         RetrieveEventsParams(startDate: minDate, endDate: maxDate),
       );
 
-      // 步驟 2: 用「事件開始日期」為 key，把同一天的事件全部集中
+      // 建立「日期 → eventId 列表」
       Map<String, List<String>> dateToEventIds = {};
       for (var e in existingEvents.data ?? []) {
         String? eventId = e.eventId;
@@ -558,32 +552,40 @@ class MainPageState extends State<MainPage> {
         dateToEventIds.putIfAbsent(dateKey, () => []).add(eventId);
       }
 
-      // 步驟 3: 對每個日期，保留 1 個 eventId（最新的），刪除其他
-      Map<String, String> cloudEventMap = {};
       int delDup = 0;
+      // 對每個日期：若已在 _googleEventIdMap 中，保留對應的 eventId，刪除其他
+      // 若不在 map 中，刪除全部（之後會重建）
       for (var entry in dateToEventIds.entries) {
         List<String> ids = entry.value;
-        if (ids.length == 1) {
-          cloudEventMap[entry.key] = ids[0];
-        } else {
-          // 保留最後一個（通常是最新建立），刪除其他的
-          cloudEventMap[entry.key] = ids.last;
-          for (int i = 0; i < ids.length - 1; i++) {
+        String? keepId = _googleEventIdMap[entry.key];
+        for (var eid in ids) {
+          if (eid != keepId) {
             try {
-              await _calendarPlugin.deleteEvent(_rosterCalendarId!, ids[i]);
+              await _calendarPlugin.deleteEvent(_rosterCalendarId!, eid);
               delDup++;
             } catch (_) {}
           }
         }
       }
 
-      // 步驟 4: 重建本地映射
-      _googleEventIdMap.clear();
-      _googleEventIdMap.addAll(cloudEventMap);
+      // 刪除「roster 中不存在」的 [RosterPro] 事件
+      int delOrphan = 0;
+      for (var entry in dateToEventIds.entries) {
+        if (!roster.containsKey(entry.key)) {
+          for (var eid in entry.value) {
+            try {
+              await _calendarPlugin.deleteEvent(_rosterCalendarId!, eid);
+              delOrphan++;
+            } catch (_) {}
+          }
+          _googleEventIdMap.remove(entry.key);
+        }
+      }
 
-      int add = 0, upd = 0, failed = 0;
+      await Future.delayed(const Duration(milliseconds: 500));
 
-      // 步驟 5: 對 roster 每一天，有 ID 就更新，沒有就建立
+      int add = 0, failed = 0;
+
       for (var entry in roster.entries) {
         var code = entry.value;
         var def = defs[code];
@@ -604,10 +606,25 @@ class MainPageState extends State<MainPage> {
           title = '${def.code} ${def.start}-${def.end}${note.isNotEmpty ? ' | $note' : ''}';
         }
 
+        // 先刪除該日期已存在的事件（若之前的 map 有 ID）
         String? existingId = _googleEventIdMap[dateKey];
+        if (existingId != null) {
+          try {
+            await _calendarPlugin.deleteEvent(_rosterCalendarId!, existingId);
+          } catch (_) {}
+          _googleEventIdMap.remove(dateKey);
+        }
+        // 若該日期還有多個殘留事件（可能上次同步失敗留下），從 dateToEventIds 刪除
+        if (dateToEventIds.containsKey(dateKey)) {
+          for (var eid in dateToEventIds[dateKey]!) {
+            try {
+              await _calendarPlugin.deleteEvent(_rosterCalendarId!, eid);
+            } catch (_) {}
+          }
+        }
+
         tz.TZDateTime evStart, evEnd;
         if (allDayFlag) {
-          // ===== 修正跨日：全天事件用 00:00:00 ~ 23:59:59 =====
           evStart = tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0);
           evEnd = tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59);
         } else {
@@ -618,38 +635,26 @@ class MainPageState extends State<MainPage> {
           evEnd = tz.TZDateTime(tz.local, ee.year, ee.month, ee.day, ee.hour, ee.minute);
         }
 
-        Event ev = Event(_rosterCalendarId!, eventId: existingId, title: title, description: desc, start: evStart, end: evEnd, allDay: allDayFlag);
+        Event ev = Event(_rosterCalendarId!, title: title, description: desc, start: evStart, end: evEnd, allDay: allDayFlag);
         var res = await _calendarPlugin.createOrUpdateEvent(ev);
-        bool success = res != null && res.isSuccess && res.data != null;
-        if (!success && existingId != null) {
-          Event retryEv = Event(_rosterCalendarId!, title: title, description: desc, start: evStart, end: evEnd, allDay: allDayFlag);
-          res = await _calendarPlugin.createOrUpdateEvent(retryEv);
-          success = res != null && res.isSuccess && res.data != null;
-          if (success) { _googleEventIdMap[dateKey] = res!.data!; add++; } else { failed++; }
-        } else if (success) {
-          _googleEventIdMap[dateKey] = res!.data!;
-          if (existingId == null) add++; else upd++;
-        } else { failed++; }
-      }
-
-      // 步驟 6: 刪除 roster 中不存在的 [RosterPro] 事件
-      int del = delDup;
-      List<String> datesToRemove = [];
-      for (var mapEntry in _googleEventIdMap.entries) {
-        if (!roster.containsKey(mapEntry.key)) {
-          try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, mapEntry.value); del++; } catch (_) {}
-          datesToRemove.add(mapEntry.key);
+        if (res != null && res.isSuccess && res.data != null) {
+          _googleEventIdMap[dateKey] = res.data!;
+          add++;
+        } else {
+          failed++;
         }
       }
-      for (var k in datesToRemove) _googleEventIdMap.remove(k);
 
       var sp = await SharedPreferences.getInstance();
       sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
       updateWidget();
-      if (!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('同步完成：新增$add 更新$upd 刪除$del${delDup > 0 ? '（清重複$delDup）' : ''}${failed > 0 ? ' 失敗$failed' : ''}'),
-        duration: const Duration(seconds: 4),
-      ));
+
+      if (!silent && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('同步完成：新增$add 清重複$delDup 清孤兒$delOrphan${failed > 0 ? ' 失敗$failed' : ''}'),
+          duration: const Duration(seconds: 4),
+        ));
+      }
     } catch (e) {
       if (!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('同步失敗 $e')));
     } finally {
@@ -657,11 +662,12 @@ class MainPageState extends State<MainPage> {
     }
   }
 
-  // ===== 全清重建：只清 [RosterPro] 事件，涵蓋所有 roster 日期 =====
+  // ===== 修改 1：全清重建徹底重寫 =====
+  // 策略：直接掃描 2020~2035，刪除所有 [RosterPro] 事件，再重建
   Future<void> _forceFullResync() async {
     bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
       title: const Text('⚠️ 全清重建確認'),
-      content: const Text('這會刪除 Google 日曆上所有 [RosterPro] 事件並重新建立。\n\n✅ App 排班資料不受影響\n✅ 你其他的 Google 行程不會被刪除\n✅ 涵蓋所有 roster 日期（過去+未來）\n\n確定要執行嗎？'),
+      content: const Text('這會刪除 Google 日曆上「所有」[RosterPro] 事件（包含 2020-2035 所有日期），並根據 App 現有排班重新建立。\n\n✅ App 排班資料不受影響\n✅ 你其他的 Google 行程不會被刪除\n\n確定要執行嗎？'),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
         FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('確定執行'))
@@ -676,30 +682,19 @@ class MainPageState extends State<MainPage> {
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) await _ensureCalendar();
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) throw '未選真 Google 日曆';
 
-      // 計算查詢範圍
-      DateTime minDate = DateTime(2035, 12, 31);
-      DateTime maxDate = DateTime(2020, 1, 1);
-      if (roster.isNotEmpty) {
-        for (var entry in roster.keys) {
-          DateTime d = DateFormat('yyyy-MM-dd').parse(entry);
-          if (d.isBefore(minDate)) minDate = d;
-          if (d.isAfter(maxDate)) maxDate = d;
-        }
-      } else {
-        minDate = DateTime.now().subtract(const Duration(days: 365));
-        maxDate = DateTime.now().add(const Duration(days: 365));
-      }
-      minDate = minDate.subtract(const Duration(days: 30));
-      maxDate = maxDate.add(const Duration(days: 30));
-
+      // 擴大範圍：2020-01-01 ~ 2035-12-31
       var existingEvents = await _calendarPlugin.retrieveEvents(
         _rosterCalendarId!,
-        RetrieveEventsParams(startDate: minDate, endDate: maxDate),
+        RetrieveEventsParams(
+          startDate: DateTime(2020, 1, 1),
+          endDate: DateTime(2035, 12, 31),
+        ),
       );
 
       int del = 0;
       for (var e in existingEvents.data ?? []) {
-        if ((e.description ?? '').contains('[RosterPro]') && e.eventId != null) {
+        String desc = e.description ?? '';
+        if (desc.contains('[RosterPro]') && e.eventId != null) {
           try {
             await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.eventId!);
             del++;
@@ -711,8 +706,8 @@ class MainPageState extends State<MainPage> {
       var sp = await SharedPreferences.getInstance();
       sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
 
-      // 等待伺服器同步
-      await Future.delayed(const Duration(milliseconds: 800));
+      // 等待 Google 伺服器完成刪除
+      await Future.delayed(const Duration(seconds: 2));
 
       int add = 0;
       for (var entry in roster.entries) {
@@ -1083,18 +1078,21 @@ class MainPageState extends State<MainPage> {
     });
   }
 
+  // ===== 修改 6：智能排班重寫 =====
+  // 邏輯：選定模式 → 選開始日期 → 自動排 4 * (7 * n) 天，其中 n = 模式行數
   Future<void> smartSchedule() async {
     if (savedPatterns.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請先建立至少一個已存模式')));
       return;
     }
+    // 選模式
     int? selectedIdx = await showDialog<int>(context: context, builder: (ctx) {
       return AlertDialog(
         title: const Text('選擇要使用的模式'),
         content: SizedBox(width: 300, child: ListView(shrinkWrap: true, children: [
           ...savedPatterns.asMap().entries.map((en) => ListTile(
             title: Text(en.value.name),
-            subtitle: Text('${en.value.data.length}行 (週期: ${en.value.data.expand((e) => e).length}天)'),
+            subtitle: Text('${en.value.data.length}行 (${en.value.data.length * 7}天)'),
             leading: const Icon(Icons.folder),
             onTap: () => Navigator.pop(ctx, en.key),
           )),
@@ -1103,34 +1101,34 @@ class MainPageState extends State<MainPage> {
       );
     });
     if (selectedIdx == null) return;
+
     var selectedPattern = savedPatterns[selectedIdx].data;
-    int cycleDays = selectedPattern.expand((e) => e).length;
-    if (cycleDays == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('所選模式為空')));
-      return;
-    }
-    DateTimeRange? startRange = await showDateRangePicker(
+    int rows = selectedPattern.length;
+    int cycleDays = rows * 7;
+    int totalDays = 4 * cycleDays; // 4 * 7 * n 天
+
+    // 只選開始日期（用 showDatePicker）
+    DateTime initialDate = DateTime.now();
+    DateTime? startDate = await showDatePicker(
       context: context,
+      initialDate: initialDate,
       firstDate: DateTime(2023),
       lastDate: DateTime(2035),
-      helpText: '選擇開始日期（結束日期可忽略）',
+      helpText: '選擇開始日期',
     );
-    if (startRange == null) return;
-    DateTime startDate = startRange.start;
-    int fourCycles = cycleDays * 4;
-    int oneYear = 365;
-    int totalDays = fourCycles >= oneYear ? fourCycles : oneYear;
+    if (startDate == null) return;
+
     DateTime endDate = startDate.add(Duration(days: totalDays - 1));
+
     bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
       title: const Text('智能排班確認'),
       content: Text(
         '模式: ${savedPatterns[selectedIdx].name}\n'
-        '週期: $cycleDays 天\n'
-        '一個週期: ${(cycleDays / 7).toStringAsFixed(1)} 週\n'
+        '模式行數: $rows 行\n'
+        '一個週期: $cycleDays 天 (${rows} 週)\n'
         '開始日期: ${DateFormat('yyyy-MM-dd').format(startDate)}\n'
-        '計算方式: ${fourCycles >= oneYear ? "4 個週期 ($fourCycles 天)" : "1 年 ($oneYear 天)"}\n'
         '結束日期: ${DateFormat('yyyy-MM-dd').format(endDate)}\n'
-        '總共排班: $totalDays 天\n\n'
+        '總共排班: $totalDays 天 (4 個週期)\n\n'
         '確定要執行嗎？',
       ),
       actions: [
@@ -1139,18 +1137,27 @@ class MainPageState extends State<MainPage> {
       ]
     ));
     if (confirm != true) return;
-    var flat = selectedPattern.expand((e) => e).toList();
+
+    // 攤平模式：從第一行開始
+    List<String> flat = [];
+    for (var row in selectedPattern) {
+      flat.addAll(row);
+    }
+
     setState(() {
-      int i = 0;
-      for (DateTime d = startDate; !d.isAfter(endDate); d = d.add(const Duration(days: 1))) {
-        roster[DateFormat('yyyy-MM-dd').format(d)] = flat[i % flat.length];
-        i++;
+      for (int i = 0; i < totalDays; i++) {
+        DateTime d = startDate.add(Duration(days: i));
+        String dateKey = DateFormat('yyyy-MM-dd').format(d);
+        roster[dateKey] = flat[i % flat.length];
       }
     });
     save();
     setState(() => tab = 0);
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('智能排班完成：$totalDays 天')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('智能排班完成：$totalDays 天\n${DateFormat('yyyy-MM-dd').format(startDate)} ~ ${DateFormat('yyyy-MM-dd').format(endDate)}'),
+        duration: const Duration(seconds: 4),
+      ));
     }
   }
 
@@ -1224,8 +1231,8 @@ class MainPageState extends State<MainPage> {
                         Container(width: 32, alignment: Alignment.center, child: Text('W${isoWeek(days[row * 7])}', style: const TextStyle(fontSize: 11, color: Colors.deepPurple, fontWeight: FontWeight.bold))),
                         Expanded(
                           child: GridView.builder(
-                            shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), padding: const EdgeInsets.all(3),
-                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7, childAspectRatio: 0.72, mainAxisSpacing: 4, crossAxisSpacing: 4),
+                            shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), padding: const EdgeInsets.all(2),
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7, childAspectRatio: 0.68, mainAxisSpacing: 3, crossAxisSpacing: 3),
                             itemCount: 7,
                             itemBuilder: (ctx2, col) {
                               int idx = row * 7 + col;
@@ -1250,18 +1257,42 @@ class MainPageState extends State<MainPage> {
                                 onLongPress: () { setState(() => selectedDay = day); showDetail(day); },
                                 child: Container(
                                   decoration: BoxDecoration(
-                                    color: bg, borderRadius: BorderRadius.circular(12),
-                                    border: isToday ? Border.all(width: 2.8, color: todayBorderColor) : sel ? Border.all(width: 2, color: Colors.deepPurple) : null
+                                    color: bg, borderRadius: BorderRadius.circular(10),
+                                    border: isToday ? Border.all(width: 2.5, color: todayBorderColor) : sel ? Border.all(width: 2, color: Colors.deepPurple) : null
                                   ),
-                                  child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                                    Text('${day.day}', style: TextStyle(fontWeight: isToday ? FontWeight.w900 : FontWeight.bold, fontSize: calendarFontSize - 1, color: inM ? Colors.black : Colors.grey)),
-                                    if (code != null) FittedBox(child: Container(margin: const EdgeInsets.only(top: 1), padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: def?.color ?? Colors.orange, borderRadius: BorderRadius.circular(8)), child: Text(code, style: TextStyle(color: Colors.white, fontSize: calendarFontSize - 3)))),
-                                    if (showLunar && lunarText.isNotEmpty && inM) Text(lunarText, style: TextStyle(fontSize: 8, color: Colors.grey[700]), maxLines: 1, overflow: TextOverflow.ellipsis),
-                                    const SizedBox(height: 1),
+                                  child: Column(mainAxisAlignment: MainAxisAlignment.start, children: [
+                                    const SizedBox(height: 2),
+                                    // 修改 4：數字用 FittedBox，避免擠壓
+                                    FittedBox(fit: BoxFit.scaleDown, child: Text('${day.day}', style: TextStyle(fontWeight: isToday ? FontWeight.w900 : FontWeight.bold, fontSize: calendarFontSize, color: inM ? Colors.black : Colors.grey))),
+                                    // 班次 chip 縮小
+                                    if (code != null)
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                                        child: FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                                            decoration: BoxDecoration(color: def?.color ?? Colors.orange, borderRadius: BorderRadius.circular(5)),
+                                            child: Text(code, style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                                          ),
+                                        ),
+                                      ),
+                                    // 農曆：用 Expanded + FittedBox 確保不遮蓋
+                                    if (showLunar && lunarText.isNotEmpty && inM)
+                                      Expanded(
+                                        child: Center(
+                                          child: FittedBox(
+                                            fit: BoxFit.scaleDown,
+                                            child: Text(lunarText, style: TextStyle(fontSize: 8, color: Colors.grey[700])),
+                                          ),
+                                        ),
+                                      ),
+                                    // 底部小點
                                     Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                                      if (isHol) Container(width: 5, height: 5, margin: const EdgeInsets.symmetric(horizontal: 1), decoration: BoxDecoration(color: holidayDotColor, shape: BoxShape.circle)),
-                                      if (hasNote) Container(width: 5, height: 5, margin: const EdgeInsets.symmetric(horizontal: 1), decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle)),
+                                      if (isHol) Container(width: 4, height: 4, margin: const EdgeInsets.symmetric(horizontal: 1), decoration: BoxDecoration(color: holidayDotColor, shape: BoxShape.circle)),
+                                      if (hasNote) Container(width: 4, height: 4, margin: const EdgeInsets.symmetric(horizontal: 1), decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle)),
                                     ]),
+                                    const SizedBox(height: 2),
                                   ])
                                 )
                               );
@@ -1539,7 +1570,7 @@ class MainPageState extends State<MainPage> {
                 const ListTile(title: Text('已存排班模式', style: TextStyle(fontWeight: FontWeight.bold))),
                 ...savedPatterns.asMap().entries.map((en) => ListTile(
                   title: Text(en.value.name),
-                  subtitle: Text('${en.value.data.length}行 (週期: ${en.value.data.expand((e) => e).length}天)'),
+                  subtitle: Text('${en.value.data.length}行 (${en.value.data.length * 7}天)'),
                   trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                     IconButton(icon: const Icon(Icons.upload), tooltip: '載入', onPressed: () { setState(() { pattern = en.value.data.map((r) => List<String>.from(r)).toList(); editingPatternName = en.value.name; editingPatternIndex = en.key; }); save(); Navigator.pop(ctx); }),
                     IconButton(icon: const Icon(Icons.edit), tooltip: '改名', onPressed: () {
@@ -1718,6 +1749,7 @@ class MainPageState extends State<MainPage> {
     double otAmount = ot * overtimeRate;
     double totalAllow = allow + otAmount + extraAllowances.fold(0.0, (a, b) => a + b.amount);
     return SafeArea(child: ListView(padding: const EdgeInsets.all(12), children: [
+      // 修改 5：改用 Expanded 讓兩邊都能顯示
       Row(children: [
         FilledButton.icon(
           onPressed: exportReport,
@@ -1726,9 +1758,21 @@ class MainPageState extends State<MainPage> {
           style: FilledButton.styleFrom(backgroundColor: Colors.deepPurple),
         ),
         const SizedBox(width: 8),
-        Flexible(child: InkWell(onTap: () => quickJumpMonth(forReport: true), child: Row(mainAxisSize: MainAxisSize.min, children: [Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text('${year}年${isYearReport ? ' 全年' : ' ${month}月'}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)))), const Icon(Icons.arrow_drop_down)]))),
-        const Spacer(),
-        SegmentedButton<bool>(segments: const [ButtonSegment(value: false, label: Text('本月')), ButtonSegment(value: true, label: Text('全年'))], selected: {isYearReport}, onSelectionChanged: (s) { setState(() => isYearReport = s.first); }),
+        Expanded(
+          child: InkWell(
+            onTap: () => quickJumpMonth(forReport: true),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text('${year}年${isYearReport ? ' 全年' : ' ${month}月'}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)))),
+              const Icon(Icons.arrow_drop_down),
+            ]),
+          ),
+        ),
+        const SizedBox(width: 8),
+        SegmentedButton<bool>(
+          segments: const [ButtonSegment(value: false, label: Text('本月')), ButtonSegment(value: true, label: Text('全年'))],
+          selected: {isYearReport},
+          onSelectionChanged: (s) { setState(() => isYearReport = s.first); },
+        ),
       ]),
       const SizedBox(height: 8),
       if (isYearReport) Card(color: const Color(0xFFE3F2FD), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1892,7 +1936,7 @@ class MainPageState extends State<MainPage> {
           decoration: BoxDecoration(color: Colors.red.withOpacity(0.08), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.withOpacity(0.3))),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('⚠️ 全清重建（救援用）', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 13)),
-            const Text('• 只刪除 [RosterPro] 事件\n• 涵蓋所有 roster 日期（過去+未來）\n• 你其他的 Google 行程不會被刪除', style: TextStyle(fontSize: 10, color: Colors.black54)),
+            const Text('• 只刪除 [RosterPro] 事件\n• 涵蓋 2020-2035 所有日期\n• 你其他的 Google 行程不會被刪除', style: TextStyle(fontSize: 10, color: Colors.black54)),
             const SizedBox(height: 8),
             SizedBox(width: double.infinity, child: FilledButton.icon(
               onPressed: googleSyncEnabled ? _forceFullResync : null,
@@ -2023,7 +2067,7 @@ class MainPageState extends State<MainPage> {
         SizedBox(width: double.infinity, child: FilledButton.tonal(
           onPressed: () async {
             await updateWidget();
-            await Future.delayed(const Duration(milliseconds: 500));
+            await Future.delayed(const Duration(milliseconds: 800));
             await updateWidget();
             if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已刷新桌面小工具')));
           },
