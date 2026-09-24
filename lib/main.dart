@@ -20,6 +20,9 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 void main() {
   tzData.initializeTimeZones();
+  // 【問題1&2 修復】設定本地時區為香港，避免同步到 Google 日曆時產生 8 小時時差（跨天）
+  tz.setLocalLocation(tz.getLocation('Asia/Hong_Kong'));
+  
   WidgetsFlutterBinding.ensureInitialized();
   HomeWidget.setAppGroupId('group.rosterPro');
   runApp(const RosterApp());
@@ -183,7 +186,8 @@ class MainPageState extends State<MainPage> {
   String _rosterAccountName = '';
   Map<String, String> _googleEventIdMap = {};
 
-  double widgetFontSize = 11;
+  // 【問題4 修改】桌面小工具相關設定，預設字體加大
+  double widgetFontSize = 55; // 原本 11，加大 5 倍
   int widgetTextColor = 0xFF333333;
   int widgetBgColor = 0xFFFFFFFF;
 
@@ -201,6 +205,11 @@ class MainPageState extends State<MainPage> {
       await HomeWidget.saveWidgetData('today_border', todayBorderColor.value);
       await HomeWidget.saveWidgetData('roster_json', jsonEncode(roster));
       await HomeWidget.saveWidgetData('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
+      
+      // 【問題4 修改】傳遞桌面小工具的字體大小與顏色設定
+      await HomeWidget.saveWidgetData('widget_font_size', widgetFontSize);
+      await HomeWidget.saveWidgetData('widget_text_color', widgetTextColor);
+      
       DateTime now = DateTime.now();
       await HomeWidget.saveWidgetData('initial_year', now.year);
       await HomeWidget.saveWidgetData('initial_month', now.month);
@@ -302,6 +311,9 @@ class MainPageState extends State<MainPage> {
       todayBgColor = Color(sp.getInt('todayBg') ?? 0xFFFFF9C4);
       todayBorderColor = Color(sp.getInt('todayBorder') ?? 0xFFFF9800);
       showLunar = sp.getBool('showLunar') ?? true;
+      // 【問題4 修改】載入桌面小工具設定
+      widgetFontSize = sp.getDouble('widgetFontSize') ?? 55;
+      widgetTextColor = sp.getInt('widgetTextColor') ?? 0xFF333333;
     });
     updateWidget();
   }
@@ -337,8 +349,11 @@ class MainPageState extends State<MainPage> {
     sp.setString('roster_json', jsonEncode(roster));
     sp.setString('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
     sp.setBool('showLunar', showLunar);
+    // 【問題4 修改】儲存桌面小工具設定
+    sp.setDouble('widgetFontSize', widgetFontSize);
+    sp.setInt('widgetTextColor', widgetTextColor);
     updateWidget();
-    // ===== 修改 1：debounce 防重入 =====
+    // 防重入 debounce
     if (autoSync && googleSyncEnabled && !_isSyncing) {
       Future.delayed(const Duration(seconds: 2), () {
         if (!_isSyncing && autoSync && googleSyncEnabled) _syncToGoogle(silent: true);
@@ -567,14 +582,16 @@ class MainPageState extends State<MainPage> {
             end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59),
             allDay: true);
         } else {
+          // 【問題1&2 修復】明確轉換為 tz.local 時間，確保不因 UTC 誤判而跨天
           DateTime s = DateTime(date.year, date.month, date.day,
               int.parse(def.start.split(':')[0]), int.parse(def.start.split(':')[1]));
           DateTime ee = DateTime(date.year, date.month, date.day,
               int.parse(def.end.split(':')[0]), int.parse(def.end.split(':')[1]));
           if (!ee.isAfter(s)) ee = ee.add(const Duration(days: 1));
+          
           ev = Event(_rosterCalendarId!, title: title, description: desc,
-            start: tz.TZDateTime(tz.local, s.year, s.month, s.day, s.hour, s.minute),
-            end: tz.TZDateTime(tz.local, ee.year, ee.month, ee.day, ee.hour, ee.minute),
+            start: tz.TZDateTime.from(s, tz.local),
+            end: tz.TZDateTime.from(ee, tz.local),
             allDay: false);
         }
 
@@ -601,8 +618,7 @@ class MainPageState extends State<MainPage> {
     } finally {
       _isSyncing = false;
     }
-  }
-
+  }  
   // ===== 修改 3：全清重建（同步邏輯：先按 map 刪、再掃孤兒）=====
   Future<void> _forceFullResync() async {
     bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
@@ -671,12 +687,14 @@ class MainPageState extends State<MainPage> {
             end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59),
             allDay: true);
         } else {
+          // 【問題1&2 修復】明確轉換為 tz.local 時間，確保不因 UTC 誤判而跨天
           DateTime s = DateTime(date.year, date.month, date.day, int.parse(def.start.split(':')[0]), int.parse(def.start.split(':')[1]));
           DateTime ee = DateTime(date.year, date.month, date.day, int.parse(def.end.split(':')[0]), int.parse(def.end.split(':')[1]));
           if (!ee.isAfter(s)) ee = ee.add(const Duration(days: 1));
+          
           ev = Event(_rosterCalendarId!, title: title, description: desc,
-            start: tz.TZDateTime(tz.local, s.year, s.month, s.day, s.hour, s.minute),
-            end: tz.TZDateTime(tz.local, ee.year, ee.month, ee.day, ee.hour, ee.minute),
+            start: tz.TZDateTime.from(s, tz.local),
+            end: tz.TZDateTime.from(ee, tz.local),
             allDay: false);
         }
         var res = await _calendarPlugin.createOrUpdateEvent(ev);
@@ -697,7 +715,8 @@ class MainPageState extends State<MainPage> {
       _isSyncing = false;
     }
   }
-    Future<void> clearRosterByRange() async {
+
+  Future<void> clearRosterByRange() async {
     DateTimeRange? range = await showDateRangePicker(context: context, firstDate: DateTime(2023), lastDate: DateTime(2035), helpText: '選擇要清除的排更範圍');
     if (range == null) return;
     int count = 0;
@@ -788,7 +807,7 @@ class MainPageState extends State<MainPage> {
     String? dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇備份位置');
     if (dir == null) return;
     String fileName = 'roster_pro_full_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.json';
-    var backup = {'version': '7.3', 'exportTime': DateTime.now().toIso8601String(), 'roster': roster, 'note': rosterNote, 'extraType': rosterExtraType, 'roOt': rosterOt, 'roEx': rosterExtra, 'roExH': rosterExtraHrs, 'defs': defs.map((k, v) => MapEntry(k, v.toJson())), 'pattern': pattern, 'carry': carry, 'cName': customName, 'stdWeek': standardWeeklyHours, 'otRate': overtimeRate, 'extraNewV36': extraAllowances.map((e) => e.toJson()).toList(), 'calFont': calendarFontSize, 'savedPatterns': savedPatterns.map((e) => e.toJson()).toList(), 'holidayRegion': holidayRegion, 'manualHolidays': manualHolidays, 'rosterCalId': _rosterCalendarId, 'rosterCalName': _rosterCalendarName, 'rosterAccName': _rosterAccountName, 'googleEventIdMap': _googleEventIdMap, 'gSync': googleSyncEnabled, 'gAuto': autoSync, 'todayBg': todayBgColor.value, 'todayBorder': todayBorderColor.value, 'showLunar': showLunar};
+    var backup = {'version': '7.3', 'exportTime': DateTime.now().toIso8601String(), 'roster': roster, 'note': rosterNote, 'extraType': rosterExtraType, 'roOt': rosterOt, 'roEx': rosterExtra, 'roExH': rosterExtraHrs, 'defs': defs.map((k, v) => MapEntry(k, v.toJson())), 'pattern': pattern, 'carry': carry, 'cName': customName, 'stdWeek': standardWeeklyHours, 'otRate': overtimeRate, 'extraNewV36': extraAllowances.map((e) => e.toJson()).toList(), 'calFont': calendarFontSize, 'savedPatterns': savedPatterns.map((e) => e.toJson()).toList(), 'holidayRegion': holidayRegion, 'manualHolidays': manualHolidays, 'rosterCalId': _rosterCalendarId, 'rosterCalName': _rosterCalendarName, 'rosterAccName': _rosterAccountName, 'googleEventIdMap': _googleEventIdMap, 'gSync': googleSyncEnabled, 'gAuto': autoSync, 'todayBg': todayBgColor.value, 'todayBorder': todayBorderColor.value, 'showLunar': showLunar, 'widgetFontSize': widgetFontSize, 'widgetTextColor': widgetTextColor};
     var f = File('$dir/$fileName');
     await f.writeAsString(jsonEncode(backup));
     setState(() => _lastBackupPath = '$dir/$fileName');
@@ -829,6 +848,8 @@ class MainPageState extends State<MainPage> {
         if (j['todayBg'] != null) todayBgColor = Color(j['todayBg']);
         if (j['todayBorder'] != null) todayBorderColor = Color(j['todayBorder']);
         if (j['showLunar'] != null) showLunar = j['showLunar'];
+        if (j['widgetFontSize'] != null) widgetFontSize = (j['widgetFontSize'] as num).toDouble();
+        if (j['widgetTextColor'] != null) widgetTextColor = j['widgetTextColor'];
       });
       save();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('還原成功')));
@@ -1179,7 +1200,8 @@ class MainPageState extends State<MainPage> {
                               else if (sel) bg = Colors.white;
                               else if (def != null) bg = def.color.withOpacity(0.18);
                               else bg = const Color(0xFFFFF0D0);
-                              // ===== 修改 4：日曆格子（日期+班次同行、農曆獨立行）=====
+                              
+                              // 【問題3 修改】班次代碼放到日期和農曆中間，自動適配文字大小
                               return GestureDetector(
                                 onTap: () { setState(() => selectedDay = day); },
                                 onLongPress: () { setState(() => selectedDay = day); showDetail(day); },
@@ -1189,29 +1211,41 @@ class MainPageState extends State<MainPage> {
                                     border: isToday ? Border.all(width: 2.5, color: todayBorderColor) : sel ? Border.all(width: 2, color: Colors.deepPurple) : null
                                   ),
                                   child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                                    Row(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.center, children: [
-                                      Text('${day.day}', style: TextStyle(fontWeight: isToday ? FontWeight.w900 : FontWeight.bold, fontSize: calendarFontSize, color: inM ? Colors.black : Colors.grey)),
-                                      if (code != null) ...[
-                                        const SizedBox(width: 3),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                          decoration: BoxDecoration(color: def?.color ?? Colors.orange, borderRadius: BorderRadius.circular(5)),
-                                          child: Text(code, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                                        ),
-                                      ],
-                                    ]),
+                                    // 1. 日期
+                                    FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Text('${day.day}', style: TextStyle(fontWeight: isToday ? FontWeight.w900 : FontWeight.bold, fontSize: calendarFontSize, color: inM ? Colors.black : Colors.grey)),
+                                    ),
                                     const SizedBox(height: 1),
+                                    // 2. 班次代碼 (放到中間，使用 FittedBox 自適應寬度，防止出界)
+                                    if (code != null)
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                                        child: FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0.5),
+                                            decoration: BoxDecoration(color: def?.color ?? Colors.orange, borderRadius: BorderRadius.circular(4)),
+                                            child: Text(code, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                                          ),
+                                        ),
+                                      )
+                                    else
+                                      const SizedBox(height: 15), // 沒有班次時佔位，保持高度一致
+                                    const SizedBox(height: 1),
+                                    // 3. 農曆
                                     if (showLunar && lunarText.isNotEmpty && inM)
                                       Expanded(
                                         child: Center(
                                           child: FittedBox(
                                             fit: BoxFit.scaleDown,
-                                            child: Text(lunarText, style: TextStyle(fontSize: 10, color: Colors.grey[700])),
+                                            child: Text(lunarText, style: TextStyle(fontSize: 9, color: Colors.grey[700])),
                                           ),
                                         ),
                                       )
                                     else
                                       const Spacer(),
+                                    // 4. 圓點
                                     SizedBox(
                                       height: 6,
                                       child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -1675,7 +1709,6 @@ class MainPageState extends State<MainPage> {
     double otAmount = ot * overtimeRate;
     double totalAllow = allow + otAmount + extraAllowances.fold(0.0, (a, b) => a + b.amount);
     return SafeArea(child: ListView(padding: const EdgeInsets.all(12), children: [
-      // ===== 修改 5：報表頂列 =====
       Row(children: [
         FilledButton.icon(
           onPressed: exportReport,
@@ -1886,6 +1919,39 @@ class MainPageState extends State<MainPage> {
             )),
           ])
         ),
+      ]))),
+      const SizedBox(height: 16),
+      // 【問題4 修改】桌面小工具設定區塊
+      const Text('桌面小工具設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      Card(color: const Color(0xFFE8F5E9), child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
+        Row(children: [
+          const Text('文字大小'),
+          Expanded(child: Slider(
+            value: widgetFontSize, 
+            min: 20, max: 100, divisions: 16, 
+            label: widgetFontSize.toStringAsFixed(0),
+            onChanged: (v) { setState(() => widgetFontSize = v); updateWidget(); },
+            onChangeEnd: (v) { save(); },
+          )),
+          Text(widgetFontSize.toStringAsFixed(0)),
+        ]),
+        ListTile(
+          title: const Text('文字顏色'),
+          leading: CircleAvatar(backgroundColor: Color(widgetTextColor)),
+          trailing: const Icon(Icons.color_lens),
+          onTap: () {
+            showDialog(context: context, builder: (ctx) => AlertDialog(
+              title: const Text('選擇桌面小工具文字顏色'),
+              content: Wrap(spacing: 8, runSpacing: 8, children: [
+                Colors.black, Colors.white, Colors.red, Colors.blue, Colors.green, Colors.orange, Colors.purple, Colors.grey, Colors.pink, Colors.teal
+              ].map((c) => GestureDetector(
+                onTap: () { setState(() => widgetTextColor = c.value); updateWidget(); save(); Navigator.pop(ctx); }, 
+                child: Container(width: 40, height: 40, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: Colors.black26)))
+              )).toList())
+            ));
+          },
+        ),
+        const Text('提示：修改後需等待桌面小工具重新整理 (約數秒)', style: TextStyle(fontSize: 10, color: Colors.grey)),
       ]))),
       const SizedBox(height: 16),
       const Text('清除排更 - 按日期範圍', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red)),
