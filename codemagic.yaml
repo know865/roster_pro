@@ -17,21 +17,12 @@ workflows:
 
       - name: Rebuild Android Skeleton
         script: |
-          echo "=== 備份重要檔案 ==="
           cp lib/main.dart /tmp/main.dart.bak
           cp pubspec.yaml /tmp/pubspec.yaml.bak
-
-          echo "=== 刪除舊 android 目錄 ==="
           rm -rf android
-
-          echo "=== flutter create 重建骨架 ==="
           flutter create --platforms=android --org com.example --project-name roster_pro --no-pub .
-
-          echo "=== 還原重要檔案 ==="
           cp /tmp/main.dart.bak lib/main.dart
           cp /tmp/pubspec.yaml.bak pubspec.yaml
-
-          echo "=== 檢查關鍵檔案 ==="
           ls -la android/build.gradle
           ls -la android/settings.gradle
           ls -la android/app/build.gradle
@@ -40,8 +31,7 @@ workflows:
       - name: Add Custom Widget Files
         script: |
           set -e
-
-          echo "=== 覆寫 AndroidManifest.xml ==="
+          # 寫入 AndroidManifest.xml
           cat > android/app/src/main/AndroidManifest.xml <<'MANIFEST_EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET"/>
@@ -66,19 +56,13 @@ workflows:
                       android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
                       android:hardwareAccelerated="true"
                       android:windowSoftInputMode="adjustResize">
-                      <meta-data
-                          android:name="io.flutter.embedding.android.NormalTheme"
-                          android:resource="@style/NormalTheme" />
+                      <meta-data android:name="io.flutter.embedding.android.NormalTheme" android:resource="@style/NormalTheme" />
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN"/>
                           <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
                   </activity>
-
-                  <meta-data
-                      android:name="flutterEmbedding"
-                      android:value="2" />
-
+                  <meta-data android:name="flutterEmbedding" android:value="2" />
                   <receiver android:name=".RosterWidgetProvider" android:exported="false">
                       <intent-filter>
                           <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
@@ -89,7 +73,6 @@ workflows:
                       <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info" />
                   </receiver>
               </application>
-
               <queries>
                   <intent>
                       <action android:name="android.intent.action.PROCESS_TEXT"/>
@@ -99,7 +82,7 @@ workflows:
           </manifest>
           MANIFEST_EOF
 
-          echo "=== 建立 MainActivity.kt ==="
+          # MainActivity.kt
           mkdir -p android/app/src/main/kotlin/com/example/roster_pro
           cat > android/app/src/main/kotlin/com/example/roster_pro/MainActivity.kt <<'MAIN_EOF'
           package com.example.roster_pro
@@ -121,7 +104,6 @@ workflows:
 
           class MainActivity : FlutterActivity() {
               private val CHANNEL = "com.roster/calendar_real"
-
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
@@ -133,7 +115,6 @@ workflows:
                       }
                   }
               }
-
               private fun handleGetCalendars(result: MethodChannel.Result) {
                   if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
                       result.error("PERMISSION", "No calendar permission", null)
@@ -141,12 +122,7 @@ workflows:
                   }
                   val calendars = mutableListOf<Map<String, Any?>>()
                   val uri = CalendarContract.Calendars.CONTENT_URI
-                  val projection = arrayOf(
-                      CalendarContract.Calendars._ID,
-                      CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
-                      CalendarContract.Calendars.ACCOUNT_NAME,
-                      CalendarContract.Calendars.ACCOUNT_TYPE
-                  )
+                  val projection = arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.CALENDAR_DISPLAY_NAME, CalendarContract.Calendars.ACCOUNT_NAME, CalendarContract.Calendars.ACCOUNT_TYPE)
                   val cursor = contentResolver.query(uri, projection, null, null, null)
                   cursor?.use {
                       while (it.moveToNext()) {
@@ -155,41 +131,19 @@ workflows:
                           val accountName = it.getString(2) ?: ""
                           val accountType = it.getString(3) ?: ""
                           val isGoogle = accountName.contains("gmail") || accountType.contains("google") || accountName.contains("google")
-                          calendars.add(mapOf(
-                              "id" to id,
-                              "displayName" to displayName,
-                              "accountName" to accountName,
-                              "accountType" to accountType,
-                              "isGoogle" to isGoogle
-                          ))
+                          calendars.add(mapOf("id" to id, "displayName" to displayName, "accountName" to accountName, "accountType" to accountType, "isGoogle" to isGoogle))
                       }
                   }
                   result.success(calendars)
               }
-
               private fun handleScanImage(path: String?, result: MethodChannel.Result) {
-                  if (path == null) {
-                      result.error("NO_PATH", "Path is null", null)
-                      return
-                  }
+                  if (path == null) { result.error("NO_PATH", "Path is null", null); return }
                   try {
                       val file = File(path)
-                      if (!file.exists()) {
-                          result.error("NO_FILE", "File does not exist: $path", null)
-                          return
-                      }
-                      MediaScannerConnection.scanFile(
-                          applicationContext,
-                          arrayOf(file.absolutePath),
-                          arrayOf("image/jpeg", "image/jpg", "image/png")
-                      ) { _, uri ->
-                          result.success(uri?.toString() ?: path)
-                      }
-                  } catch (e: Exception) {
-                      result.error("SCAN_FAIL", e.message, null)
-                  }
+                      if (!file.exists()) { result.error("NO_FILE", "File does not exist: $path", null); return }
+                      MediaScannerConnection.scanFile(applicationContext, arrayOf(file.absolutePath), arrayOf("image/jpeg", "image/jpg", "image/png")) { _, uri -> result.success(uri?.toString() ?: path) }
+                  } catch (e: Exception) { result.error("SCAN_FAIL", e.message, null) }
               }
-
               private fun handleRequestManageStorage(result: MethodChannel.Result) {
                   try {
                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -201,17 +155,13 @@ workflows:
                               return
                           }
                           result.success(true)
-                      } else {
-                          result.success(true)
-                      }
-                  } catch (e: Exception) {
-                      result.error("STORAGE_FAIL", e.message, null)
-                  }
+                      } else { result.success(true) }
+                  } catch (e: Exception) { result.error("STORAGE_FAIL", e.message, null) }
               }
           }
           MAIN_EOF
 
-          echo "=== 建立 widget_info.xml ==="
+          # widget_info.xml
           mkdir -p android/app/src/main/res/xml
           cat > android/app/src/main/res/xml/widget_info.xml <<'INFO_EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -225,7 +175,7 @@ workflows:
           </appwidget-provider>
           INFO_EOF
 
-          echo "=== 建立 widget_layout.xml ==="
+          # widget_layout.xml (包含 42 個格子 + widget_root id)
           mkdir -p android/app/src/main/res/layout
           cat > android/app/src/main/res/layout/widget_layout.xml <<'LAYOUT_EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -289,7 +239,7 @@ workflows:
           </LinearLayout>
           LAYOUT_EOF
 
-          echo "=== 建立 RosterWidgetProvider.kt ==="
+          # RosterWidgetProvider.kt
           cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt <<'WIDGET_EOF'
           package com.example.roster_pro
 
@@ -403,14 +353,13 @@ workflows:
           }
           WIDGET_EOF
 
-          echo "=== 完成！檢查檔案 ==="
           ls -la android/app/src/main/kotlin/com/example/roster_pro/
           ls -la android/app/src/main/res/layout/
           ls -la android/app/src/main/res/xml/
 
       - name: Build APK Release
         script: |
-          # 用時間戳自動遞增 build-number，避免重複無法覆蓋安裝
+          # 用時間戳自動遞增 build-number
           BUILD_NUM=$(date +%s | tail -c 8)
           echo "Build number: $BUILD_NUM"
           flutter pub get
