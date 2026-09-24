@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -156,7 +157,6 @@ class MainPageState extends State<MainPage> {
   List<List<String>> pattern = [["早", "早", "中", "中", "宵", "宵", "O"], ["早", "早", "早", "中", "中", "O", "O"]];
   List<List<String>> get _defaultPattern => [["早", "早", "中", "中", "宵", "宵", "O"], ["早", "早", "早", "中", "中", "O", "O"]];
   List<SavedPattern> savedPatterns = [];
-  // 修改 3：當前選中的班次代號
   String selectedPatternCode = "O";
 
   double carry = 0;
@@ -188,7 +188,6 @@ class MainPageState extends State<MainPage> {
   int widgetTextColor = 0xFF333333;
   int widgetBgColor = 0xFFFFFFFF;
 
-  // 修改 7：App 版本資訊
   String appVersion = '載入中...';
 
   Future<void> updateWidget() async {
@@ -263,7 +262,6 @@ class MainPageState extends State<MainPage> {
       try {
         await _realChannel.invokeMethod('requestManageStorage');
       } catch (_) {}
-      // 修改 1：啟動時主動刷新 Widget
       await updateWidget();
     });
   }
@@ -825,7 +823,6 @@ class MainPageState extends State<MainPage> {
     }
   }
 
-  // 修改 2：報表匯出加 BOM 避免亂碼 + 排序
   Future<void> exportReport() async {
     try {
       StringBuffer sb = StringBuffer();
@@ -882,7 +879,6 @@ class MainPageState extends State<MainPage> {
       }
       String fileName = 'report_${isYearReport ? 'year${focused.year}' : '${focused.year}${focused.month.toString().padLeft(2, '0')}'}.csv';
       String path = '$dir/$fileName';
-      // 加 UTF-8 BOM 讓 Excel 正確識別中文
       final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(sb.toString())];
       await File(path).writeAsBytes(bytes);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已匯出 $path')));
@@ -891,7 +887,6 @@ class MainPageState extends State<MainPage> {
     }
   }
 
-  // 修改 4：記事清單加全年/月選擇
   Future<void> showNotesListDialog() async {
     int queryYear = focused.year;
     int queryMonth = focused.month;
@@ -900,7 +895,6 @@ class MainPageState extends State<MainPage> {
       return StatefulBuilder(builder: (ctx2, setD) {
         List<MapEntry<String, String>> notes = [];
         if (yearMode) {
-          // 全年
           for (int m = 1; m <= 12; m++) {
             int dim = DateTime(queryYear, m + 1, 0).day;
             for (int d = 1; d <= dim; d++) {
@@ -911,7 +905,6 @@ class MainPageState extends State<MainPage> {
             }
           }
         } else {
-          // 指定月
           for (int i = 1; i <= 31; i++) {
             try {
               DateTime dt = DateTime(queryYear, queryMonth, i);
@@ -927,7 +920,6 @@ class MainPageState extends State<MainPage> {
         return AlertDialog(
           title: Text(yearMode ? '$queryYear年 全年記事清單' : '$queryYear年$queryMonth月 記事清單'),
           content: SizedBox(width: 500, height: 500, child: Column(children: [
-            // 模式切換
             Row(children: [
               Expanded(child: SegmentedButton<bool>(
                 segments: const [
@@ -939,7 +931,6 @@ class MainPageState extends State<MainPage> {
               )),
             ]),
             const SizedBox(height: 8),
-            // 年份/月份選擇
             Row(children: [
               IconButton(icon: const Icon(Icons.chevron_left), onPressed: () {
                 setD(() {
@@ -1014,7 +1005,6 @@ class MainPageState extends State<MainPage> {
         Padding(
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
           child: Row(children: [
-            // 修改 5：年份月份和按鈕之間用 Flexible 讓按鈕不擠出界
             Flexible(
               flex: 2,
               child: InkWell(
@@ -1342,7 +1332,6 @@ class MainPageState extends State<MainPage> {
     setState(() => tab = 0);
   }
 
-  // ===== 模式頁面：修改 3 =====
   Widget patternTab() {
     return SafeArea(child: Column(children: [
       const Padding(padding: EdgeInsets.only(top: 12), child: Center(child: Text('排更模式', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)))),
@@ -1427,7 +1416,6 @@ class MainPageState extends State<MainPage> {
           ),
         ])
       ),
-      // 選中班次列 - 點選切換「當前選中班次」
       Container(
         padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
         child: SingleChildScrollView(
@@ -1456,7 +1444,6 @@ class MainPageState extends State<MainPage> {
           }).toList()),
         ),
       ),
-      // 提示文字
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         child: Text('已選班次: $selectedPatternCode (點下方格子填入)', style: const TextStyle(fontSize: 12, color: Colors.grey)),
@@ -1474,7 +1461,6 @@ class MainPageState extends State<MainPage> {
                 Color chipColor = def?.color ?? Colors.grey;
                 return Expanded(child: GestureDetector(
                   onTap: () {
-                    // 修改 3：點擊格子填入當前選中的班次
                     setState(() => pattern[r][c] = selectedPatternCode);
                     save();
                   },
@@ -1859,7 +1845,6 @@ class MainPageState extends State<MainPage> {
           },
         ),
       ]))),
-      // 修改 7：顯示版本號
       const SizedBox(height: 16),
       const Text('應用資訊', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: ListTile(
