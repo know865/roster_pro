@@ -50,6 +50,8 @@ workflows:
               <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
               <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
               <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
               <application
                   android:label="Roster Pro"
@@ -408,8 +410,11 @@ workflows:
 
       - name: Build APK Release
         script: |
+          # 用時間戳自動遞增 build-number，避免重複無法覆蓋安裝
+          BUILD_NUM=$(date +%s | tail -c 8)
+          echo "Build number: $BUILD_NUM"
           flutter pub get
-          flutter build apk --release --no-tree-shake-icons --build-name=7.1.9 --build-number=71
+          flutter build apk --release --no-tree-shake-icons --build-name=7.1.9 --build-number=$BUILD_NUM
           ls -lh build/app/outputs/flutter-apk/
 
     artifacts:
