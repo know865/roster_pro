@@ -8,12 +8,6 @@ workflows:
       java: 17
       groups:
         - keystore_credentials
-    triggering:
-      events:
-        - push
-      branch_patterns:
-        - pattern: main
-          include: true
     scripts:
       - name: Set up Flutter
         script: |
