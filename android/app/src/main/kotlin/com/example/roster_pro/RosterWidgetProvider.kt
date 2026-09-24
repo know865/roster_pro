@@ -60,6 +60,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 val prefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
                 var year = prefs.getInt("year", Calendar.getInstance().get(Calendar.YEAR))
                 var month = prefs.getInt("month", Calendar.getInstance().get(Calendar.MONTH))
+                
                 if (action == "PREV_MONTH") {
                     month--
                     if (month < 0) { month = 11; year-- }
@@ -69,6 +70,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 }
                 prefs.edit().putInt("year", year).putInt("month", month).apply()
                 Log.d(TAG, "Month changed to: $year-$month")
+                
                 for (appWidgetId in allWidgetIds) {
                     try {
                         updateAppWidget(context, appWidgetManager, appWidgetId)
@@ -83,37 +85,81 @@ class RosterWidgetProvider : AppWidgetProvider() {
     }
 
     companion object {
+        // 安全讀取 Float（防禦 SharedPreferences 型別錯誤）
+        private fun getSafeFloat(sp: SharedPreferences, key: String, def: Float): Float {
+            return try {
+                sp.getFloat(key, def)
+            } catch (e: Exception) {
+                try {
+                    sp.getLong(key, def.toLong()).toFloat()
+                } catch (e2: Exception) {
+                    try {
+                        sp.getInt(key, def.toInt()).toFloat()
+                    } catch (e3: Exception) {
+                        def
+                    }
+                }
+            }
+        }
+
+        // 安全讀取 Int（防禦 SharedPreferences 型別錯誤）
+        private fun getSafeInt(sp: SharedPreferences, key: String, def: Int): Int {
+            return try {
+                sp.getInt(key, def)
+            } catch (e: Exception) {
+                try {
+                    sp.getLong(key, def.toLong()).toInt()
+                } catch (e2: Exception) {
+                    def
+                }
+            }
+        }
+
+        // 安全讀取 Long（防禦 SharedPreferences 型別錯誤）
+        private fun getSafeLong(sp: SharedPreferences, key: String, def: Long): Long {
+            return try {
+                sp.getLong(key, def)
+            } catch (e: Exception) {
+                try {
+                    sp.getInt(key, def.toInt()).toLong()
+                } catch (e2: Exception) {
+                    def
+                }
+            }
+        }
+
         fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
             val views = RemoteViews(context.packageName, R.layout.widget_layout)
             try {
-                // 讀取當前顯示的年月
+                // 1. 讀取當前顯示的年月
                 val widgetPrefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
                 val cal = Calendar.getInstance()
                 val year = widgetPrefs.getInt("year", cal.get(Calendar.YEAR))
                 val month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH))
                 val monthNames = arrayOf("1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月")
 
-                // 讀取 Flutter 傳來的設定
+                // 2. 讀取 Flutter 傳來的設定 (修正鍵名與預設值)
                 val fp: SharedPreferences = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                val widgetFontSize = fp.getFloat("flutter.widgetFontSize", 11f)
-                val widgetTextColor = fp.getLong("flutter.widgetTextColor", 0xFF333333).toInt()
-                val widgetBgColor = fp.getLong("flutter.widgetBgColor", 0xFFFFFFFF).toInt()
-                val todayBgColor = fp.getLong("flutter.today_bg", 0xFFFFF9C4).toInt()
+                val widgetFontSize = getSafeFloat(fp, "flutter.widget_font_size", 55f) // 預設加大到 55
+                val widgetTextColor = getSafeInt(fp, "flutter.widget_text_color", 0xFF333333.toInt())
+                val widgetBgColor = getSafeInt(fp, "flutter.widgetBgColor", 0xFFFFFFFF.toInt())
+                val todayBgColor = getSafeInt(fp, "flutter.today_bg", 0xFFFFF9C4.toInt())
 
-                // 讀取排更資料
+                Log.d(TAG, "Loaded Settings -> FontSize: $widgetFontSize, TextColor: $widgetTextColor")
+
+                // 3. 讀取排更資料
                 val rosterJsonStr = fp.getString("flutter.roster_json", "{}") ?: "{}"
                 val defsJsonStr = fp.getString("flutter.defs_json", "{}") ?: "{}"
-                Log.d(TAG, "rosterJson length: ${rosterJsonStr.length}")
-                Log.d(TAG, "defsJson length: ${defsJsonStr.length}")
-
+                
                 val rosterJson = try { JSONObject(rosterJsonStr) } catch (e: Exception) { JSONObject() }
                 val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
 
-                // 更新標題
+                // 4. 更新標題
                 views.setTextViewText(R.id.tv_month_title, "${year}年${monthNames[month]}")
                 views.setTextColor(R.id.tv_month_title, widgetTextColor)
+                views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, widgetFontSize * 0.8f) // 標題稍小一點以免換行
 
-                // 計算日曆格子
+                // 5. 計算日曆格子
                 val calendar = Calendar.getInstance()
                 calendar.set(year, month, 1)
                 val firstDayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
@@ -121,7 +167,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 val maxDaysInMonth = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
                 val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
 
-                // 更新 42 格
+                // 6. 更新 42 格
                 for (i in 0 until 42) {
                     val dayIndex = i - startOffset + 1
                     val tvId = context.resources.getIdentifier("day$i", "id", context.packageName)
@@ -136,6 +182,8 @@ class RosterWidgetProvider : AppWidgetProvider() {
                             }
                             views.setTextViewText(tvId, displayText)
                             views.setTextColor(tvId, widgetTextColor)
+                            
+                            // 設定字體大小
                             views.setTextViewTextSize(tvId, TypedValue.COMPLEX_UNIT_SP, widgetFontSize)
                             views.setViewVisibility(tvId, View.VISIBLE)
 
@@ -163,11 +211,11 @@ class RosterWidgetProvider : AppWidgetProvider() {
                                 Log.e(TAG, "setBackgroundColor cell $i error")
                             }
 
-                            // 點擊打開 App
+                            // 點擊打開 App (使用唯一的 requestCode 避免點擊錯亂)
                             val intent = Intent(context, MainActivity::class.java)
                             intent.putExtra("selected_date", dateStr)
                             val pi = PendingIntent.getActivity(
-                                context, i, intent,
+                                context, appWidgetId * 1000 + i, intent,
                                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                             )
                             views.setOnClickPendingIntent(tvId, pi)
@@ -180,14 +228,14 @@ class RosterWidgetProvider : AppWidgetProvider() {
                     }
                 }
 
-                // 設定根背景
+                // 7. 設定根背景
                 try {
                     views.setInt(R.id.widget_root, "setBackgroundColor", widgetBgColor)
                 } catch (e: Exception) {
                     Log.e(TAG, "set root bg error")
                 }
 
-                // 按鈕 PendingIntent
+                // 8. 按鈕 PendingIntent
                 val prevIntent = Intent(context, RosterWidgetProvider::class.java).setAction("PREV_MONTH")
                 views.setOnClickPendingIntent(
                     R.id.btn_prev,
