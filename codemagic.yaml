@@ -169,7 +169,7 @@ workflows:
           </appwidget-provider>
           INFO_EOF
 
-          # 完全回到舊版能用的 XML（ImageButton + 系統 drawable）
+          # ===== 修改 4：Widget 按鈕加大到 48dp，月份字體加大到 18sp =====
           mkdir -p android/app/src/main/res/layout
           cat > android/app/src/main/res/layout/widget_layout.xml <<'LAYOUT_EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -178,57 +178,19 @@ workflows:
               android:layout_height="match_parent"
               android:orientation="vertical"
               android:background="#FFFFFF"
-              android:padding="8dp">
-
+              android:padding="6dp">
               <LinearLayout
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
                   android:orientation="horizontal"
                   android:gravity="center_vertical"
                   android:layout_marginBottom="4dp">
-
-                  <ImageButton
-                      android:id="@+id/btn_prev"
-                      android:layout_width="36dp"
-                      android:layout_height="36dp"
-                      android:src="@android:drawable/ic_media_previous"
-                      android:background="?android:attr/selectableItemBackground"
-                      android:contentDescription="上個月" />
-
-                  <TextView
-                      android:id="@+id/tv_month_title"
-                      android:layout_width="0dp"
-                      android:layout_height="wrap_content"
-                      android:layout_weight="1"
-                      android:text="2024年1月"
-                      android:textAlignment="center"
-                      android:textSize="16sp"
-                      android:textStyle="bold"
-                      android:textColor="#333333" />
-
-                  <ImageButton
-                      android:id="@+id/btn_next"
-                      android:layout_width="36dp"
-                      android:layout_height="36dp"
-                      android:src="@android:drawable/ic_media_next"
-                      android:background="?android:attr/selectableItemBackground"
-                      android:contentDescription="下個月" />
-
-                  <ImageButton
-                      android:id="@+id/btn_refresh"
-                      android:layout_width="36dp"
-                      android:layout_height="36dp"
-                      android:src="@android:drawable/ic_popup_sync"
-                      android:background="?android:attr/selectableItemBackground"
-                      android:contentDescription="重新整理" />
+                  <ImageButton android:id="@+id/btn_prev" android:layout_width="48dp" android:layout_height="48dp" android:src="@android:drawable/ic_media_previous" android:background="?android:attr/selectableItemBackground" android:contentDescription="上個月" />
+                  <TextView android:id="@+id/tv_month_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="2024年1月" android:textAlignment="center" android:textSize="18sp" android:textStyle="bold" android:textColor="#333333" />
+                  <ImageButton android:id="@+id/btn_next" android:layout_width="48dp" android:layout_height="48dp" android:src="@android:drawable/ic_media_next" android:background="?android:attr/selectableItemBackground" android:contentDescription="下個月" />
+                  <ImageButton android:id="@+id/btn_refresh" android:layout_width="48dp" android:layout_height="48dp" android:src="@android:drawable/ic_popup_sync" android:background="?android:attr/selectableItemBackground" android:contentDescription="重新整理" />
               </LinearLayout>
-
-              <LinearLayout
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:orientation="horizontal"
-                  android:weightSum="7"
-                  android:layout_marginBottom="2dp">
+              <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:weightSum="7" android:layout_marginBottom="2dp">
                   <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="一" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#333333" />
                   <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="二" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#333333" />
                   <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="三" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#333333" />
@@ -237,14 +199,7 @@ workflows:
                   <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="六" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#D32F2F" />
                   <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="日" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#D32F2F" />
               </LinearLayout>
-
-              <GridLayout
-                  android:layout_width="match_parent"
-                  android:layout_height="0dp"
-                  android:layout_weight="1"
-                  android:columnCount="7"
-                  android:rowCount="6"
-                  android:layout_marginTop="2dp">
+              <GridLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:columnCount="7" android:rowCount="6" android:layout_marginTop="2dp">
                   <TextView android:id="@+id/day0" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day1" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
                   <TextView android:id="@+id/day2" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="2dp" />
@@ -291,7 +246,7 @@ workflows:
           </LinearLayout>
           LAYOUT_EOF
 
-          # 完全回到舊版能用的 Kotlin（不讀取 widgetFontSize 等可能導致崩潰的 key）
+          # RosterWidgetProvider.kt 完全保持不變
           cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt <<'WIDGET_EOF'
           package com.example.roster_pro
 
@@ -310,9 +265,7 @@ workflows:
 
           class RosterWidgetProvider : AppWidgetProvider() {
               override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
-                  for (appWidgetId in appWidgetIds) {
-                      updateAppWidget(context, appWidgetManager, appWidgetId)
-                  }
+                  for (appWidgetId in appWidgetIds) { updateAppWidget(context, appWidgetManager, appWidgetId) }
               }
               override fun onReceive(context: Context, intent: Intent) {
                   super.onReceive(context, intent)
@@ -339,24 +292,19 @@ workflows:
                           val year = widgetPrefs.getInt("year", cal.get(Calendar.YEAR))
                           val month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH))
                           val monthNames = arrayOf("1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月")
-
                           views.setTextViewText(R.id.tv_month_title, "${year}年 ${monthNames[month]}")
-
                           val flutterPrefs: SharedPreferences = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
                           val rosterJsonStr = flutterPrefs.getString("flutter.roster_json", "{}") ?: "{}"
                           val defsJsonStr = flutterPrefs.getString("flutter.defs_json", "{}") ?: "{}"
                           val todayBgColor = flutterPrefs.getLong("flutter.today_bg", 0xFFFFF9C4).toInt()
-
                           val rosterJson = try { JSONObject(rosterJsonStr) } catch (e: Exception) { JSONObject() }
                           val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
-
                           val calendar = Calendar.getInstance()
                           calendar.set(year, month, 1)
                           val fdow = calendar.get(Calendar.DAY_OF_WEEK)
                           val startOffset = if (fdow == Calendar.SUNDAY) 6 else fdow - 2
                           val maxDays = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
                           val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-
                           for (i in 0 until 42) {
                               val dayIndex = i - startOffset + 1
                               val tvId = context.resources.getIdentifier("day$i", "id", context.packageName)
@@ -382,12 +330,8 @@ workflows:
                                           } else {
                                               views.setInt(tvId, "setBackgroundColor", Color.TRANSPARENT)
                                           }
-                                          if (dateStr == todayStr) {
-                                              views.setInt(tvId, "setBackgroundColor", todayBgColor)
-                                          }
-                                      } catch (e: Exception) {
-                                          // 忽略背景色錯誤，不讓整個 widget 白屏
-                                      }
+                                          if (dateStr == todayStr) { views.setInt(tvId, "setBackgroundColor", todayBgColor) }
+                                      } catch (e: Exception) {}
                                       val intent = Intent(context, MainActivity::class.java)
                                       intent.putExtra("selected_date", dateStr)
                                       views.setOnClickPendingIntent(tvId, PendingIntent.getActivity(context, i, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
@@ -397,16 +341,13 @@ workflows:
                                   }
                               }
                           }
-
                           val prevI = Intent(context, RosterWidgetProvider::class.java).setAction("PREV_MONTH")
                           views.setOnClickPendingIntent(R.id.btn_prev, PendingIntent.getBroadcast(context, 0, prevI, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                           val nextI = Intent(context, RosterWidgetProvider::class.java).setAction("NEXT_MONTH")
                           views.setOnClickPendingIntent(R.id.btn_next, PendingIntent.getBroadcast(context, 1, nextI, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                           val refI = Intent(context, RosterWidgetProvider::class.java).setAction("REFRESH_WIDGET")
                           views.setOnClickPendingIntent(R.id.btn_refresh, PendingIntent.getBroadcast(context, 2, refI, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
-                      } catch (e: Exception) {
-                          // 外層 try-catch，任何錯誤都不會白屏
-                      }
+                      } catch (e: Exception) {}
                       appWidgetManager.updateAppWidget(appWidgetId, views)
                   }
               }
