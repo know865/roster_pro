@@ -183,13 +183,14 @@ class MainPageState extends State<MainPage> {
   String _rosterAccountName = '';
   Map<String, String> _googleEventIdMap = {};
 
+  // Widget 設定（不儲存到 SharedPreferences，避免 Kotlin 讀取錯誤）
   double widgetFontSize = 11;
   int widgetTextColor = 0xFF333333;
   int widgetBgColor = 0xFFFFFFFF;
 
   String appVersion = '載入中...';
 
-  // 修改 2：Widget 更新加入延遲
+  // ===== 修改：updateWidget 完全回到舊版機制（只存必要 Key） =====
   Future<void> updateWidget() async {
     try {
       String todayKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -200,16 +201,12 @@ class MainPageState extends State<MainPage> {
       await HomeWidget.saveWidgetData('extraType', rosterExtraType[todayKey] ?? '');
       await HomeWidget.saveWidgetData('today_bg', todayBgColor.value);
       await HomeWidget.saveWidgetData('today_border', todayBorderColor.value);
+      // 關鍵：儲存排更數據
       await HomeWidget.saveWidgetData('roster_json', jsonEncode(roster));
       await HomeWidget.saveWidgetData('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
-      await HomeWidget.saveWidgetData('widgetFontSize', widgetFontSize);
-      await HomeWidget.saveWidgetData('widgetTextColor', widgetTextColor);
-      await HomeWidget.saveWidgetData('widgetBgColor', widgetBgColor);
       DateTime now = DateTime.now();
       await HomeWidget.saveWidgetData('initial_year', now.year);
       await HomeWidget.saveWidgetData('initial_month', now.month);
-      // 修改：儲存後稍等再刷新，確保 Kotlin 讀到最新
-      await Future.delayed(const Duration(milliseconds: 300));
       await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
     } catch (e) {
       print("Widget update error: $e");
@@ -307,9 +304,6 @@ class MainPageState extends State<MainPage> {
       _lastBackupPath = sp.getString('lastBackupPath') ?? '未備份';
       todayBgColor = Color(sp.getInt('todayBg') ?? 0xFFFFF9C4);
       todayBorderColor = Color(sp.getInt('todayBorder') ?? 0xFFFF9800);
-      widgetFontSize = sp.getDouble('widgetFontSize') ?? 11;
-      widgetTextColor = sp.getInt('widgetTextColor') ?? 0xFF333333;
-      widgetBgColor = sp.getInt('widgetBgColor') ?? 0xFFFFFFFF;
       showLunar = sp.getBool('showLunar') ?? true;
     });
     updateWidget();
@@ -345,9 +339,6 @@ class MainPageState extends State<MainPage> {
     sp.setInt('todayBorder', todayBorderColor.value);
     sp.setString('roster_json', jsonEncode(roster));
     sp.setString('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
-    sp.setDouble('widgetFontSize', widgetFontSize);
-    sp.setInt('widgetTextColor', widgetTextColor);
-    sp.setInt('widgetBgColor', widgetBgColor);
     sp.setBool('showLunar', showLunar);
     updateWidget();
     if (autoSync && googleSyncEnabled && !_isSyncing) { _syncToGoogle(silent: true); }
@@ -491,13 +482,7 @@ class MainPageState extends State<MainPage> {
     await _pickGoogleCalendarDialog();
   }
 
-  // ===== 修改 1 + 3：同步邏輯徹底重寫 =====
-  // 策略：
-  // 1. 查詢**全部 roster 內日期**範圍（不限今天）
-  // 2. 用 start 的時間（不依賴 description）建立「日期 → eventId 列表」
-  // 3. 每日期只保留 1 個 eventId，其他刪除
-  // 4. 對 roster 每一天，一律「先刪該日所有事件，再新建 1 個」
-  //    （不使用 createOrUpdateEvent 的 eventId 參數，因為它在 Android 上不可靠）
+  // ===== 修改 3：同步邏輯徹底重寫 =====
   Future<void> _syncToGoogle({bool silent = false}) async {
     if (!googleSyncEnabled && !silent) {
       bool? en = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
@@ -518,28 +503,13 @@ class MainPageState extends State<MainPage> {
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) await _ensureCalendar();
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) throw '未選真 Google 日曆';
 
-      // 用 roster 中最早和最晚日期作為範圍
-      DateTime minDate = DateTime(2035, 12, 31);
-      DateTime maxDate = DateTime(2020, 1, 1);
-      if (roster.isNotEmpty) {
-        for (var entry in roster.keys) {
-          DateTime d = DateFormat('yyyy-MM-dd').parse(entry);
-          if (d.isBefore(minDate)) minDate = d;
-          if (d.isAfter(maxDate)) maxDate = d;
-        }
-      } else {
-        minDate = DateTime.now().subtract(const Duration(days: 365));
-        maxDate = DateTime.now().add(const Duration(days: 365));
-      }
-      minDate = minDate.subtract(const Duration(days: 7));
-      maxDate = maxDate.add(const Duration(days: 7));
-
+      // 掃描 2020-2035
       var existingEvents = await _calendarPlugin.retrieveEvents(
         _rosterCalendarId!,
-        RetrieveEventsParams(startDate: minDate, endDate: maxDate),
+        RetrieveEventsParams(startDate: DateTime(2020, 1, 1), endDate: DateTime(2035, 12, 31)),
       );
 
-      // 建立「日期 → eventId 列表」
+      // 用事件開始日期為 key
       Map<String, List<String>> dateToEventIds = {};
       for (var e in existingEvents.data ?? []) {
         String? eventId = e.eventId;
@@ -552,40 +522,26 @@ class MainPageState extends State<MainPage> {
         dateToEventIds.putIfAbsent(dateKey, () => []).add(eventId);
       }
 
-      int delDup = 0;
-      // 對每個日期：若已在 _googleEventIdMap 中，保留對應的 eventId，刪除其他
-      // 若不在 map 中，刪除全部（之後會重建）
+      int delAll = 0;
+      // 對每個日期，刪除所有已存在的事件（含舊的）
       for (var entry in dateToEventIds.entries) {
-        List<String> ids = entry.value;
-        String? keepId = _googleEventIdMap[entry.key];
-        for (var eid in ids) {
-          if (eid != keepId) {
-            try {
-              await _calendarPlugin.deleteEvent(_rosterCalendarId!, eid);
-              delDup++;
-            } catch (_) {}
-          }
+        for (var eid in entry.value) {
+          try {
+            await _calendarPlugin.deleteEvent(_rosterCalendarId!, eid);
+            delAll++;
+          } catch (_) {}
         }
       }
 
-      // 刪除「roster 中不存在」的 [RosterPro] 事件
-      int delOrphan = 0;
-      for (var entry in dateToEventIds.entries) {
-        if (!roster.containsKey(entry.key)) {
-          for (var eid in entry.value) {
-            try {
-              await _calendarPlugin.deleteEvent(_rosterCalendarId!, eid);
-              delOrphan++;
-            } catch (_) {}
-          }
-          _googleEventIdMap.remove(entry.key);
-        }
-      }
+      _googleEventIdMap.clear();
+      var sp = await SharedPreferences.getInstance();
+      sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
 
-      await Future.delayed(const Duration(milliseconds: 500));
+      // 等待 Google 伺服器完成刪除
+      await Future.delayed(const Duration(milliseconds: 800));
 
-      int add = 0, failed = 0;
-
+      int add = 0;
+      // 重建所有 roster 日期的事件
       for (var entry in roster.entries) {
         var code = entry.value;
         var def = defs[code];
@@ -606,52 +562,35 @@ class MainPageState extends State<MainPage> {
           title = '${def.code} ${def.start}-${def.end}${note.isNotEmpty ? ' | $note' : ''}';
         }
 
-        // 先刪除該日期已存在的事件（若之前的 map 有 ID）
-        String? existingId = _googleEventIdMap[dateKey];
-        if (existingId != null) {
-          try {
-            await _calendarPlugin.deleteEvent(_rosterCalendarId!, existingId);
-          } catch (_) {}
-          _googleEventIdMap.remove(dateKey);
-        }
-        // 若該日期還有多個殘留事件（可能上次同步失敗留下），從 dateToEventIds 刪除
-        if (dateToEventIds.containsKey(dateKey)) {
-          for (var eid in dateToEventIds[dateKey]!) {
-            try {
-              await _calendarPlugin.deleteEvent(_rosterCalendarId!, eid);
-            } catch (_) {}
-          }
-        }
-
-        tz.TZDateTime evStart, evEnd;
+        Event ev;
         if (allDayFlag) {
-          evStart = tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0);
-          evEnd = tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59);
+          ev = Event(_rosterCalendarId!, title: title, description: desc,
+            start: tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0),
+            end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59),
+            allDay: true);
         } else {
           DateTime s = DateTime(date.year, date.month, date.day, int.parse(def.start.split(':')[0]), int.parse(def.start.split(':')[1]));
           DateTime ee = DateTime(date.year, date.month, date.day, int.parse(def.end.split(':')[0]), int.parse(def.end.split(':')[1]));
           if (ee.isBefore(s)) ee = ee.add(const Duration(days: 1));
-          evStart = tz.TZDateTime(tz.local, s.year, s.month, s.day, s.hour, s.minute);
-          evEnd = tz.TZDateTime(tz.local, ee.year, ee.month, ee.day, ee.hour, ee.minute);
+          ev = Event(_rosterCalendarId!, title: title, description: desc,
+            start: tz.TZDateTime(tz.local, s.year, s.month, s.day, s.hour, s.minute),
+            end: tz.TZDateTime(tz.local, ee.year, ee.month, ee.day, ee.hour, ee.minute),
+            allDay: false);
         }
 
-        Event ev = Event(_rosterCalendarId!, title: title, description: desc, start: evStart, end: evEnd, allDay: allDayFlag);
         var res = await _calendarPlugin.createOrUpdateEvent(ev);
         if (res != null && res.isSuccess && res.data != null) {
           _googleEventIdMap[dateKey] = res.data!;
           add++;
-        } else {
-          failed++;
         }
       }
 
-      var sp = await SharedPreferences.getInstance();
       sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
       updateWidget();
 
       if (!silent && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('同步完成：新增$add 清重複$delDup 清孤兒$delOrphan${failed > 0 ? ' 失敗$failed' : ''}'),
+          content: Text('同步完成：刪除$delAll 重建$add'),
           duration: const Duration(seconds: 4),
         ));
       }
@@ -663,11 +602,10 @@ class MainPageState extends State<MainPage> {
   }
 
   // ===== 修改 1：全清重建徹底重寫 =====
-  // 策略：直接掃描 2020~2035，刪除所有 [RosterPro] 事件，再重建
   Future<void> _forceFullResync() async {
     bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
       title: const Text('⚠️ 全清重建確認'),
-      content: const Text('這會刪除 Google 日曆上「所有」[RosterPro] 事件（包含 2020-2035 所有日期），並根據 App 現有排班重新建立。\n\n✅ App 排班資料不受影響\n✅ 你其他的 Google 行程不會被刪除\n\n確定要執行嗎？'),
+      content: const Text('這會刪除 Google 日曆上「所有」[RosterPro] 事件（2020-2035），並根據 App 現有排班重新建立。\n\n✅ App 排班資料不受影響\n✅ 你其他 Google 行程不會被刪除\n\n確定要執行嗎？'),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
         FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('確定執行'))
@@ -682,13 +620,10 @@ class MainPageState extends State<MainPage> {
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) await _ensureCalendar();
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) throw '未選真 Google 日曆';
 
-      // 擴大範圍：2020-01-01 ~ 2035-12-31
+      // 掃描 2020-2035 全部
       var existingEvents = await _calendarPlugin.retrieveEvents(
         _rosterCalendarId!,
-        RetrieveEventsParams(
-          startDate: DateTime(2020, 1, 1),
-          endDate: DateTime(2035, 12, 31),
-        ),
+        RetrieveEventsParams(startDate: DateTime(2020, 1, 1), endDate: DateTime(2035, 12, 31)),
       );
 
       int del = 0;
@@ -706,7 +641,7 @@ class MainPageState extends State<MainPage> {
       var sp = await SharedPreferences.getInstance();
       sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
 
-      // 等待 Google 伺服器完成刪除
+      // 等待 Google 伺服器
       await Future.delayed(const Duration(seconds: 2));
 
       int add = 0;
@@ -852,7 +787,7 @@ class MainPageState extends State<MainPage> {
     String? dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇備份位置');
     if (dir == null) return;
     String fileName = 'roster_pro_full_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.json';
-    var backup = {'version': '7.1', 'exportTime': DateTime.now().toIso8601String(), 'roster': roster, 'note': rosterNote, 'extraType': rosterExtraType, 'roOt': rosterOt, 'roEx': rosterExtra, 'roExH': rosterExtraHrs, 'defs': defs.map((k, v) => MapEntry(k, v.toJson())), 'pattern': pattern, 'carry': carry, 'cName': customName, 'stdWeek': standardWeeklyHours, 'otRate': overtimeRate, 'extraNewV36': extraAllowances.map((e) => e.toJson()).toList(), 'calFont': calendarFontSize, 'savedPatterns': savedPatterns.map((e) => e.toJson()).toList(), 'holidayRegion': holidayRegion, 'manualHolidays': manualHolidays, 'rosterCalId': _rosterCalendarId, 'rosterCalName': _rosterCalendarName, 'rosterAccName': _rosterAccountName, 'googleEventIdMap': _googleEventIdMap, 'gSync': googleSyncEnabled, 'gAuto': autoSync, 'todayBg': todayBgColor.value, 'todayBorder': todayBorderColor.value, 'widgetFontSize': widgetFontSize, 'widgetTextColor': widgetTextColor, 'widgetBgColor': widgetBgColor, 'showLunar': showLunar};
+    var backup = {'version': '7.3', 'exportTime': DateTime.now().toIso8601String(), 'roster': roster, 'note': rosterNote, 'extraType': rosterExtraType, 'roOt': rosterOt, 'roEx': rosterExtra, 'roExH': rosterExtraHrs, 'defs': defs.map((k, v) => MapEntry(k, v.toJson())), 'pattern': pattern, 'carry': carry, 'cName': customName, 'stdWeek': standardWeeklyHours, 'otRate': overtimeRate, 'extraNewV36': extraAllowances.map((e) => e.toJson()).toList(), 'calFont': calendarFontSize, 'savedPatterns': savedPatterns.map((e) => e.toJson()).toList(), 'holidayRegion': holidayRegion, 'manualHolidays': manualHolidays, 'rosterCalId': _rosterCalendarId, 'rosterCalName': _rosterCalendarName, 'rosterAccName': _rosterAccountName, 'googleEventIdMap': _googleEventIdMap, 'gSync': googleSyncEnabled, 'gAuto': autoSync, 'todayBg': todayBgColor.value, 'todayBorder': todayBorderColor.value, 'showLunar': showLunar};
     var f = File('$dir/$fileName');
     await f.writeAsString(jsonEncode(backup));
     setState(() => _lastBackupPath = '$dir/$fileName');
@@ -892,9 +827,6 @@ class MainPageState extends State<MainPage> {
         if (j['gAuto'] != null) autoSync = j['gAuto'];
         if (j['todayBg'] != null) todayBgColor = Color(j['todayBg']);
         if (j['todayBorder'] != null) todayBorderColor = Color(j['todayBorder']);
-        if (j['widgetFontSize'] != null) widgetFontSize = (j['widgetFontSize'] as num).toDouble();
-        if (j['widgetTextColor'] != null) widgetTextColor = j['widgetTextColor'];
-        if (j['widgetBgColor'] != null) widgetBgColor = j['widgetBgColor'];
         if (j['showLunar'] != null) showLunar = j['showLunar'];
       });
       save();
@@ -1079,13 +1011,11 @@ class MainPageState extends State<MainPage> {
   }
 
   // ===== 修改 6：智能排班重寫 =====
-  // 邏輯：選定模式 → 選開始日期 → 自動排 4 * (7 * n) 天，其中 n = 模式行數
   Future<void> smartSchedule() async {
     if (savedPatterns.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請先建立至少一個已存模式')));
       return;
     }
-    // 選模式
     int? selectedIdx = await showDialog<int>(context: context, builder: (ctx) {
       return AlertDialog(
         title: const Text('選擇要使用的模式'),
@@ -1105,13 +1035,12 @@ class MainPageState extends State<MainPage> {
     var selectedPattern = savedPatterns[selectedIdx].data;
     int rows = selectedPattern.length;
     int cycleDays = rows * 7;
-    int totalDays = 4 * cycleDays; // 4 * 7 * n 天
+    int totalDays = 4 * cycleDays;
 
-    // 只選開始日期（用 showDatePicker）
-    DateTime initialDate = DateTime.now();
+    // 只選開始日期
     DateTime? startDate = await showDatePicker(
       context: context,
-      initialDate: initialDate,
+      initialDate: DateTime.now(),
       firstDate: DateTime(2023),
       lastDate: DateTime(2035),
       helpText: '選擇開始日期',
@@ -1138,7 +1067,6 @@ class MainPageState extends State<MainPage> {
     ));
     if (confirm != true) return;
 
-    // 攤平模式：從第一行開始
     List<String> flat = [];
     for (var row in selectedPattern) {
       flat.addAll(row);
@@ -1155,7 +1083,7 @@ class MainPageState extends State<MainPage> {
     setState(() => tab = 0);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('智能排班完成：$totalDays 天\n${DateFormat('yyyy-MM-dd').format(startDate)} ~ ${DateFormat('yyyy-MM-dd').format(endDate)}'),
+        content: Text('智能排班完成：$totalDays 天'),
         duration: const Duration(seconds: 4),
       ));
     }
@@ -1261,23 +1189,21 @@ class MainPageState extends State<MainPage> {
                                     border: isToday ? Border.all(width: 2.5, color: todayBorderColor) : sel ? Border.all(width: 2, color: Colors.deepPurple) : null
                                   ),
                                   child: Column(mainAxisAlignment: MainAxisAlignment.start, children: [
-                                    const SizedBox(height: 2),
-                                    // 修改 4：數字用 FittedBox，避免擠壓
+                                    const SizedBox(height: 1),
                                     FittedBox(fit: BoxFit.scaleDown, child: Text('${day.day}', style: TextStyle(fontWeight: isToday ? FontWeight.w900 : FontWeight.bold, fontSize: calendarFontSize, color: inM ? Colors.black : Colors.grey))),
-                                    // 班次 chip 縮小
+                                    // 修改 4：班次 chip 縮小 + 農曆用 Expanded
                                     if (code != null)
                                       Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                                        padding: const EdgeInsets.symmetric(horizontal: 1),
                                         child: FittedBox(
                                           fit: BoxFit.scaleDown,
                                           child: Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-                                            decoration: BoxDecoration(color: def?.color ?? Colors.orange, borderRadius: BorderRadius.circular(5)),
+                                            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 0.5),
+                                            decoration: BoxDecoration(color: def?.color ?? Colors.orange, borderRadius: BorderRadius.circular(4)),
                                             child: Text(code, style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
                                           ),
                                         ),
                                       ),
-                                    // 農曆：用 Expanded + FittedBox 確保不遮蓋
                                     if (showLunar && lunarText.isNotEmpty && inM)
                                       Expanded(
                                         child: Center(
@@ -1286,13 +1212,14 @@ class MainPageState extends State<MainPage> {
                                             child: Text(lunarText, style: TextStyle(fontSize: 8, color: Colors.grey[700])),
                                           ),
                                         ),
-                                      ),
-                                    // 底部小點
+                                      )
+                                    else
+                                      const Spacer(),
                                     Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                                      if (isHol) Container(width: 4, height: 4, margin: const EdgeInsets.symmetric(horizontal: 1), decoration: BoxDecoration(color: holidayDotColor, shape: BoxShape.circle)),
-                                      if (hasNote) Container(width: 4, height: 4, margin: const EdgeInsets.symmetric(horizontal: 1), decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle)),
+                                      if (isHol) Container(width: 4, height: 4, margin: const EdgeInsets.symmetric(horizontal: 0.5), decoration: BoxDecoration(color: holidayDotColor, shape: BoxShape.circle)),
+                                      if (hasNote) Container(width: 4, height: 4, margin: const EdgeInsets.symmetric(horizontal: 0.5), decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle)),
                                     ]),
-                                    const SizedBox(height: 2),
+                                    const SizedBox(height: 1),
                                   ])
                                 )
                               );
@@ -1749,12 +1676,12 @@ class MainPageState extends State<MainPage> {
     double otAmount = ot * overtimeRate;
     double totalAllow = allow + otAmount + extraAllowances.fold(0.0, (a, b) => a + b.amount);
     return SafeArea(child: ListView(padding: const EdgeInsets.all(12), children: [
-      // 修改 5：改用 Expanded 讓兩邊都能顯示
+      // 修改 5：Expanded 讓按鈕不被擠壓
       Row(children: [
         FilledButton.icon(
           onPressed: exportReport,
           icon: const Icon(Icons.ios_share),
-          label: const Text('匯出報表'),
+          label: const Text('匯出'),
           style: FilledButton.styleFrom(backgroundColor: Colors.deepPurple),
         ),
         const SizedBox(width: 8),
@@ -1920,7 +1847,7 @@ class MainPageState extends State<MainPage> {
       const Text('日曆同步', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
         SwitchListTile(title: const Text('啟用日曆同步'), subtitle: Text(googleSyncEnabled ? '已授權' : '未授權'), value: googleSyncEnabled, onChanged: (v) async { if (v) { await _requestGooglePerm(); } else { setState(() => googleSyncEnabled = false); save(); } }),
-        SwitchListTile(title: const Text('自動同步(增量去重)'), value: autoSync, onChanged: googleSyncEnabled ? (v) { setState(() => autoSync = v); save(); } : null),
+        SwitchListTile(title: const Text('自動同步(全刪重建)'), value: autoSync, onChanged: googleSyncEnabled ? (v) { setState(() => autoSync = v); save(); } : null),
         Row(children: [
           Expanded(child: OutlinedButton.icon(onPressed: googleSyncEnabled ? () => _syncToGoogle() : null, icon: const Icon(Icons.sync), label: const Text('手動同步'))),
           const SizedBox(width: 8),
@@ -1936,7 +1863,7 @@ class MainPageState extends State<MainPage> {
           decoration: BoxDecoration(color: Colors.red.withOpacity(0.08), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.withOpacity(0.3))),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('⚠️ 全清重建（救援用）', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 13)),
-            const Text('• 只刪除 [RosterPro] 事件\n• 涵蓋 2020-2035 所有日期\n• 你其他的 Google 行程不會被刪除', style: TextStyle(fontSize: 10, color: Colors.black54)),
+            const Text('• 刪除 2020-2035 所有 [RosterPro] 事件\n• App 排班資料不受影響', style: TextStyle(fontSize: 10, color: Colors.black54)),
             const SizedBox(height: 8),
             SizedBox(width: double.infinity, child: FilledButton.icon(
               onPressed: googleSyncEnabled ? _forceFullResync : null,
@@ -2032,47 +1959,6 @@ class MainPageState extends State<MainPage> {
           const Text('最近備份路徑:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
           Text(_lastBackupPath, style: const TextStyle(fontSize: 10, color: Colors.black87)),
         ]))
-      ]))),
-      const SizedBox(height: 16),
-      const Text('桌面小工具設定', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-      Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
-        ListTile(
-          leading: const Icon(Icons.text_fields),
-          title: const Text('字體大小'),
-          subtitle: Slider(value: widgetFontSize, min: 8, max: 20, divisions: 12, label: widgetFontSize.toStringAsFixed(0), onChanged: (v) { setState(() => widgetFontSize = v); }, onChangeEnd: (v) { save(); }),
-        ),
-        ListTile(
-          leading: const Icon(Icons.color_lens),
-          title: const Text('文字顏色'),
-          trailing: CircleAvatar(backgroundColor: Color(widgetTextColor)),
-          onTap: () {
-            showDialog(context: context, builder: (ctx) => AlertDialog(
-              title: const Text('選擇文字顏色'),
-              content: Wrap(spacing: 8, children: [Colors.black, Colors.white, Colors.deepPurple, Colors.blue, Colors.green, Colors.red, Colors.orange].map((c) => GestureDetector(onTap: () { setState(() => widgetTextColor = c.value); save(); Navigator.pop(ctx); }, child: Container(width: 40, height: 40, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all())))).toList())
-            ));
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.wallpaper),
-          title: const Text('小工具背景顏色'),
-          trailing: CircleAvatar(backgroundColor: Color(widgetBgColor)),
-          onTap: () {
-            showDialog(context: context, builder: (ctx) => AlertDialog(
-              title: const Text('選擇背景顏色'),
-              content: Wrap(spacing: 8, children: [Colors.white, Colors.grey.shade100, Colors.grey.shade200, Colors.yellow.shade50, Colors.blue.shade50, Colors.green.shade50, Colors.pink.shade50].map((c) => GestureDetector(onTap: () { setState(() => widgetBgColor = c.value); save(); Navigator.pop(ctx); }, child: Container(width: 40, height: 40, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all())))).toList())
-            ));
-          },
-        ),
-        const SizedBox(height: 8),
-        SizedBox(width: double.infinity, child: FilledButton.tonal(
-          onPressed: () async {
-            await updateWidget();
-            await Future.delayed(const Duration(milliseconds: 800));
-            await updateWidget();
-            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已刷新桌面小工具')));
-          },
-          child: const Text('刷新小工具'),
-        )),
       ]))),
       const SizedBox(height: 16),
       const Text('應用資訊', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
