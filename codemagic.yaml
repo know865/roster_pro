@@ -8,6 +8,12 @@ workflows:
       java: 17
       groups:
         - keystore_credentials
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
     scripts:
       - name: Set up Flutter
         script: |
@@ -97,7 +103,7 @@ workflows:
           </manifest>
           MANIFEST_EOF
 
-          echo "=== 建立 MainActivity.kt (含日曆方法 + 相冊掃描) ==="
+          echo "=== 建立 MainActivity.kt ==="
           mkdir -p android/app/src/main/kotlin/com/example/roster_pro
           cat > android/app/src/main/kotlin/com/example/roster_pro/MainActivity.kt <<'MAIN_EOF'
           package com.example.roster_pro
@@ -228,6 +234,7 @@ workflows:
           cat > android/app/src/main/res/layout/widget_layout.xml <<'LAYOUT_EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/widget_root"
               android:layout_width="match_parent"
               android:layout_height="match_parent"
               android:orientation="vertical"
@@ -286,7 +293,7 @@ workflows:
           </LinearLayout>
           LAYOUT_EOF
 
-          echo "=== 建立 RosterWidgetProvider.kt (支援字體/顏色設定) ==="
+          echo "=== 建立 RosterWidgetProvider.kt ==="
           cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt <<'WIDGET_EOF'
           package com.example.roster_pro
 
@@ -334,12 +341,9 @@ workflows:
                       val monthNames = arrayOf("1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月")
 
                       val fp: SharedPreferences = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-
-                      // ===== 讀取用戶設定的字體大小 / 顏色 / 背景色 =====
                       val widgetFontSize = fp.getFloat("flutter.widgetFontSize", 11f)
                       val widgetTextColor = fp.getLong("flutter.widgetTextColor", 0xFF333333).toInt()
                       val widgetBgColor = fp.getLong("flutter.widgetBgColor", 0xFFFFFFFF).toInt()
-                      // ===================================================
 
                       views.setTextViewText(R.id.tv_month_title, "${year}年 ${monthNames[month]}")
                       views.setTextColor(R.id.tv_month_title, widgetTextColor)
@@ -365,7 +369,6 @@ workflows:
                                   var txt = dayIndex.toString()
                                   if (shiftCode.isNotEmpty()) txt = "$dayIndex\n$shiftCode"
                                   views.setTextViewText(tvId, txt)
-                                  // 套用字體顏色 + 大小
                                   views.setTextColor(tvId, widgetTextColor)
                                   views.setTextViewTextSize(tvId, TypedValue.COMPLEX_UNIT_SP, widgetFontSize)
                                   views.setViewVisibility(tvId, View.VISIBLE)
@@ -390,7 +393,6 @@ workflows:
                           }
                       }
 
-                      // 套用背景色
                       views.setInt(R.id.widget_root, "setBackgroundColor", widgetBgColor)
 
                       val prevI = Intent(context, RosterWidgetProvider::class.java).setAction("PREV_MONTH")
