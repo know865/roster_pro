@@ -73,7 +73,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
                         if (file.length() > 200 * 1024) file.writeText("[$timestamp] (log reset)\n")
                         return
                     }
-                } catch (e: Exception) { Log.e(TAG, "Write to ExternalFiles failed: ${e.message}") }
+                } catch (e: Exception) { Log.e("RosterWidget", "Write to ExternalFiles failed: ${e.message}") }
                 try {
                     val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
                     if (downloadDir != null) {
@@ -82,9 +82,9 @@ class RosterWidgetProvider : AppWidgetProvider() {
                         file.appendText(line)
                         return
                     }
-                } catch (e: Exception) { Log.e(TAG, "Write to Download failed: ${e.message}") }
-                try { val file = File(context.filesDir, "roster_widget_debug.txt"); file.appendText(line) } catch (e: Exception) { Log.e(TAG, "Write to filesDir failed: ${e.message}") }
-            } catch (e: Exception) { Log.e(TAG, "writeDebugLog fatal error: ${e.message}") }
+                } catch (e: Exception) { Log.e("RosterWidget", "Write to Download failed: ${e.message}") }
+                try { val file = File(context.filesDir, "roster_widget_debug.txt"); file.appendText(line) } catch (e: Exception) { Log.e("RosterWidget", "Write to filesDir failed: ${e.message}") }
+            } catch (e: Exception) { Log.e("RosterWidget", "writeDebugLog fatal error: ${e.message}") }
         }
 
         private fun getValueAsDouble(sp: SharedPreferences, key: String, def: Double): Double {
@@ -100,7 +100,6 @@ class RosterWidgetProvider : AppWidgetProvider() {
             val views = RemoteViews(context.packageName, R.layout.widget_layout)
             try {
                 val widgetPrefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
-                // 【關鍵修復】優先讀取 HomeWidgetPreferences
                 val homeWidgetPrefs = context.getSharedPreferences("HomeWidgetPreferences", Context.MODE_PRIVATE)
                 val flutterPrefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
 
@@ -109,10 +108,9 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 val month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH))
                 val monthNames = arrayOf("1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月")
 
-                // 【關鍵修復】先讀 HomeWidgetPreferences，再讀 FlutterSharedPreferences
                 var fontSize = getValueAsDouble(homeWidgetPrefs, "widgetFontSize", 0.0)
                 if (fontSize <= 0.0) fontSize = getValueAsDouble(flutterPrefs, "flutter.widgetFontSize", 0.0)
-                if (fontSize <= 0.0) fontSize = 60.0  // 預設放大到 60.0
+                if (fontSize <= 0.0) fontSize = 60.0
 
                 var textColor = getValueAsInt(homeWidgetPrefs, "widgetTextColor", 0)
                 if (textColor == 0) textColor = getValueAsInt(flutterPrefs, "flutter.widgetTextColor", 0)
