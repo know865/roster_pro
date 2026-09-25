@@ -271,7 +271,6 @@ workflows:
               android:background="#FFFFFF"
               android:padding="4dp">
 
-              <!-- 頂部：月份 + 上下月 + 刷新 -->
               <LinearLayout
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
@@ -284,7 +283,6 @@ workflows:
                   <ImageButton android:id="@+id/btn_refresh" android:layout_width="36dp" android:layout_height="36dp" android:src="@android:drawable/ic_popup_sync" android:background="?android:attr/selectableItemBackground" android:contentDescription="重新整理" />
               </LinearLayout>
 
-              <!-- 星期標題列 -->
               <LinearLayout
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
@@ -300,7 +298,6 @@ workflows:
                   <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="日" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#D32F2F" />
               </LinearLayout>
 
-              <!-- 第 1 行 -->
               <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
                   <TextView android:id="@+id/week0" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="2" />
                   <TextView android:id="@+id/day0" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
@@ -312,7 +309,6 @@ workflows:
                   <TextView android:id="@+id/day6" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
               </LinearLayout>
 
-              <!-- 第 2 行 -->
               <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
                   <TextView android:id="@+id/week1" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="2" />
                   <TextView android:id="@+id/day7" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
@@ -324,7 +320,6 @@ workflows:
                   <TextView android:id="@+id/day13" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
               </LinearLayout>
 
-              <!-- 第 3 行 -->
               <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
                   <TextView android:id="@+id/week2" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="2" />
                   <TextView android:id="@+id/day14" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
@@ -336,7 +331,6 @@ workflows:
                   <TextView android:id="@+id/day20" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
               </LinearLayout>
 
-              <!-- 第 4 行 -->
               <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
                   <TextView android:id="@+id/week3" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="2" />
                   <TextView android:id="@+id/day21" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
@@ -348,7 +342,6 @@ workflows:
                   <TextView android:id="@+id/day27" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
               </LinearLayout>
 
-              <!-- 第 5 行 -->
               <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
                   <TextView android:id="@+id/week4" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="2" />
                   <TextView android:id="@+id/day28" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
@@ -360,7 +353,6 @@ workflows:
                   <TextView android:id="@+id/day34" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
               </LinearLayout>
 
-              <!-- 第 6 行 -->
               <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
                   <TextView android:id="@+id/week5" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="2" />
                   <TextView android:id="@+id/day35" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
@@ -374,7 +366,7 @@ workflows:
           </LinearLayout>
           LAYOUT_EOF
 
-          # ---------- RosterWidgetProvider.kt（同時讀兩個 prefs，今日背景改藍色） ----------
+          # ---------- RosterWidgetProvider.kt（修正 double 位模式 + 今日背景改藍色） ----------
           cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt <<'WIDGET_EOF'
           package com.example.roster_pro
 
@@ -385,7 +377,6 @@ workflows:
           import android.content.Intent
           import android.content.SharedPreferences
           import android.graphics.Color
-          import android.graphics.drawable.GradientDrawable
           import android.util.Log
           import android.util.TypedValue
           import android.view.View
@@ -471,31 +462,67 @@ workflows:
                       return try { val v = sp.all[key]; when (v) { null -> def; is Double -> v; is Float -> v.toDouble(); is Long -> v.toDouble(); is Int -> v.toDouble(); is String -> v.toDoubleOrNull() ?: def; else -> def } } catch (e: Exception) { def }
                   }
 
-                  private fun getValueAsInt(sp: SharedPreferences, key: String, def: Int): Int {
-                      return try { val v = sp.all[key]; when (v) { null -> def; is Int -> v; is Long -> v.toInt(); is Double -> v.toLong().toInt(); is Float -> v.toInt(); is String -> v.toDoubleOrNull()?.toLong()?.toInt() ?: v.toIntOrNull() ?: def; else -> def } } catch (e: Exception) { def }
-                  }
-
-                  private fun readStr(sp: SharedPreferences, key: String, def: String): String {
-                      return try { sp.getString(key, def) ?: def } catch (e: Exception) { def }
-                  }
-
-                  private fun readStrWithFlutterFallback(sp: SharedPreferences, key: String, def: String): String {
-                      val v1 = sp.getString(key, "")
-                      if (!v1.isNullOrEmpty()) return v1
-                      val v2 = sp.getString("flutter.$key", "")
-                      if (!v2.isNullOrEmpty()) return v2
+                  /**
+                   * 讀取字體大小，並修復 home_widget 0.6.0 把 double 存成 long 位模式的 bug。
+                   * 例如 60.0 被存成 4633641066610819072（= Double.doubleToLongBits(60.0)），
+                   * 讀出來會變成 4.6e18 這種天文數字。
+                   */
+                  private fun getFontSizeSafe(sp: SharedPreferences, key: String, def: Double): Double {
+                      val raw = getValueAsDouble(sp, key, def)
+                      if (raw <= 0.0) return def
+                      if (raw <= 500.0) return raw
+                      try {
+                          val decoded = java.lang.Double.longBitsToDouble(raw.toLong())
+                          if (decoded > 0.0 && decoded <= 500.0) return decoded
+                      } catch (_: Exception) {}
                       return def
                   }
 
-                  private fun setRoundedBg(views: RemoteViews, viewId: Int, color: Int) {
-                      try {
-                          val drawable = GradientDrawable()
-                          drawable.setColor(color)
-                          drawable.cornerRadius = 12f
-                          views.setImageViewBitmap(viewId, null)
-                          // RemoteViews 不支援直接設 drawable，改用 setInt 設定背景色
-                          views.setInt(viewId, "setBackgroundColor", color)
-                      } catch (e: Exception) {}
+                  /**
+                   * 安全讀取顏色：處理 int / long / double / 位模式 / string 各種儲存方式，
+                   * 只要能得到有效 ARGB（alpha 非 0）就回傳。
+                   */
+                  private fun getColorSafe(sp: SharedPreferences, key: String, def: Int): Int {
+                      val raw = sp.all[key] ?: return def
+                      val candidates = mutableListOf<Long>()
+                      when (raw) {
+                          is Int -> candidates.add(raw.toLong())
+                          is Long -> {
+                              candidates.add(raw)
+                              try {
+                                  val decoded = java.lang.Double.longBitsToDouble(raw)
+                                  if (decoded > 0 && decoded <= Int.MAX_VALUE.toDouble()) {
+                                      candidates.add(decoded.toLong())
+                                  }
+                              } catch (_: Exception) {}
+                          }
+                          is Double -> {
+                              if (raw > 0 && raw <= Int.MAX_VALUE.toDouble()) candidates.add(raw.toLong())
+                              try {
+                                  val decoded = java.lang.Double.longBitsToDouble(raw.toLong())
+                                  if (decoded > 0 && decoded <= Int.MAX_VALUE.toDouble()) {
+                                      candidates.add(decoded.toLong())
+                                  }
+                              } catch (_: Exception) {}
+                          }
+                          is Float -> candidates.add(raw.toLong())
+                          is String -> raw.toLongOrNull()?.let { candidates.add(it) }
+                      }
+                      for (c in candidates) {
+                          val i = c.toInt()
+                          if ((i ushr 24) != 0) return i
+                      }
+                      return def
+                  }
+
+                  /** 判斷是否為深色（今日背景若太濃就改用藍色） */
+                  private fun isDarkColor(c: Int): Boolean {
+                      val a = (c ushr 24) and 0xFF
+                      if (a < 0x60) return true
+                      val r = (c shr 16) and 0xFF
+                      val g = (c shr 8) and 0xFF
+                      val b = c and 0xFF
+                      return (0.299 * r + 0.587 * g + 0.114 * b) < 80
                   }
 
                   fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
@@ -511,27 +538,34 @@ workflows:
                           val month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH))
                           val monthNames = arrayOf("1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月")
 
-                          var fontSize = getValueAsDouble(homeWidgetPrefs, "widgetFontSize", 0.0)
-                          if (fontSize <= 0.0) fontSize = getValueAsDouble(flutterPrefs, "flutter.widgetFontSize", 0.0)
-                          if (fontSize <= 0.0) fontSize = getValueAsDouble(flutterPrefs, "flutter.widget_font_size", 0.0)
+                          // 字體大小（修復位模式）
+                          var fontSize = getFontSizeSafe(homeWidgetPrefs, "widgetFontSize", 0.0)
+                          if (fontSize <= 0.0) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widgetFontSize", 0.0)
+                          if (fontSize <= 0.0) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widget_font_size", 0.0)
                           if (fontSize <= 0.0) fontSize = 55.0
 
-                          var textColor = getValueAsInt(homeWidgetPrefs, "widgetTextColor", 0)
-                          if (textColor == 0) textColor = getValueAsInt(flutterPrefs, "flutter.widgetTextColor", 0)
-                          if (textColor == 0) textColor = getValueAsInt(flutterPrefs, "flutter.widget_text_color", 0)
+                          // 文字顏色
+                          var textColor = getColorSafe(homeWidgetPrefs, "widgetTextColor", 0)
+                          if (textColor == 0) textColor = getColorSafe(flutterPrefs, "flutter.widgetTextColor", 0)
+                          if (textColor == 0) textColor = getColorSafe(flutterPrefs, "flutter.widget_text_color", 0)
                           if (textColor == 0) textColor = 0xFF333333.toInt()
 
-                          var bgColor = getValueAsInt(homeWidgetPrefs, "widgetBgColor", 0)
-                          if (bgColor == 0) bgColor = getValueAsInt(flutterPrefs, "flutter.widgetBgColor", 0)
+                          // 背景色
+                          var bgColor = getColorSafe(homeWidgetPrefs, "widgetBgColor", 0)
+                          if (bgColor == 0) bgColor = getColorSafe(flutterPrefs, "flutter.widgetBgColor", 0)
                           if (bgColor == 0) bgColor = 0xFFFFFFFF.toInt()
 
-                          // 今日背景：改為藍色（若 Flutter 端未設定則用藍色）
-                          var todayBgColor = getValueAsInt(homeWidgetPrefs, "today_bg", 0)
-                          if (todayBgColor == 0) todayBgColor = getValueAsInt(flutterPrefs, "flutter.today_bg", 0)
-                          if (todayBgColor == 0) todayBgColor = 0xFFBBDEFB.toInt()  // Material Blue 100
+                          // 今日背景：太濃/無效 → 淺藍
+                          var todayBgColor = getColorSafe(homeWidgetPrefs, "today_bg", 0)
+                          if (todayBgColor == 0) todayBgColor = getColorSafe(flutterPrefs, "flutter.today_bg", 0)
+                          if (todayBgColor == 0 || isDarkColor(todayBgColor)) {
+                              todayBgColor = 0xFFBBDEFB.toInt()
+                          }
 
-                          val rosterJsonStr = readStrWithFlutterFallback(homeWidgetPrefs, "roster_json", "{}")
-                          val defsJsonStr = readStrWithFlutterFallback(homeWidgetPrefs, "defs_json", "{}")
+                          var rosterJsonStr = homeWidgetPrefs.getString("roster_json", "") ?: ""
+                          if (rosterJsonStr.isEmpty()) rosterJsonStr = flutterPrefs.getString("flutter.roster_json", "{}") ?: "{}"
+                          var defsJsonStr = homeWidgetPrefs.getString("defs_json", "") ?: ""
+                          if (defsJsonStr.isEmpty()) defsJsonStr = flutterPrefs.getString("flutter.defs_json", "{}") ?: "{}"
 
                           val rosterJson = try { JSONObject(rosterJsonStr) } catch (e: Exception) { JSONObject() }
                           val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
