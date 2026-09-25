@@ -226,7 +226,6 @@ workflows:
           }
           MAIN_EOF
 
-          # ---------- 新增 DateTimeUtils.kt ----------
           cat > android/app/src/main/kotlin/com/example/roster_pro/DateTimeUtils.kt <<'DATETIME_EOF'
           package com.example.roster_pro
 
@@ -259,7 +258,7 @@ workflows:
           </appwidget-provider>
           INFO_EOF
 
-          # ---------- 新版 widget_layout.xml（LinearLayout 逐行嵌套，8 欄穩定版） ----------
+          # ---------- widget_layout.xml（頂部按鈕 72dp、每行有 id 供動態隱藏） ----------
           mkdir -p android/app/src/main/res/layout
           cat > android/app/src/main/res/layout/widget_layout.xml <<'LAYOUT_EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -271,102 +270,104 @@ workflows:
               android:background="#FFFFFF"
               android:padding="4dp">
 
+              <!-- 頂部：按鈕加大一倍（36dp → 72dp）、月份字體加大 -->
               <LinearLayout
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
                   android:orientation="horizontal"
                   android:gravity="center_vertical"
-                  android:layout_marginBottom="2dp">
-                  <ImageButton android:id="@+id/btn_prev" android:layout_width="36dp" android:layout_height="36dp" android:src="@android:drawable/ic_media_previous" android:background="?android:attr/selectableItemBackground" android:contentDescription="上個月" />
-                  <TextView android:id="@+id/tv_month_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="2024年1月" android:textAlignment="center" android:textSize="16sp" android:textStyle="bold" android:textColor="#333333" />
-                  <ImageButton android:id="@+id/btn_next" android:layout_width="36dp" android:layout_height="36dp" android:src="@android:drawable/ic_media_next" android:background="?android:attr/selectableItemBackground" android:contentDescription="下個月" />
-                  <ImageButton android:id="@+id/btn_refresh" android:layout_width="36dp" android:layout_height="36dp" android:src="@android:drawable/ic_popup_sync" android:background="?android:attr/selectableItemBackground" android:contentDescription="重新整理" />
+                  android:layout_marginBottom="4dp">
+                  <ImageButton android:id="@+id/btn_prev" android:layout_width="72dp" android:layout_height="72dp" android:src="@android:drawable/ic_media_previous" android:background="?android:attr/selectableItemBackground" android:contentDescription="上個月" android:scaleType="centerInside" />
+                  <TextView android:id="@+id/tv_month_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="2024年1月" android:textAlignment="center" android:textSize="24sp" android:textStyle="bold" android:textColor="#333333" />
+                  <ImageButton android:id="@+id/btn_next" android:layout_width="72dp" android:layout_height="72dp" android:src="@android:drawable/ic_media_next" android:background="?android:attr/selectableItemBackground" android:contentDescription="下個月" android:scaleType="centerInside" />
+                  <ImageButton android:id="@+id/btn_refresh" android:layout_width="72dp" android:layout_height="72dp" android:src="@android:drawable/ic_popup_sync" android:background="?android:attr/selectableItemBackground" android:contentDescription="重新整理" android:scaleType="centerInside" />
               </LinearLayout>
 
+              <!-- 星期標題列 -->
               <LinearLayout
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
                   android:orientation="horizontal"
                   android:layout_marginBottom="1dp">
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="0.6" android:text="週" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="一" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="二" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="三" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="四" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="五" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="六" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#D32F2F" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="日" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#D32F2F" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="0.6" android:text="週" android:textAlignment="center" android:textSize="12sp" android:textStyle="bold" android:textColor="#333333" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="一" android:textAlignment="center" android:textSize="12sp" android:textStyle="bold" android:textColor="#333333" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="二" android:textAlignment="center" android:textSize="12sp" android:textStyle="bold" android:textColor="#333333" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="三" android:textAlignment="center" android:textSize="12sp" android:textStyle="bold" android:textColor="#333333" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="四" android:textAlignment="center" android:textSize="12sp" android:textStyle="bold" android:textColor="#333333" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="五" android:textAlignment="center" android:textSize="12sp" android:textStyle="bold" android:textColor="#333333" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="六" android:textAlignment="center" android:textSize="12sp" android:textStyle="bold" android:textColor="#D32F2F" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="日" android:textAlignment="center" android:textSize="12sp" android:textStyle="bold" android:textColor="#D32F2F" />
               </LinearLayout>
 
-              <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
-                  <TextView android:id="@+id/week0" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="2" />
-                  <TextView android:id="@+id/day0" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day1" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day2" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day3" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day4" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day5" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day6" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+              <LinearLayout android:id="@+id/row0" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
+                  <TextView android:id="@+id/week0" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="10sp" android:textColor="#555555" android:maxLines="2" />
+                  <TextView android:id="@+id/day0" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day1" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day2" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day3" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day4" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day5" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day6" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
               </LinearLayout>
 
-              <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
-                  <TextView android:id="@+id/week1" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="2" />
-                  <TextView android:id="@+id/day7" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day8" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day9" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day10" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day11" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day12" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day13" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+              <LinearLayout android:id="@+id/row1" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
+                  <TextView android:id="@+id/week1" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="10sp" android:textColor="#555555" android:maxLines="2" />
+                  <TextView android:id="@+id/day7" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day8" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day9" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day10" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day11" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day12" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day13" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
               </LinearLayout>
 
-              <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
-                  <TextView android:id="@+id/week2" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="2" />
-                  <TextView android:id="@+id/day14" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day15" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day16" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day17" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day18" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day19" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day20" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+              <LinearLayout android:id="@+id/row2" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
+                  <TextView android:id="@+id/week2" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="10sp" android:textColor="#555555" android:maxLines="2" />
+                  <TextView android:id="@+id/day14" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day15" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day16" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day17" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day18" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day19" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day20" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
               </LinearLayout>
 
-              <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
-                  <TextView android:id="@+id/week3" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="2" />
-                  <TextView android:id="@+id/day21" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day22" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day23" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day24" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day25" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day26" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day27" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+              <LinearLayout android:id="@+id/row3" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
+                  <TextView android:id="@+id/week3" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="10sp" android:textColor="#555555" android:maxLines="2" />
+                  <TextView android:id="@+id/day21" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day22" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day23" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day24" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day25" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day26" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day27" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
               </LinearLayout>
 
-              <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
-                  <TextView android:id="@+id/week4" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="2" />
-                  <TextView android:id="@+id/day28" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day29" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day30" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day31" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day32" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day33" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day34" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+              <LinearLayout android:id="@+id/row4" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
+                  <TextView android:id="@+id/week4" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="10sp" android:textColor="#555555" android:maxLines="2" />
+                  <TextView android:id="@+id/day28" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day29" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day30" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day31" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day32" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day33" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day34" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
               </LinearLayout>
 
-              <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
-                  <TextView android:id="@+id/week5" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="2" />
-                  <TextView android:id="@+id/day35" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day36" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day37" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day38" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day39" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day40" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
-                  <TextView android:id="@+id/day41" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+              <LinearLayout android:id="@+id/row5" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
+                  <TextView android:id="@+id/week5" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="10sp" android:textColor="#555555" android:maxLines="2" />
+                  <TextView android:id="@+id/day35" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day36" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day37" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day38" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day39" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day40" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day41" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:textSize="11sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
               </LinearLayout>
           </LinearLayout>
           LAYOUT_EOF
 
-          # ---------- RosterWidgetProvider.kt（修正 double 位模式 + 今日背景改藍色） ----------
+          # ---------- RosterWidgetProvider.kt（加入空行隱藏 + 保留字體/顏色修正） ----------
           cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt <<'WIDGET_EOF'
           package com.example.roster_pro
 
@@ -462,11 +463,6 @@ workflows:
                       return try { val v = sp.all[key]; when (v) { null -> def; is Double -> v; is Float -> v.toDouble(); is Long -> v.toDouble(); is Int -> v.toDouble(); is String -> v.toDoubleOrNull() ?: def; else -> def } } catch (e: Exception) { def }
                   }
 
-                  /**
-                   * 讀取字體大小，並修復 home_widget 0.6.0 把 double 存成 long 位模式的 bug。
-                   * 例如 60.0 被存成 4633641066610819072（= Double.doubleToLongBits(60.0)），
-                   * 讀出來會變成 4.6e18 這種天文數字。
-                   */
                   private fun getFontSizeSafe(sp: SharedPreferences, key: String, def: Double): Double {
                       val raw = getValueAsDouble(sp, key, def)
                       if (raw <= 0.0) return def
@@ -478,10 +474,6 @@ workflows:
                       return def
                   }
 
-                  /**
-                   * 安全讀取顏色：處理 int / long / double / 位模式 / string 各種儲存方式，
-                   * 只要能得到有效 ARGB（alpha 非 0）就回傳。
-                   */
                   private fun getColorSafe(sp: SharedPreferences, key: String, def: Int): Int {
                       val raw = sp.all[key] ?: return def
                       val candidates = mutableListOf<Long>()
@@ -491,18 +483,14 @@ workflows:
                               candidates.add(raw)
                               try {
                                   val decoded = java.lang.Double.longBitsToDouble(raw)
-                                  if (decoded > 0 && decoded <= Int.MAX_VALUE.toDouble()) {
-                                      candidates.add(decoded.toLong())
-                                  }
+                                  if (decoded > 0 && decoded <= Int.MAX_VALUE.toDouble()) candidates.add(decoded.toLong())
                               } catch (_: Exception) {}
                           }
                           is Double -> {
                               if (raw > 0 && raw <= Int.MAX_VALUE.toDouble()) candidates.add(raw.toLong())
                               try {
                                   val decoded = java.lang.Double.longBitsToDouble(raw.toLong())
-                                  if (decoded > 0 && decoded <= Int.MAX_VALUE.toDouble()) {
-                                      candidates.add(decoded.toLong())
-                                  }
+                                  if (decoded > 0 && decoded <= Int.MAX_VALUE.toDouble()) candidates.add(decoded.toLong())
                               } catch (_: Exception) {}
                           }
                           is Float -> candidates.add(raw.toLong())
@@ -515,7 +503,6 @@ workflows:
                       return def
                   }
 
-                  /** 判斷是否為深色（今日背景若太濃就改用藍色） */
                   private fun isDarkColor(c: Int): Boolean {
                       val a = (c ushr 24) and 0xFF
                       if (a < 0x60) return true
@@ -538,24 +525,20 @@ workflows:
                           val month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH))
                           val monthNames = arrayOf("1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月")
 
-                          // 字體大小（修復位模式）
                           var fontSize = getFontSizeSafe(homeWidgetPrefs, "widgetFontSize", 0.0)
                           if (fontSize <= 0.0) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widgetFontSize", 0.0)
                           if (fontSize <= 0.0) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widget_font_size", 0.0)
                           if (fontSize <= 0.0) fontSize = 55.0
 
-                          // 文字顏色
                           var textColor = getColorSafe(homeWidgetPrefs, "widgetTextColor", 0)
                           if (textColor == 0) textColor = getColorSafe(flutterPrefs, "flutter.widgetTextColor", 0)
                           if (textColor == 0) textColor = getColorSafe(flutterPrefs, "flutter.widget_text_color", 0)
                           if (textColor == 0) textColor = 0xFF333333.toInt()
 
-                          // 背景色
                           var bgColor = getColorSafe(homeWidgetPrefs, "widgetBgColor", 0)
                           if (bgColor == 0) bgColor = getColorSafe(flutterPrefs, "flutter.widgetBgColor", 0)
                           if (bgColor == 0) bgColor = 0xFFFFFFFF.toInt()
 
-                          // 今日背景：太濃/無效 → 淺藍
                           var todayBgColor = getColorSafe(homeWidgetPrefs, "today_bg", 0)
                           if (todayBgColor == 0) todayBgColor = getColorSafe(flutterPrefs, "flutter.today_bg", 0)
                           if (todayBgColor == 0 || isDarkColor(todayBgColor)) {
@@ -574,7 +557,7 @@ workflows:
 
                           views.setTextViewText(R.id.tv_month_title, "${year}年${monthNames[month]}")
                           views.setTextColor(R.id.tv_month_title, textColor)
-                          views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, (fontSize * 0.8).toFloat())
+                          views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, (fontSize * 0.6).toFloat())
 
                           val calendar = Calendar.getInstance()
                           calendar.set(year, month, 1)
@@ -623,23 +606,32 @@ workflows:
                                       views.setTextViewText(tvId, "")
                                       views.setViewVisibility(tvId, View.INVISIBLE)
                                   }
+                              } catch (e: Exception) { writeDebugLog(context, "cell $i error: ${e.message}") }
+                          }
 
-                                  if (i % 7 == 0) {
-                                      val weekTvId = context.resources.getIdentifier("week${i / 7}", "id", context.packageName)
-                                      if (weekTvId != 0) {
-                                          val rowFirstDay = DateTimeUtils.getDateOfIndex(year, month, i, startOffset)
-                                          if (rowFirstDay != null) {
-                                              val weekStr = weekFormat.format(rowFirstDay)
-                                              views.setTextViewText(weekTvId, "W$weekStr")
-                                              views.setTextColor(weekTvId, textColor)
-                                              views.setViewVisibility(weekTvId, View.VISIBLE)
-                                          } else {
-                                              views.setTextViewText(weekTvId, "")
-                                              views.setViewVisibility(weekTvId, View.INVISIBLE)
-                                          }
+                          // 每行的週數 & 判斷整行是否要隱藏
+                          for (row in 0 until 6) {
+                              var rowHasDate = false
+                              for (col in 0 until 7) {
+                                  val idx = row * 7 + col
+                                  val dayIndex = idx - startOffset + 1
+                                  if (dayIndex in 1..maxDaysInMonth) { rowHasDate = true; break }
+                              }
+                              val rowId = context.resources.getIdentifier("row$row", "id", context.packageName)
+                              if (rowId != 0) {
+                                  views.setViewVisibility(rowId, if (rowHasDate) View.VISIBLE else View.GONE)
+                              }
+                              if (rowHasDate) {
+                                  val weekTvId = context.resources.getIdentifier("week$row", "id", context.packageName)
+                                  if (weekTvId != 0) {
+                                      val rowFirstDay = DateTimeUtils.getDateOfIndex(year, month, row * 7, startOffset)
+                                      if (rowFirstDay != null) {
+                                          val weekStr = weekFormat.format(rowFirstDay)
+                                          views.setTextViewText(weekTvId, "W$weekStr")
+                                          views.setTextColor(weekTvId, textColor)
                                       }
                                   }
-                              } catch (e: Exception) { writeDebugLog(context, "cell $i error: ${e.message}") }
+                              }
                           }
 
                           try { views.setInt(R.id.widget_root, "setBackgroundColor", bgColor) } catch (e: Exception) {}
