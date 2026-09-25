@@ -622,10 +622,8 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
 
       _googleEventIdMap.clear();
 
-      // 等待 Google 同步完成
       await Future.delayed(const Duration(seconds: 3));
 
-      // 循環檢查是否還有殘留事件
       int retry = 0;
       bool hasRemaining = true;
       while (hasRemaining && retry < 5) {
@@ -659,7 +657,6 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
       }
       await _writeDebugLog('=== 殘留檢查完成，共重試 $retry 次 ===');
 
-      // 寫入新班次
       await _writeDebugLog('=== 開始寫入新班次 ===');
       for (var entry in roster.entries) {
         final added = await _buildAndInsertEvent(entry.key, entry.value, offset);
@@ -1679,8 +1676,24 @@ void showDetail(DateTime day) {
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 Text('正在編輯: $editingPatternName', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                 const SizedBox(width: 8),
-                FilledButton.tonal(onPressed: () { if (editingPatternIndex != null) { setState(() => savedPatterns[editingPatternIndex!] = SavedPattern(editingPatternName!, pattern.map((r) => List<String>.from(r)).toList())); save(); } }, child: const Text('更新同名')),
-                IconButton(icon: const Icon(Icons.close, size: 16), onPressed: () { setState(() { editingPatternName = null; editingPatternIndex = null; }); })
+                FilledButton.tonal(onPressed: () {
+                  if (editingPatternIndex != null) {
+                    setState(() {
+                      savedPatterns[editingPatternIndex!] = SavedPattern(editingPatternName!, pattern.map((r) => List<String>.from(r)).toList());
+                      editingPatternName = null;
+                      editingPatternIndex = null;
+                      pattern = _defaultPattern.map((r) => List<String>.from(r)).toList();
+                    });
+                    save();
+                  }
+                }, child: const Text('更新同名')),
+                IconButton(icon: const Icon(Icons.close, size: 16), onPressed: () {
+                  setState(() {
+                    editingPatternName = null;
+                    editingPatternIndex = null;
+                    pattern = _defaultPattern.map((r) => List<String>.from(r)).toList();
+                  });
+                })
               ])
             )
           ),
