@@ -60,39 +60,79 @@ class RosterWidgetProvider : AppWidgetProvider() {
     }
 
     companion object {
-        // ===== Debug 寫入檔案 =====
+        // ===== 寫入除錯檔案（多路徑嘗試，只要有一個成功即可）=====
         private fun writeDebugLog(context: Context, message: String) {
+            val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+            val line = "[$timestamp] $message\n"
+
+            // 路徑 1：App 專屬外部目錄（不需要權限，最穩定）
             try {
-                // 寫入手機可存取的 App 專屬目錄
-                // Android/data/com.example.roster_pro/files/roster_widget_debug.txt
                 val dir = context.getExternalFilesDir(null)
                 if (dir != null) {
                     if (!dir.exists()) dir.mkdirs()
                     val file = File(dir, "roster_widget_debug.txt")
-                    val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-                    file.appendText("[$timestamp] $message\n")
-                    // 若檔案過大（超過 200KB），清空重寫，避免無限增長
+                    file.appendText(line)
                     if (file.length() > 200 * 1024) {
-                        file.writeText("[$timestamp] (log reset - file too large)\n")
+                        file.writeText("[$timestamp] (log reset)\n")
                     }
+                    return
                 }
             } catch (e: Exception) {
-                Log.e("RosterWidget", "writeDebugLog failed: ${e.message}", e)
+                Log.e(TAG, "Write to ExternalFiles failed: ${e.message}")
             }
-        }
 
-        private fun getSafeFloat(sp: SharedPreferences, key: String, def: Float): Float {
-            return try { sp.getFloat(key, def) } catch (e: Exception) {
-                try { sp.getLong(key, def.toLong()).toFloat() } catch (e2: Exception) {
-                    try { sp.getInt(key, def.toInt()).toFloat() } catch (e3: Exception) { def }
+            // 路徑 2：公共 Download 目錄（需要儲存權限，若成功可直接在「下載」找到）
+            try {
+                val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                if (downloadDir != null) {
+                    if (!downloadDir.exists()) downloadDir.mkdirs()
+                    val file = File(downloadDir, "roster_widget_debug.txt")
+                    file.appendText(line)
+                    return
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Write to Download failed: ${e.message}")
+            }
+
+            // 路徑 3：App 內部儲存（最終備援）
+            try {
+                val file = File(context.filesDir, "roster_widget_debug.txt")
+                file.appendText(line)
+            } catch (e: Exception) {
+                Log.e(TAG, "Write to filesDir failed: ${e.message}")
             }
         }
 
-        private fun getSafeInt(sp: SharedPreferences, key: String, def: Int): Int {
-            return try { sp.getInt(key, def) } catch (e: Exception) {
-                try { sp.getLong(key, def.toLong()).toInt() } catch (e2: Exception) { def }
-            }
+        // ===== 通用解析：任何型別都能轉成 Double =====
+        private fun getValueAsDouble(sp: SharedPreferences, key: String, def: Double): Double {
+            return try {
+                val v = sp.all[key]
+                when (v) {
+                    null -> def
+                    is Double -> v
+                    is Float -> v.toDouble()
+                    is Long -> v.toDouble()
+                    is Int -> v.toDouble()
+                    is String -> v.toDoubleOrNull() ?: def
+                    else -> def
+                }
+            } catch (e: Exception) { def }
+        }
+
+        // ===== 通用解析：任何型別都能轉成 Int =====
+        private fun getValueAsInt(sp: SharedPreferences, key: String, def: Int): Int {
+            return try {
+                val v = sp.all[key]
+                when (v) {
+                    null -> def
+                    is Int -> v
+                    is Long -> v.toInt()
+                    is Double -> v.toInt()
+                    is Float -> v.toInt()
+                    is String -> v.toDoubleOrNull()?.toInt() ?: v.toIntOrNull() ?: def
+                    else -> def
+                }
+            } catch (e: Exception) { def }
         }
 
         fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
@@ -106,38 +146,31 @@ class RosterWidgetProvider : AppWidgetProvider() {
 
                 val fp: SharedPreferences = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
 
-                // ===== 嘗試多種鍵名，確保讀到 =====
-                var fontSize = getSafeFloat(fp, "flutter.widgetFontSize", 0f)
-                if (fontSize <= 0f) fontSize = getSafeFloat(fp, "flutter.widget_font_size", 0f)
-                if (fontSize <= 0f) fontSize = 55f
+                // 讀取字體大小（嘗試多種鍵名，通用解析）
+                var fontSize = getValueAsDouble(fp, "flutter.widgetFontSize", 0.0)
+                if (fontSize <= 0.0) fontSize = getValueAsDouble(fp, "flutter.widget_font_size", 0.0)
+                if (fontSize <= 0.0) fontSize = 55.0
 
-                var textColor = getSafeInt(fp, "flutter.widgetTextColor", 0)
-                if (textColor == 0) textColor = getSafeInt(fp, "flutter.widget_text_color", 0xFF333333.toInt())
+                // 讀取文字顏色
+                var textColor = getValueAsInt(fp, "flutter.widgetTextColor", 0)
+                if (textColor == 0) textColor = getValueAsInt(fp, "flutter.widget_text_color", 0)
                 if (textColor == 0) textColor = 0xFF333333.toInt()
 
-                val bgColor = getSafeInt(fp, "flutter.widgetBgColor", 0xFFFFFFFF.toInt())
-                val todayBgColor = getSafeInt(fp, "flutter.today_bg", 0xFFFFF9C4.toInt())
+                val bgColor = getValueAsInt(fp, "flutter.widgetBgColor", 0xFFFFFFFF.toInt())
+                val todayBgColor = getValueAsInt(fp, "flutter.today_bg", 0xFFFFF9C4.toInt())
 
-                // ===== 詳細 Debug Log 寫入檔案 =====
                 writeDebugLog(context, "========== Widget Update ==========")
-                writeDebugLog(context, "AppWidgetId: $appWidgetId")
-                writeDebugLog(context, "Year: $year, Month: $month")
-                writeDebugLog(context, "FontSize: $fontSize")
-                writeDebugLog(context, "TextColor: 0x${Integer.toHexString(textColor)}")
+                writeDebugLog(context, "FontSize: $fontSize, TextColor: 0x${Integer.toHexString(textColor)}")
                 writeDebugLog(context, "BgColor: 0x${Integer.toHexString(bgColor)}")
-                writeDebugLog(context, "TodayBgColor: 0x${Integer.toHexString(todayBgColor)}")
                 try {
-                    val allKeys = fp.all.keys
-                    writeDebugLog(context, "FlutterSharedPrefs 總共 ${allKeys.size} 個 key:")
-                    for (k in allKeys) {
-                        writeDebugLog(context, "  Key: $k = ${fp.all[k]}")
+                    val keys = fp.all.keys
+                    writeDebugLog(context, "FlutterPrefs keys (${keys.size}):")
+                    for (k in keys) {
+                        val v = fp.all[k]
+                        writeDebugLog(context, "  $k = $v (${v?.javaClass?.simpleName})")
                     }
-                    writeDebugLog(context, "widgetFontSize raw: ${fp.all["flutter.widgetFontSize"]}")
-                    writeDebugLog(context, "widget_font_size raw: ${fp.all["flutter.widget_font_size"]}")
-                    writeDebugLog(context, "widgetTextColor raw: ${fp.all["flutter.widgetTextColor"]}")
-                    writeDebugLog(context, "widget_text_color raw: ${fp.all["flutter.widget_text_color"]}")
                 } catch (e: Exception) {
-                    writeDebugLog(context, "Failed to dump keys: ${e.message}")
+                    writeDebugLog(context, "Dump keys failed: ${e.message}")
                 }
                 writeDebugLog(context, "===================================")
 
@@ -146,11 +179,9 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 val rosterJson = try { JSONObject(rosterJsonStr) } catch (e: Exception) { JSONObject() }
                 val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
 
-                writeDebugLog(context, "Roster 筆數: ${rosterJson.length()}, Defs 筆數: ${defsJson.length()}")
-
                 views.setTextViewText(R.id.tv_month_title, "${year}年${monthNames[month]}")
                 views.setTextColor(R.id.tv_month_title, textColor)
-                views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, fontSize * 0.8f)
+                views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, (fontSize * 0.8).toFloat())
 
                 val calendar = Calendar.getInstance()
                 calendar.set(year, month, 1)
@@ -171,7 +202,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
                             if (shiftCode.isNotEmpty()) displayText = "$dayIndex\n$shiftCode"
                             views.setTextViewText(tvId, displayText)
                             views.setTextColor(tvId, textColor)
-                            views.setTextViewTextSize(tvId, TypedValue.COMPLEX_UNIT_SP, fontSize)
+                            views.setTextViewTextSize(tvId, TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat())
                             views.setViewVisibility(tvId, View.VISIBLE)
 
                             var bg = bgColor
