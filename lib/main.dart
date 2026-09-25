@@ -161,7 +161,6 @@ class MainPageState extends State<MainPage> {
   Set<String> _dirtyDates = <String>{};
   bool _needsFullSync = true;
 
-  // 【修改点 1】字体放大一倍，自动换行
   double widgetFontSize = 60.0;
   int widgetTextColor = 0xFF000000;
   int widgetBgColor = 0xFFFFFFFF;
@@ -611,8 +610,6 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
     int del = 0, add = 0, upd = 0;
 
     if (needFull) {
-      // 【方案 B】直接調用 Android 原生 API 強制刪除該日曆下所有事件
-      // 這樣就繞過了 device_calendar 插件 eventId 返回 null 的缺陷
       await _writeDebugLog('=== 使用原生 API 強制清理日曆 ID: $_rosterCalendarId ===');
       try {
         final deletedCount = await _realChannel.invokeMethod('deleteAllEventsInCalendar', {'calendarId': _rosterCalendarId});
@@ -623,13 +620,46 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
         throw '原生清理失敗: $e';
       }
 
-      // 清空記憶體中的 ID 映射
       _googleEventIdMap.clear();
 
-      // 等待一下，確保 Android 系統的刪除操作落盤
-      await Future.delayed(const Duration(seconds: 2));
+      // 等待 Google 同步完成
+      await Future.delayed(const Duration(seconds: 3));
 
-      // 重新寫入新班次
+      // 循環檢查是否還有殘留事件
+      int retry = 0;
+      bool hasRemaining = true;
+      while (hasRemaining && retry < 5) {
+        hasRemaining = false;
+        DateTime current = _calcScanStart();
+        DateTime scanEnd = _calcScanEnd();
+        while (current.isBefore(scanEnd)) {
+          DateTime next = DateTime(current.year, current.month + 1, 1);
+          if (next.isAfter(scanEnd)) next = scanEnd;
+          try {
+            var events = await _calendarPlugin.retrieveEvents(
+              _rosterCalendarId!,
+              RetrieveEventsParams(startDate: current, endDate: next),
+            );
+            if ((events.data ?? []).isNotEmpty) {
+              hasRemaining = true;
+              await _writeDebugLog('  檢查發現殘留 ${events.data!.length} 條，嘗試再次刪除');
+              for (var e in events.data!) {
+                if (e.eventId != null) {
+                  try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.eventId!); } catch (_) {}
+                }
+              }
+            }
+          } catch (_) {}
+          current = next;
+        }
+        if (hasRemaining) {
+          retry++;
+          await Future.delayed(const Duration(seconds: 2));
+        }
+      }
+      await _writeDebugLog('=== 殘留檢查完成，共重試 $retry 次 ===');
+
+      // 寫入新班次
       await _writeDebugLog('=== 開始寫入新班次 ===');
       for (var entry in roster.entries) {
         final added = await _buildAndInsertEvent(entry.key, entry.value, offset);
