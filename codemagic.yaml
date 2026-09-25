@@ -179,7 +179,6 @@ workflows:
                   } catch (e: Exception) { result.error("STORAGE_FAIL", e.message, null) }
               }
 
-              // 【核心】分批删除，每批 10 条，绕过 Android 系统的批量删除安全限制
               private fun handleDeleteAllEvents(calendarId: String, result: MethodChannel.Result) {
                   try {
                       if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
@@ -396,7 +395,7 @@ workflows:
                                   if (file.length() > 200 * 1024) file.writeText("[$timestamp] (log reset)\n")
                                   return
                               }
-                          } catch (e: Exception) { Log.e("RosterWidget", "Write to ExternalFiles failed: ${e.message}") }
+                          } catch (e: Exception) { Log.e(TAG, "Write to ExternalFiles failed: ${e.message}") }
                           try {
                               val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
                               if (downloadDir != null) {
@@ -405,9 +404,9 @@ workflows:
                                   file.appendText(line)
                                   return
                               }
-                          } catch (e: Exception) { Log.e("RosterWidget", "Write to Download failed: ${e.message}") }
-                          try { val file = File(context.filesDir, "roster_widget_debug.txt"); file.appendText(line) } catch (e: Exception) { Log.e("RosterWidget", "Write to filesDir failed: ${e.message}") }
-                      } catch (e: Exception) { Log.e("RosterWidget", "writeDebugLog fatal error: ${e.message}") }
+                          } catch (e: Exception) { Log.e(TAG, "Write to Download failed: ${e.message}") }
+                          try { val file = File(context.filesDir, "roster_widget_debug.txt"); file.appendText(line) } catch (e: Exception) { Log.e(TAG, "Write to filesDir failed: ${e.message}") }
+                      } catch (e: Exception) { Log.e(TAG, "writeDebugLog fatal error: ${e.message}") }
                   }
 
                   private fun getValueAsDouble(sp: SharedPreferences, key: String, def: Double): Double {
@@ -447,8 +446,11 @@ workflows:
                           if (todayBgColor == 0) todayBgColor = getValueAsInt(flutterPrefs, "flutter.today_bg", 0)
                           if (todayBgColor == 0) todayBgColor = 0xFFFFF9C4.toInt()
 
-                          val rosterJsonStr = flutterPrefs.getString("flutter.roster_json", "{}") ?: "{}"
-                          val defsJsonStr = flutterPrefs.getString("flutter.defs_json", "{}") ?: "{}"
+                          var rosterJsonStr = homeWidgetPrefs.getString("roster_json", "") ?: ""
+                          if (rosterJsonStr.isEmpty()) rosterJsonStr = flutterPrefs.getString("flutter.roster_json", "{}") ?: "{}"
+                          var defsJsonStr = homeWidgetPrefs.getString("defs_json", "") ?: ""
+                          if (defsJsonStr.isEmpty()) defsJsonStr = flutterPrefs.getString("flutter.defs_json", "{}") ?: "{}"
+
                           val rosterJson = try { JSONObject(rosterJsonStr) } catch (e: Exception) { JSONObject() }
                           val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
 
