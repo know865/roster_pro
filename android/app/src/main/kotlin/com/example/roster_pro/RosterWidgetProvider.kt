@@ -155,7 +155,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 // 優先讀取 HomeWidgetPreferences，其次讀取 FlutterSharedPreferences
                 var fontSize = getValueAsDouble(homeWidgetPrefs, "widgetFontSize", 0.0)
                 if (fontSize <= 0.0) fontSize = getValueAsDouble(flutterPrefs, "flutter.widgetFontSize", 0.0)
-                if (fontSize <= 0.0) fontSize = 17.0 // 【修改】防止默認值過大溢出
+                if (fontSize <= 0.0) fontSize = 30.0  // 【修改】從 17.0 改為 30.0，讓字體更大
 
                 var textColor = getValueAsInt(homeWidgetPrefs, "widgetTextColor", 0)
                 if (textColor == 0) textColor = getValueAsInt(flutterPrefs, "flutter.widgetTextColor", 0)
