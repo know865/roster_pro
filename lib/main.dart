@@ -581,6 +581,44 @@ Future<void> _syncNow() async {
   await _syncToGoogle(silent: true);
 }
 
+// 【新增】範圍同步：只同步使用者選定日期範圍內、且有變更的日期
+Future<void> syncDateRange() async {
+  if (!googleSyncEnabled) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請先啟用日曆同步')));
+    return;
+  }
+  DateTimeRange? range = await showDateRangePicker(
+    context: context,
+    firstDate: DateTime(2020),
+    lastDate: DateTime(DateTime.now().year + 30, 12, 31),
+    helpText: '選擇要同步的日期範圍',
+    saveText: '同步',
+  );
+  if (range == null) return;
+  // 篩選範圍內、且有變更的日期
+  Set<String> inRange = <String>{};
+  DateTime cur = DateTime(range.start.year, range.start.month, range.start.day);
+  DateTime last = DateTime(range.end.year, range.end.month, range.end.day);
+  while (!cur.isAfter(last)) {
+    String k = DateFormat('yyyy-MM-dd').format(cur);
+    if (_dirtyDates.contains(k)) inRange.add(k);
+    cur = cur.add(const Duration(days: 1));
+  }
+  if (inRange.isEmpty) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('所選範圍內沒有變更需要同步'), duration: Duration(seconds: 3)));
+    return;
+  }
+  // 保存範圍外的 dirty，把 _dirtyDates 臨時設為 inRange
+  Set<String> others = Set<String>.from(_dirtyDates)..removeAll(inRange);
+  _dirtyDates = inRange;
+  await _syncToGoogle(silent: false);
+  // 同步完成後，把範圍外的 dirty 加回去
+  _dirtyDates.addAll(others);
+  var sp = await SharedPreferences.getInstance();
+  await sp.setStringList('dirtyDates', _dirtyDates.toList());
+}
+
 Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) async {
   if (!googleSyncEnabled && !silent) {
     bool? en = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
@@ -1383,6 +1421,23 @@ Widget calTab() {
                 child: Text(LunarHelper.getFullLunarText(selectedDay), style: const TextStyle(fontSize: 11, color: Colors.black87, fontWeight: FontWeight.bold)),
               ),
               const SizedBox(width: 8),
+              // 【新增】範圍同步按鈕
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.date_range, size: 18, color: Colors.blue),
+                  tooltip: '範圍同步',
+                  onPressed: googleSyncEnabled ? syncDateRange : null,
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                ),
+              ),
+              const SizedBox(width: 4),
               FilledButton.tonalIcon(onPressed: () { showDetail(selectedDay); }, icon: const Icon(Icons.edit, size: 16), label: const Text('編輯', style: TextStyle(fontSize: 12)), style: FilledButton.styleFrom(minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 12))),
             ]),
             const SizedBox(height: 10),
@@ -1994,6 +2049,10 @@ void showDetail(DateTime day) {
         Row(children: [
           Expanded(child: OutlinedButton.icon(onPressed: googleSyncEnabled ? () => _syncToGoogle() : null, icon: const Icon(Icons.sync), label: const Text('手動同步'))),
           const SizedBox(width: 8),
+          Expanded(child: OutlinedButton.icon(onPressed: googleSyncEnabled ? () => syncDateRange() : null, icon: const Icon(Icons.date_range), label: const Text('範圍同步'))),
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
           Expanded(child: OutlinedButton.icon(onPressed: () { setState(() => googleSyncEnabled = false); save(); }, icon: const Icon(Icons.link_off), label: const Text('取消')))
         ]),
         Text('當前: $_rosterCalendarName\nID: ${_rosterCalendarId ?? '未選'}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
