@@ -109,7 +109,6 @@ class MainActivity : FlutterActivity() {
             val selection = "${CalendarContract.Events.CALENDAR_ID} = ?"
             val selectionArgs = arrayOf(calendarId)
 
-            // 先查出所有事件 ID
             val cursor = contentResolver.query(uri, projection, selection, selectionArgs, null)
             val eventIds = mutableListOf<Long>()
             cursor?.use {
@@ -118,7 +117,6 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
-            // 分批删除，每批 10 条
             val batchSize = 10
             var deleted = 0
             var index = 0
@@ -129,12 +127,9 @@ class MainActivity : FlutterActivity() {
                     try {
                         contentResolver.delete(eventUri, null, null)
                         deleted++
-                    } catch (e: Exception) {
-                        // 忽略个别失败
-                    }
+                    } catch (e: Exception) { }
                 }
                 index = end
-                // 每删完一批，等 200ms，让系统喘口气，避免触发上限弹窗
                 if (index < eventIds.size) {
                     try { Thread.sleep(200) } catch (_: InterruptedException) {}
                 }
