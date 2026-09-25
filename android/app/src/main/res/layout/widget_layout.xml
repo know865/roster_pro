@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
@@ -12,49 +13,13 @@
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:layout_marginBottom="2dp">
-
-        <ImageButton
-            android:id="@+id/btn_prev"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:src="@android:drawable/ic_media_previous"
-            android:background="?android:attr/selectableItemBackground"
-            android:contentDescription="上個月" />
-
-        <TextView
-            android:id="@+id/tv_month_title"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="2024年1月"
-            android:textAlignment="center"
-            android:textSize="18sp"
-            android:textStyle="bold"
-            android:textColor="#333333" />
-
-        <ImageButton
-            android:id="@+id/btn_next"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:src="@android:drawable/ic_media_next"
-            android:background="?android:attr/selectableItemBackground"
-            android:contentDescription="下個月" />
-
-        <ImageButton
-            android:id="@+id/btn_refresh"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:src="@android:drawable/ic_popup_sync"
-            android:background="?android:attr/selectableItemBackground"
-            android:contentDescription="重新整理" />
+        <ImageButton android:id="@+id/btn_prev" android:layout_width="40dp" android:layout_height="40dp" android:src="@android:drawable/ic_media_previous" android:background="?android:attr/selectableItemBackground" android:contentDescription="上個月" />
+        <TextView android:id="@+id/tv_month_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="2024年1月" android:textAlignment="center" android:textSize="18sp" android:textStyle="bold" android:textColor="#333333" />
+        <ImageButton android:id="@+id/btn_next" android:layout_width="40dp" android:layout_height="40dp" android:src="@android:drawable/ic_media_next" android:background="?android:attr/selectableItemBackground" android:contentDescription="下個月" />
+        <ImageButton android:id="@+id/btn_refresh" android:layout_width="40dp" android:layout_height="40dp" android:src="@android:drawable/ic_popup_sync" android:background="?android:attr/selectableItemBackground" android:contentDescription="重新整理" />
     </LinearLayout>
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:weightSum="7"
-        android:layout_marginBottom="2dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:weightSum="7" android:layout_marginBottom="2dp">
         <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="一" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
         <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="二" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
         <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="三" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
@@ -64,14 +29,8 @@
         <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="日" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#D32F2F" />
     </LinearLayout>
 
-    <GridLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:columnCount="7"
-        android:rowCount="6"
-        android:layout_marginTop="1dp">
-        <!-- 【關鍵修改】所有 day 格子加上 maxLines="3" 和 ellipsize="none" -->
+    <GridLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:columnCount="7" android:rowCount="6" android:layout_marginTop="1dp">
+        <!-- day0 到 day41，每個都加上 maxLines="3" 和 ellipsize="none" -->
         <TextView android:id="@+id/day0" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
         <TextView android:id="@+id/day1" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
         <TextView android:id="@+id/day2" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
