@@ -18,6 +18,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:home_widget/home_widget.dart';
 import 'package:image/image.dart' as img;
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
 
 void main() {
   tzData.initializeTimeZones();
@@ -190,7 +191,6 @@ class MainPageState extends State<MainPage> {
   int widgetBgColor = 0xFFFFFFFF;
 
   Timer? _autoSyncTimer;
-
   String appVersion = '載入中...';
 
   Future<void> updateWidget() async {
@@ -345,7 +345,7 @@ class MainPageState extends State<MainPage> {
     sp.setString('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
     sp.setBool('showLunar', showLunar);
 
-    // ===== 關鍵：用 HomeWidget 直接寫入帶 flutter. 前綴的 key =====
+    // 用 HomeWidget 寫入 widget 設定（帶 flutter. 前綴）
     await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
     await HomeWidget.saveWidgetData<int>('widgetTextColor', widgetTextColor);
     await HomeWidget.saveWidgetData<int>('widgetBgColor', widgetBgColor);
@@ -356,11 +356,8 @@ class MainPageState extends State<MainPage> {
 
     await updateWidget();
 
-    // 延遲 500ms 再觸發一次，確保 SharedPreferences 落盤 + Android 重繪
     Future.delayed(const Duration(milliseconds: 500), () async {
-      try {
-        await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
-      } catch (_) {}
+      try { await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider'); } catch (_) {}
     });
 
     if (autoSync && googleSyncEnabled && !_isSyncing) {
@@ -510,7 +507,6 @@ Future<void> _ensureCalendar() async {
   await _pickGoogleCalendarDialog();
 }
 
-// ===== 同步：eventId 精準刪除 + 設備時區偏移 + 全天用 local 不跨天 =====
 Future<void> _syncToGoogle({bool silent = false}) async {
   if (!googleSyncEnabled && !silent) {
     bool? en = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
@@ -538,16 +534,12 @@ Future<void> _syncToGoogle({bool silent = false}) async {
     final sp = await SharedPreferences.getInstance();
     int del = 0, delOrphan = 0, add = 0;
 
-    // 步驟 1：優先按 _googleEventIdMap 的 eventId 精準刪除
+    // 步驟 1：優先按 _googleEventIdMap 精準刪除
     final trackedIds = Map<String, String>.from(_googleEventIdMap);
     for (var e in trackedIds.entries) {
-      try {
-        await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.value);
-        del++;
-      } catch (_) {}
+      try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.value); del++; } catch (_) {}
     }
     _googleEventIdMap.clear();
-
     if (del > 0) await Future.delayed(const Duration(milliseconds: 1500));
 
     // 步驟 2：掃描孤兒事件
@@ -567,7 +559,6 @@ Future<void> _syncToGoogle({bool silent = false}) async {
       scanStart = DateTime(minDate.year - 2, 1, 1);
       scanEnd = DateTime(maxDate.year + 2, 12, 31);
     }
-
     for (int attempt = 0; attempt < 3; attempt++) {
       var existingEvents = await _calendarPlugin.retrieveEvents(
         _rosterCalendarId!,
@@ -590,7 +581,6 @@ Future<void> _syncToGoogle({bool silent = false}) async {
 
     // 步驟 3：重建
     final offset = DateTime.now().timeZoneOffset;
-
     for (var entry in roster.entries) {
       final dateKey = entry.key;
       final code = entry.value;
@@ -613,13 +603,12 @@ Future<void> _syncToGoogle({bool silent = false}) async {
 
       Event ev;
       if (allDayFlag) {
-        // 【關鍵】全天事件：直接用本地時間，不轉 UTC，避免跨天
+        // 全天事件：用本地時區，不轉 UTC，避免跨天
         ev = Event(_rosterCalendarId!, title: title, description: desc,
           start: tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0),
           end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59),
           allDay: true);
       } else {
-        // 【關鍵】定時事件：用設備時區偏移明確轉 UTC
         final sp1 = def.start.split(':');
         final ep1 = def.end.split(':');
         DateTime sLocal = DateTime(date.year, date.month, date.day, int.parse(sp1[0]), int.parse(sp1[1]));
@@ -658,7 +647,6 @@ Future<void> _syncToGoogle({bool silent = false}) async {
   }
 }
 
-// ===== 全清重建：eventId 精準刪除 + 設備時區偏移 + 全天用 local =====
 Future<void> _forceFullResync() async {
   bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
     title: const Text('⚠️ 全清重建確認'),
@@ -681,19 +669,13 @@ Future<void> _forceFullResync() async {
     final sp = await SharedPreferences.getInstance();
     int del = 0, delOrphan = 0, add = 0;
 
-    // 步驟 1：優先按 _googleEventIdMap 精準刪除
     final trackedIds = Map<String, String>.from(_googleEventIdMap);
     for (var e in trackedIds.entries) {
-      try {
-        await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.value);
-        del++;
-      } catch (_) {}
+      try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.value); del++; } catch (_) {}
     }
     _googleEventIdMap.clear();
-
     if (del > 0) await Future.delayed(const Duration(milliseconds: 1500));
 
-    // 步驟 2：掃描孤兒事件（重試 5 次）
     DateTime scanStart, scanEnd;
     if (roster.isEmpty) {
       int currentYear = DateTime.now().year;
@@ -710,7 +692,6 @@ Future<void> _forceFullResync() async {
       scanStart = DateTime(minDate.year - 2, 1, 1);
       scanEnd = DateTime(maxDate.year + 2, 12, 31);
     }
-
     for (int attempt = 0; attempt < 5; attempt++) {
       var existingEvents = await _calendarPlugin.retrieveEvents(
         _rosterCalendarId!,
@@ -730,14 +711,11 @@ Future<void> _forceFullResync() async {
       if (!hasRemaining) break;
       await Future.delayed(const Duration(seconds: 1));
     }
-
     await Future.delayed(const Duration(seconds: 2));
     _googleEventIdMap.clear();
     sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
 
-    // 步驟 3：重建
     final offset = DateTime.now().timeZoneOffset;
-
     for (var entry in roster.entries) {
       final code = entry.value;
       final def = defs[code];
@@ -759,7 +737,6 @@ Future<void> _forceFullResync() async {
 
       Event ev;
       if (allDayFlag) {
-        // 【關鍵】全天事件：直接用本地時間，不轉 UTC
         ev = Event(_rosterCalendarId!, title: title, description: desc,
           start: tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0),
           end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59),
@@ -796,7 +773,309 @@ Future<void> _forceFullResync() async {
     _isSyncing = false;
   }
 }
-  Future<void> clearRosterByRange() async {
+
+// ===== 取得備份目錄 =====
+Future<String> _getBackupDir() async {
+  try {
+    Directory dir = Directory('/storage/emulated/0/RosterPro_Backups');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    final testFile = File('${dir.path}/.test');
+    await testFile.writeAsString('ok');
+    await testFile.delete();
+    return dir.path;
+  } catch (_) {
+    final appDir = await getApplicationDocumentsDirectory();
+    Directory dir = Directory('${appDir.path}/RosterPro_Backups');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return dir.path;
+  }
+}
+
+// ===== 從檔案還原 =====
+Future<void> restoreFromFile(String path) async {
+  try {
+    String c = await File(path).readAsString();
+    var j = jsonDecode(c);
+    setState(() {
+      if (j['roster'] != null) roster = Map<String, String>.from(j['roster']);
+      if (j['note'] != null) rosterNote = Map<String, String>.from(j['note']);
+      if (j['extraType'] != null) rosterExtraType = Map<String, String>.from(j['extraType']);
+      if (j['roOt'] != null) rosterOt = Map<String, double>.from((j['roOt'] as Map).map((k, v) => MapEntry(k as String, (v as num).toDouble())));
+      if (j['roEx'] != null) rosterExtra = Map<String, double>.from((j['roEx'] as Map).map((k, v) => MapEntry(k as String, (v as num).toDouble())));
+      if (j['roExH'] != null) rosterExtraHrs = Map<String, double>.from((j['roExH'] as Map).map((k, v) => MapEntry(k as String, (v as num).toDouble())));
+      if (j['defs'] != null) defs = (j['defs'] as Map).map<String, ShiftDef>((k, v) => MapEntry(k as String, ShiftDef.fromJson(Map<String, dynamic>.from(v as Map))));
+      if (j['pattern'] != null) pattern = (j['pattern'] as List).map<List<String>>((r) => (r as List).map<String>((e) => e.toString()).toList()).toList();
+      if (j['carry'] != null) carry = (j['carry'] as num).toDouble();
+      if (j['cName'] != null) { customName = j['cName']; nameCtrl.text = customName; }
+      if (j['stdWeek'] != null) standardWeeklyHours = (j['stdWeek'] as num).toDouble();
+      if (j['otRate'] != null) overtimeRate = (j['otRate'] as num).toDouble();
+      if (j['extraNewV36'] != null) extraAllowances = (j['extraNewV36'] as List).map((e) => ExtraAllowance.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+      if (j['calFont'] != null) calendarFontSize = (j['calFont'] as num).toDouble();
+      if (j['savedPatterns'] != null) savedPatterns = (j['savedPatterns'] as List).map((e) => SavedPattern.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+      if (j['holidayRegion'] != null) holidayRegion = j['holidayRegion'];
+      if (j['manualHolidays'] != null) manualHolidays = Map<String, String>.from(j['manualHolidays']);
+      if (j['rosterCalId'] != null) _rosterCalendarId = j['rosterCalId'];
+      if (j['rosterCalName'] != null) _rosterCalendarName = j['rosterCalName'];
+      if (j['rosterAccName'] != null) _rosterAccountName = j['rosterAccName'];
+      if (j['googleEventIdMap'] != null) _googleEventIdMap = Map<String, String>.from(j['googleEventIdMap']);
+      if (j['gSync'] != null) googleSyncEnabled = j['gSync'];
+      if (j['gAuto'] != null) autoSync = j['gAuto'];
+      if (j['todayBg'] != null) todayBgColor = Color(j['todayBg']);
+      if (j['todayBorder'] != null) todayBorderColor = Color(j['todayBorder']);
+      if (j['showLunar'] != null) showLunar = j['showLunar'];
+      if (j['widgetFontSize'] != null) widgetFontSize = (j['widgetFontSize'] as num).toDouble();
+      if (j['widgetTextColor'] != null) widgetTextColor = j['widgetTextColor'];
+    });
+    await save();
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('還原成功')));
+  } catch (e) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('還原失敗 $e')));
+  }
+}
+
+// ===== 從檔案選擇還原（保留）=====
+Future<void> restoreLocalFile() async {
+  var res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['json']);
+  if (res == null) return;
+  await restoreFromFile(res.files.single.path!);
+}
+
+// ===== 顯示備份清單 =====
+Future<void> showBackupList() async {
+  final dirPath = await _getBackupDir();
+  final dir = Directory(dirPath);
+  if (!await dir.exists()) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('沒有備份')));
+    return;
+  }
+  List<FileSystemEntity> entities = dir.listSync();
+  List<File> files = entities.whereType<File>().where((f) => f.path.endsWith('.json')).toList();
+  files.sort((a, b) => b.path.compareTo(a.path));
+
+  if (files.isEmpty) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('沒有備份')));
+    return;
+  }
+
+  Set<String> selectedPaths = <String>{};
+  bool multiSelectMode = false;
+
+  await showDialog(context: context, builder: (ctx) {
+    return StatefulBuilder(builder: (ctx2, setD) {
+      return AlertDialog(
+        title: Text(multiSelectMode ? '已選 ${selectedPaths.length} 個' : '備份清單 (${files.length})'),
+        content: SizedBox(width: 500, height: 500, child: Column(children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+            child: Text('目錄: $dirPath', style: const TextStyle(fontSize: 10)),
+          ),
+          const SizedBox(height: 8),
+          Expanded(child: ListView.builder(
+            itemCount: files.length,
+            itemBuilder: (c, i) {
+              final f = files[i];
+              final name = f.path.split('/').last;
+              final sizeKB = (f.statSync().size / 1024).toStringAsFixed(1);
+              final isSelected = selectedPaths.contains(f.path);
+              return ListTile(
+                dense: true,
+                leading: multiSelectMode
+                    ? Checkbox(
+                        value: isSelected,
+                        onChanged: (v) {
+                          setD(() {
+                            if (v == true) selectedPaths.add(f.path);
+                            else selectedPaths.remove(f.path);
+                          });
+                        },
+                      )
+                    : const Icon(Icons.description, size: 20),
+                title: Text(name, style: const TextStyle(fontSize: 12)),
+                subtitle: Text('${sizeKB} KB', style: const TextStyle(fontSize: 10)),
+                onTap: () async {
+                  if (multiSelectMode) {
+                    setD(() {
+                      if (isSelected) selectedPaths.remove(f.path);
+                      else selectedPaths.add(f.path);
+                    });
+                  } else {
+                    bool? c = await showDialog<bool>(context: context, builder: (c2) => AlertDialog(
+                      title: const Text('確認還原'),
+                      content: Text('將用此備份覆蓋目前資料：\n\n$name\n\n確定？'),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(c2, false), child: const Text('取消')),
+                        FilledButton(onPressed: () => Navigator.pop(c2, true), child: const Text('還原')),
+                      ],
+                    ));
+                    if (c == true && mounted) {
+                      Navigator.pop(ctx2);
+                      await restoreFromFile(f.path);
+                    }
+                  }
+                },
+              );
+            },
+          )),
+        ])),
+        actions: [
+          if (!multiSelectMode)
+            TextButton(onPressed: () => setD(() => multiSelectMode = true), child: const Text('多選刪除')),
+          if (multiSelectMode)
+            TextButton(
+              onPressed: () async {
+                if (selectedPaths.isEmpty) return;
+                bool? c = await showDialog<bool>(context: context, builder: (c2) => AlertDialog(
+                  title: const Text('確認刪除'),
+                  content: Text('刪除 ${selectedPaths.length} 個備份？\n\n此操作無法復原。'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(c2, false), child: const Text('取消')),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(c2, true),
+                      style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                      child: const Text('刪除'),
+                    ),
+                  ],
+                ));
+                if (c == true) {
+                  int deleted = 0;
+                  for (var p in selectedPaths) {
+                    try { await File(p).delete(); deleted++; } catch (_) {}
+                  }
+                  if (mounted) {
+                    Navigator.pop(ctx2);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已刪除 $deleted 個備份')));
+                  }
+                }
+              },
+              child: const Text('刪除選中', style: TextStyle(color: Colors.red)),
+            ),
+          TextButton(
+            onPressed: () {
+              if (multiSelectMode) {
+                setD(() { multiSelectMode = false; selectedPaths.clear(); });
+              } else {
+                Navigator.pop(ctx2);
+              }
+            },
+            child: Text(multiSelectMode ? '取消多選' : '關閉'),
+          ),
+        ],
+      );
+    });
+  });
+}
+
+// ===== 查看小工具調試日誌 =====
+Future<void> showWidgetDebugLog() async {
+  String content = '';
+  String usedPath = '';
+
+  try {
+    final dir = await getExternalStorageDirectory();
+    if (dir != null) {
+      final f = File('${dir.path}/roster_widget_debug.txt');
+      if (await f.exists()) {
+        content = await f.readAsString();
+        usedPath = f.path;
+      }
+    }
+  } catch (_) {}
+
+  if (content.isEmpty) {
+    try {
+      final dl = Directory('/storage/emulated/0/Download');
+      final f = File('${dl.path}/roster_widget_debug.txt');
+      if (await f.exists()) {
+        content = await f.readAsString();
+        usedPath = f.path;
+      }
+    } catch (_) {}
+  }
+
+  if (content.isEmpty) {
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final f = File('${appDir.path}/roster_widget_debug.txt');
+      if (await f.exists()) {
+        content = await f.readAsString();
+        usedPath = f.path;
+      }
+    } catch (_) {}
+  }
+
+  if (content.isEmpty) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('尚未產生除錯日誌。請先修改字體大小或顏色，讓小工具更新一次。'),
+        duration: Duration(seconds: 5),
+      ));
+    }
+    return;
+  }
+
+  if (!mounted) return;
+  await showDialog(context: context, builder: (ctx) => AlertDialog(
+    title: const Text('小工具調試日誌'),
+    content: SizedBox(
+      width: 500, height: 500,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(6)),
+          child: Text('路徑: $usedPath', style: const TextStyle(fontSize: 9)),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: SingleChildScrollView(
+            child: SelectableText(content, style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
+          ),
+        ),
+      ]),
+    ),
+    actions: [
+      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('關閉')),
+    ],
+  ));
+}
+
+// ===== 備份 =====
+Future<void> backupAnywhere() async {
+  try {
+    final dirPath = await _getBackupDir();
+    String fileName = 'roster_pro_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.json';
+    var backup = {
+      'version': appVersion, 'exportTime': DateTime.now().toIso8601String(),
+      'roster': roster, 'note': rosterNote, 'extraType': rosterExtraType,
+      'roOt': rosterOt, 'roEx': rosterExtra, 'roExH': rosterExtraHrs,
+      'defs': defs.map((k, v) => MapEntry(k, v.toJson())),
+      'pattern': pattern, 'carry': carry, 'cName': customName,
+      'stdWeek': standardWeeklyHours, 'otRate': overtimeRate,
+      'extraNewV36': extraAllowances.map((e) => e.toJson()).toList(),
+      'calFont': calendarFontSize,
+      'savedPatterns': savedPatterns.map((e) => e.toJson()).toList(),
+      'holidayRegion': holidayRegion, 'manualHolidays': manualHolidays,
+      'rosterCalId': _rosterCalendarId, 'rosterCalName': _rosterCalendarName,
+      'rosterAccName': _rosterAccountName, 'googleEventIdMap': _googleEventIdMap,
+      'gSync': googleSyncEnabled, 'gAuto': autoSync,
+      'todayBg': todayBgColor.value, 'todayBorder': todayBorderColor.value,
+      'showLunar': showLunar, 'widgetFontSize': widgetFontSize,
+      'widgetTextColor': widgetTextColor,
+    };
+    var f = File('$dirPath/$fileName');
+    await f.writeAsString(jsonEncode(backup));
+    setState(() => _lastBackupPath = '$dirPath/$fileName');
+    await save();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已備份: $fileName'), duration: const Duration(seconds: 3)));
+    }
+  } catch (e) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('備份失敗 $e')));
+  }
+}
+
+// ===== 清除排更（範圍）=====
+Future<void> clearRosterByRange() async {
   DateTimeRange? range = await showDateRangePicker(
     context: context,
     firstDate: DateTime(2023),
@@ -887,63 +1166,7 @@ Future<void> exportShareImage() async {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('截圖失敗 $e')));
   }
 }
-
-Future<void> backupAnywhere() async {
-  String? dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇備份位置');
-  if (dir == null) return;
-  String fileName = 'roster_pro_full_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.json';
-  var backup = {'version': appVersion, 'exportTime': DateTime.now().toIso8601String(), 'roster': roster, 'note': rosterNote, 'extraType': rosterExtraType, 'roOt': rosterOt, 'roEx': rosterExtra, 'roExH': rosterExtraHrs, 'defs': defs.map((k, v) => MapEntry(k, v.toJson())), 'pattern': pattern, 'carry': carry, 'cName': customName, 'stdWeek': standardWeeklyHours, 'otRate': overtimeRate, 'extraNewV36': extraAllowances.map((e) => e.toJson()).toList(), 'calFont': calendarFontSize, 'savedPatterns': savedPatterns.map((e) => e.toJson()).toList(), 'holidayRegion': holidayRegion, 'manualHolidays': manualHolidays, 'rosterCalId': _rosterCalendarId, 'rosterCalName': _rosterCalendarName, 'rosterAccName': _rosterAccountName, 'googleEventIdMap': _googleEventIdMap, 'gSync': googleSyncEnabled, 'gAuto': autoSync, 'todayBg': todayBgColor.value, 'todayBorder': todayBorderColor.value, 'showLunar': showLunar, 'widgetFontSize': widgetFontSize, 'widgetTextColor': widgetTextColor};
-  var f = File('$dir/$fileName');
-  await f.writeAsString(jsonEncode(backup));
-  setState(() => _lastBackupPath = '$dir/$fileName');
-  await save();
-  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('全部備份 $_lastBackupPath')));
-}
-
-Future<void> restoreLocalFile() async {
-  var res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['json']);
-  if (res == null) return;
-  try {
-    String c = await File(res.files.single.path!).readAsString();
-    var j = jsonDecode(c);
-    setState(() {
-      if (j['roster'] != null) roster = Map<String, String>.from(j['roster']);
-      if (j['note'] != null) rosterNote = Map<String, String>.from(j['note']);
-      if (j['extraType'] != null) rosterExtraType = Map<String, String>.from(j['extraType']);
-      if (j['roOt'] != null) rosterOt = Map<String, double>.from((j['roOt'] as Map).map((k, v) => MapEntry(k as String, (v as num).toDouble())));
-      if (j['roEx'] != null) rosterExtra = Map<String, double>.from((j['roEx'] as Map).map((k, v) => MapEntry(k as String, (v as num).toDouble())));
-      if (j['roExH'] != null) rosterExtraHrs = Map<String, double>.from((j['roExH'] as Map).map((k, v) => MapEntry(k as String, (v as num).toDouble())));
-      if (j['defs'] != null) defs = (j['defs'] as Map).map<String, ShiftDef>((k, v) => MapEntry(k as String, ShiftDef.fromJson(Map<String, dynamic>.from(v as Map))));
-      if (j['pattern'] != null) pattern = (j['pattern'] as List).map<List<String>>((r) => (r as List).map<String>((e) => e.toString()).toList()).toList();
-      if (j['carry'] != null) carry = (j['carry'] as num).toDouble();
-      if (j['cName'] != null) { customName = j['cName']; nameCtrl.text = customName; }
-      if (j['stdWeek'] != null) standardWeeklyHours = (j['stdWeek'] as num).toDouble();
-      if (j['otRate'] != null) overtimeRate = (j['otRate'] as num).toDouble();
-      if (j['extraNewV36'] != null) extraAllowances = (j['extraNewV36'] as List).map((e) => ExtraAllowance.fromJson(Map<String, dynamic>.from(e as Map))).toList();
-      if (j['calFont'] != null) calendarFontSize = (j['calFont'] as num).toDouble();
-      if (j['savedPatterns'] != null) savedPatterns = (j['savedPatterns'] as List).map((e) => SavedPattern.fromJson(Map<String, dynamic>.from(e as Map))).toList();
-      if (j['holidayRegion'] != null) holidayRegion = j['holidayRegion'];
-      if (j['manualHolidays'] != null) manualHolidays = Map<String, String>.from(j['manualHolidays']);
-      if (j['rosterCalId'] != null) _rosterCalendarId = j['rosterCalId'];
-      if (j['rosterCalName'] != null) _rosterCalendarName = j['rosterCalName'];
-      if (j['rosterAccName'] != null) _rosterAccountName = j['rosterAccName'];
-      if (j['googleEventIdMap'] != null) _googleEventIdMap = Map<String, String>.from(j['googleEventIdMap']);
-      if (j['gSync'] != null) googleSyncEnabled = j['gSync'];
-      if (j['gAuto'] != null) autoSync = j['gAuto'];
-      if (j['todayBg'] != null) todayBgColor = Color(j['todayBg']);
-      if (j['todayBorder'] != null) todayBorderColor = Color(j['todayBorder']);
-      if (j['showLunar'] != null) showLunar = j['showLunar'];
-      if (j['widgetFontSize'] != null) widgetFontSize = (j['widgetFontSize'] as num).toDouble();
-      if (j['widgetTextColor'] != null) widgetTextColor = j['widgetTextColor'];
-    });
-    save();
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('還原成功')));
-  } catch (e) {
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('還原失敗 $e')));
-  }
-}
-
-Future<void> exportReport() async {
+  Future<void> exportReport() async {
   try {
     StringBuffer sb = StringBuffer();
     if (!isYearReport) {
@@ -1033,9 +1256,7 @@ Future<void> showNotesListDialog() async {
           int dim = DateTime(queryYear, m + 1, 0).day;
           for (int d = 1; d <= dim; d++) {
             String k = DateFormat('yyyy-MM-dd').format(DateTime(queryYear, m, d));
-            if (rosterNote.containsKey(k) && rosterNote[k]!.isNotEmpty) {
-              notes.add(MapEntry(k, rosterNote[k]!));
-            }
+            if (rosterNote.containsKey(k) && rosterNote[k]!.isNotEmpty) notes.add(MapEntry(k, rosterNote[k]!));
           }
         }
       } else {
@@ -1044,9 +1265,7 @@ Future<void> showNotesListDialog() async {
             DateTime dt = DateTime(queryYear, queryMonth, i);
             if (dt.month != queryMonth) break;
             String k = DateFormat('yyyy-MM-dd').format(dt);
-            if (rosterNote.containsKey(k) && rosterNote[k]!.isNotEmpty) {
-              notes.add(MapEntry(k, rosterNote[k]!));
-            }
+            if (rosterNote.containsKey(k) && rosterNote[k]!.isNotEmpty) notes.add(MapEntry(k, rosterNote[k]!));
           } catch (_) {}
         }
       }
@@ -1056,10 +1275,7 @@ Future<void> showNotesListDialog() async {
         content: SizedBox(width: 500, height: 500, child: Column(children: [
           Row(children: [
             Expanded(child: SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: false, label: Text('指定月')),
-                ButtonSegment(value: true, label: Text('全年')),
-              ],
+              segments: const [ButtonSegment(value: false, label: Text('指定月')), ButtonSegment(value: true, label: Text('全年'))],
               selected: {yearMode},
               onSelectionChanged: (s) => setD(() => yearMode = s.first),
             )),
@@ -1099,9 +1315,7 @@ Future<void> showNotesListDialog() async {
             try {
               StringBuffer sb = StringBuffer();
               sb.writeln('日期,記事');
-              for (var n in notes) {
-                sb.writeln('${n.key},"${n.value.replaceAll('"', '""')}"');
-              }
+              for (var n in notes) sb.writeln('${n.key},"${n.value.replaceAll('"', '""')}"');
               String? dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇匯出資料夾');
               if (dir != null) {
                 String path = '$dir/notes_${queryYear}${yearMode ? '' : queryMonth.toString().padLeft(2, '0')}.csv';
@@ -1173,9 +1387,7 @@ Future<void> smartSchedule() async {
   if (confirm != true) return;
 
   List<String> flat = [];
-  for (var row in selectedPattern) {
-    flat.addAll(row);
-  }
+  for (var row in selectedPattern) flat.addAll(row);
 
   setState(() {
     for (int i = 0; i < totalDays; i++) {
@@ -1187,10 +1399,7 @@ Future<void> smartSchedule() async {
   save();
   setState(() => tab = 0);
   if (mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('智能排班完成：$totalDays 天'),
-      duration: const Duration(seconds: 4),
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('智能排班完成：$totalDays 天'), duration: const Duration(seconds: 4)));
   }
 }
 
@@ -1265,12 +1474,7 @@ Widget calTab() {
                       Expanded(
                         child: GridView.builder(
                           shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), padding: const EdgeInsets.all(2),
-                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 7,
-                            childAspectRatio: 0.55,
-                            mainAxisSpacing: 3,
-                            crossAxisSpacing: 3
-                          ),
+                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7, childAspectRatio: 0.55, mainAxisSpacing: 3, crossAxisSpacing: 3),
                           itemCount: 7,
                           itemBuilder: (ctx2, col) {
                             int idx = row * 7 + col;
@@ -1299,40 +1503,19 @@ Widget calTab() {
                                   color: bg, borderRadius: BorderRadius.circular(10),
                                   border: isToday ? Border.all(width: 2.5, color: todayBorderColor) : sel ? Border.all(width: 2, color: Colors.deepPurple) : null
                                 ),
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                  children: [
-                                    FittedBox(
-                                      fit: BoxFit.scaleDown,
-                                      child: Text('${day.day}', style: TextStyle(fontWeight: isToday ? FontWeight.w900 : FontWeight.bold, fontSize: calendarFontSize, color: inM ? Colors.black : Colors.grey)),
-                                    ),
-                                    if (code != null)
-                                      FittedBox(
-                                        fit: BoxFit.scaleDown,
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                          decoration: BoxDecoration(color: def?.color ?? Colors.orange, borderRadius: BorderRadius.circular(4)),
-                                          child: Text(code, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
-                                        ),
-                                      )
-                                    else
-                                      const SizedBox(height: 14),
-                                    if (showLunar && lunarText.isNotEmpty && inM)
-                                      FittedBox(
-                                        fit: BoxFit.scaleDown,
-                                        child: Text(lunarText, style: TextStyle(fontSize: 9, color: Colors.grey[700])),
-                                      )
-                                    else
-                                      const SizedBox(height: 10),
-                                    SizedBox(
-                                      height: 6,
-                                      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                                        if (isHol) Container(width: 5, height: 5, margin: const EdgeInsets.symmetric(horizontal: 0.5), decoration: BoxDecoration(color: holidayDotColor, shape: BoxShape.circle)),
-                                        if (hasNote) Container(width: 5, height: 5, margin: const EdgeInsets.symmetric(horizontal: 0.5), decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle)),
-                                      ]),
-                                    ),
-                                  ]
-                                )
+                                child: Column(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                                  FittedBox(fit: BoxFit.scaleDown, child: Text('${day.day}', style: TextStyle(fontWeight: isToday ? FontWeight.w900 : FontWeight.bold, fontSize: calendarFontSize, color: inM ? Colors.black : Colors.grey))),
+                                  if (code != null)
+                                    FittedBox(fit: BoxFit.scaleDown, child: Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: def?.color ?? Colors.orange, borderRadius: BorderRadius.circular(4)), child: Text(code, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold))))
+                                  else const SizedBox(height: 14),
+                                  if (showLunar && lunarText.isNotEmpty && inM)
+                                    FittedBox(fit: BoxFit.scaleDown, child: Text(lunarText, style: TextStyle(fontSize: 9, color: Colors.grey[700])))
+                                  else const SizedBox(height: 10),
+                                  SizedBox(height: 6, child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                    if (isHol) Container(width: 5, height: 5, margin: const EdgeInsets.symmetric(horizontal: 0.5), decoration: BoxDecoration(color: holidayDotColor, shape: BoxShape.circle)),
+                                    if (hasNote) Container(width: 5, height: 5, margin: const EdgeInsets.symmetric(horizontal: 0.5), decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle)),
+                                  ])),
+                                ])
                               )
                             );
                           }
@@ -1412,37 +1595,34 @@ void showDetail(DateTime day) {
             const SizedBox(height: 12),
             Row(children: [
               Expanded(child: OutlinedButton(onPressed: () async {
+                final eventId = _googleEventIdMap[k];
+                final calId = _rosterCalendarId;
+                Navigator.pop(ctx2);
                 setState(() { roster.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); rosterExtraType.remove(k); });
-                if (_googleEventIdMap.containsKey(k) && _rosterCalendarId != null) {
-                  try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, _googleEventIdMap[k]); } catch (_) {}
+                if (eventId != null && calId != null) {
+                  try { await _calendarPlugin.deleteEvent(calId, eventId); } catch (_) {}
                   _googleEventIdMap.remove(k);
                 }
-                await save();
-                // 立即觸發 widget 重繪
-                Future.delayed(const Duration(milliseconds: 300), () async {
-                  try { await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider'); } catch (_) {}
-                });
-                if (mounted) Navigator.pop(ctx2);
+                save();
               }, child: const Text('清除班次(保留記事)', style: TextStyle(color: Colors.orange)))),
               const SizedBox(width: 8),
-              Expanded(child: FilledButton(onPressed: () async {
-                double? otVal = double.tryParse(otc.text);
-                double? exVal = double.tryParse(exCtrl.text);
-                double? exHVal = double.tryParse(exHCtrl.text);
+              Expanded(child: FilledButton(onPressed: () {
+                final otVal = double.tryParse(otc.text);
+                final exVal = double.tryParse(exCtrl.text);
+                final exHVal = double.tryParse(exHCtrl.text);
+                final noteText = nc.text;
+                final exTypeText = exTypeCtrl.text.trim();
+                final curCode = cur;
+                Navigator.pop(ctx2);
                 setState(() {
-                  if (cur.isNotEmpty) roster[k] = cur;
-                  if (nc.text.isNotEmpty) rosterNote[k] = nc.text; else rosterNote.remove(k);
-                  if (exTypeCtrl.text.isNotEmpty) rosterExtraType[k] = exTypeCtrl.text.trim(); else rosterExtraType.remove(k);
+                  if (curCode.isNotEmpty) roster[k] = curCode;
+                  if (noteText.isNotEmpty) rosterNote[k] = noteText; else rosterNote.remove(k);
+                  if (exTypeText.isNotEmpty) rosterExtraType[k] = exTypeText; else rosterExtraType.remove(k);
                   if (otVal != null) rosterOt[k] = otVal;
                   if (exVal != null && exVal != 0) rosterExtra[k] = exVal; else if (exVal == 0) rosterExtra.remove(k);
                   if (exHVal != null && exHVal != 0) rosterExtraHrs[k] = exHVal; else rosterExtraHrs.remove(k);
                 });
-                await save();
-                // 立即觸發 widget 重繪
-                Future.delayed(const Duration(milliseconds: 300), () async {
-                  try { await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider'); } catch (_) {}
-                });
-                if (mounted) Navigator.pop(ctx2);
+                save();
               }, child: const Text('儲存'))),
             ]),
           ])
@@ -1567,11 +1747,7 @@ Future<void> pickRangeAndApply() async {
     if (selected == null) return;
     if (selected == -1) chosenPattern = pattern; else chosenPattern = savedPatterns[selected].data.map((r) => List<String>.from(r)).toList();
   }
-  DateTimeRange? p = await showDateRangePicker(
-    context: context,
-    firstDate: DateTime(2023),
-    lastDate: DateTime(DateTime.now().year + 30, 12, 31)
-  );
+  DateTimeRange? p = await showDateRangePicker(context: context, firstDate: DateTime(2023), lastDate: DateTime(DateTime.now().year + 30, 12, 31));
   if (p == null) return;
   var flat = chosenPattern.expand((e) => e).toList();
   setState(() {
@@ -1606,12 +1782,7 @@ Widget patternTab() {
           const SizedBox(width: 8),
           FilledButton(onPressed: () async { await pickRangeAndApply(); }, child: const Text('自動排班')),
           const SizedBox(width: 8),
-          FilledButton.tonalIcon(
-            icon: const Icon(Icons.auto_awesome),
-            label: const Text('智能排班'),
-            onPressed: smartSchedule,
-            style: FilledButton.styleFrom(backgroundColor: Colors.amber.shade200),
-          ),
+          FilledButton.tonalIcon(icon: const Icon(Icons.auto_awesome), label: const Text('智能排班'), onPressed: smartSchedule, style: FilledButton.styleFrom(backgroundColor: Colors.amber.shade200)),
         ]),
         const SizedBox(height: 8),
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -1731,11 +1902,7 @@ Widget patternTab() {
                 child: Container(
                   margin: const EdgeInsets.all(2),
                   height: 60,
-                  decoration: BoxDecoration(
-                    color: chipColor.withOpacity(0.3),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: chipColor, width: 2),
-                  ),
+                  decoration: BoxDecoration(color: chipColor.withOpacity(0.3), borderRadius: BorderRadius.circular(8), border: Border.all(color: chipColor, width: 2)),
                   child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: Text(code, style: TextStyle(fontSize: calendarFontSize, fontWeight: FontWeight.bold)))),
                 )
               ));
@@ -1800,41 +1967,18 @@ Widget patternTab() {
     double totalAllow = allow + otAmount + extraAllowances.fold(0.0, (a, b) => a + b.amount);
     return SafeArea(child: ListView(padding: const EdgeInsets.all(12), children: [
       Row(children: [
-        FilledButton.icon(
-          onPressed: exportReport,
-          icon: const Icon(Icons.ios_share, size: 18),
-          label: const Text('匯出', style: TextStyle(fontSize: 14)),
-          style: FilledButton.styleFrom(backgroundColor: Colors.deepPurple, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
-        ),
+        FilledButton.icon(onPressed: exportReport, icon: const Icon(Icons.ios_share, size: 18), label: const Text('匯出', style: TextStyle(fontSize: 14)), style: FilledButton.styleFrom(backgroundColor: Colors.deepPurple, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8))),
         const SizedBox(width: 8),
-        Expanded(
-          child: InkWell(
-            onTap: () => quickJumpMonth(forReport: true),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Flexible(
-                  child: Text(
-                    '${year}年${isYearReport ? ' 全年' : ' ${month}月'}',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const Icon(Icons.arrow_drop_down, size: 22),
-              ]),
-            ),
-          ),
-        ),
+        Expanded(child: InkWell(onTap: () => quickJumpMonth(forReport: true), child: Container(padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Flexible(child: Text('${year}年${isYearReport ? ' 全年' : ' ${month}月'}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+          const Icon(Icons.arrow_drop_down, size: 22),
+        ])))),
         const SizedBox(width: 4),
         SegmentedButton<bool>(
           segments: const [ButtonSegment(value: false, label: Text('本月')), ButtonSegment(value: true, label: Text('全年'))],
           selected: {isYearReport},
           onSelectionChanged: (s) { setState(() => isYearReport = s.first); },
-          style: ButtonStyle(
-            padding: WidgetStateProperty.all(const EdgeInsets.symmetric(horizontal: 8)),
-            textStyle: WidgetStateProperty.all(const TextStyle(fontSize: 13)),
-            visualDensity: VisualDensity.compact,
-          ),
+          style: ButtonStyle(padding: WidgetStateProperty.all(const EdgeInsets.symmetric(horizontal: 8)), textStyle: WidgetStateProperty.all(const TextStyle(fontSize: 13)), visualDensity: VisualDensity.compact),
         ),
       ]),
       const SizedBox(height: 8),
@@ -1937,47 +2081,31 @@ Widget patternTab() {
         Text('本年 ${focused.year} 假期數: ${getHolidays(focused.year, holidayRegion).length} 個', style: const TextStyle(fontSize: 12, color: Colors.grey)),
         const SizedBox(height: 8),
         Row(children: [
-          Expanded(child: OutlinedButton.icon(
-            icon: const Icon(Icons.refresh, size: 18),
-            label: const Text('手動更新'),
-            onPressed: () { setState(() {}); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('假期已手動更新'))); },
-          )),
+          Expanded(child: OutlinedButton.icon(icon: const Icon(Icons.refresh, size: 18), label: const Text('手動更新'), onPressed: () { setState(() {}); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('假期已手動更新'))); })),
           const SizedBox(width: 8),
-          Expanded(child: OutlinedButton.icon(
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('農曆添加'),
-            onPressed: () {
-              var dCtrl = TextEditingController(text: '${focused.year}-');
-              var nCtrl = TextEditingController(text: '農曆節日');
-              showDialog(context: context, builder: (ctx) => AlertDialog(
-                title: const Text('新增農曆/手動假期'),
-                content: Column(mainAxisSize: MainAxisSize.min, children: [
-                  SizedBox(height: 56, child: TextField(controller: dCtrl, decoration: const InputDecoration(labelText: '日期 (yyyy-MM-dd)', isDense: true, border: OutlineInputBorder()))),
-                  const SizedBox(height: 8),
-                  SizedBox(height: 56, child: TextField(controller: nCtrl, decoration: const InputDecoration(labelText: '假期名稱', isDense: true, border: OutlineInputBorder()))),
-                ]),
-                actions: [
-                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-                  FilledButton(onPressed: () { if (dCtrl.text.isNotEmpty && nCtrl.text.isNotEmpty) { setState(() => manualHolidays[dCtrl.text.trim()] = nCtrl.text.trim()); save(); Navigator.pop(ctx); } }, child: const Text('新增')),
-                ]
-              ));
-            },
-          )),
+          Expanded(child: OutlinedButton.icon(icon: const Icon(Icons.add, size: 18), label: const Text('農曆添加'), onPressed: () {
+            var dCtrl = TextEditingController(text: '${focused.year}-');
+            var nCtrl = TextEditingController(text: '農曆節日');
+            showDialog(context: context, builder: (ctx) => AlertDialog(
+              title: const Text('新增農曆/手動假期'),
+              content: Column(mainAxisSize: MainAxisSize.min, children: [
+                SizedBox(height: 56, child: TextField(controller: dCtrl, decoration: const InputDecoration(labelText: '日期 (yyyy-MM-dd)', isDense: true, border: OutlineInputBorder()))),
+                const SizedBox(height: 8),
+                SizedBox(height: 56, child: TextField(controller: nCtrl, decoration: const InputDecoration(labelText: '假期名稱', isDense: true, border: OutlineInputBorder()))),
+              ]),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+                FilledButton(onPressed: () { if (dCtrl.text.isNotEmpty && nCtrl.text.isNotEmpty) { setState(() => manualHolidays[dCtrl.text.trim()] = nCtrl.text.trim()); save(); Navigator.pop(ctx); } }, child: const Text('新增')),
+              ]
+            ));
+          })),
         ]),
         if (manualHolidays.isNotEmpty) ...[
           const Divider(),
           const Text('已添加的手動假期:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-          ...manualHolidays.entries.map((e) => ListTile(
-            dense: true,
-            title: Text('${e.key} - ${e.value}', style: const TextStyle(fontSize: 12)),
-            trailing: IconButton(icon: const Icon(Icons.delete, size: 18), onPressed: () { setState(() => manualHolidays.remove(e.key)); save(); }),
-          )),
+          ...manualHolidays.entries.map((e) => ListTile(dense: true, title: Text('${e.key} - ${e.value}', style: const TextStyle(fontSize: 12)), trailing: IconButton(icon: const Icon(Icons.delete, size: 18), onPressed: () { setState(() => manualHolidays.remove(e.key)); save(); }))),
         ],
-        SwitchListTile(
-          title: const Text('顯示農曆'),
-          value: showLunar,
-          onChanged: (v) { setState(() => showLunar = v); save(); },
-        ),
+        SwitchListTile(title: const Text('顯示農曆'), value: showLunar, onChanged: (v) { setState(() => showLunar = v); save(); }),
       ]))),
       const SizedBox(height: 16),
       const Text('日曆同步', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -1994,8 +2122,7 @@ Widget patternTab() {
         SizedBox(width: double.infinity, child: OutlinedButton.icon(icon: const Icon(Icons.list), label: const Text('選擇日曆'), onPressed: () async { await _pickGoogleCalendarDialog(); })),
         SizedBox(width: double.infinity, child: OutlinedButton.icon(icon: const Icon(Icons.security), label: const Text('重新請求日曆權限'), onPressed: () async { await handleCalendarPermission(silent: false); setState(() {}); })),
         const Divider(),
-        Container(
-          width: double.infinity, padding: const EdgeInsets.all(10),
+        Container(width: double.infinity, padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(color: Colors.red.withOpacity(0.08), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.withOpacity(0.3))),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('⚠️ 全清重建（救援用）', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 13)),
@@ -2086,15 +2213,21 @@ Widget patternTab() {
       const Text('全部備份與還原', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Expanded(child: OutlinedButton.icon(onPressed: backupAnywhere, icon: const Icon(Icons.backup), label: const Text('全部備份'))),
+          Expanded(child: FilledButton.icon(onPressed: backupAnywhere, icon: const Icon(Icons.backup), label: const Text('立即備份'))),
           const SizedBox(width: 8),
-          Expanded(child: OutlinedButton.icon(onPressed: restoreLocalFile, icon: const Icon(Icons.restore), label: const Text('全部還原')))
+          Expanded(child: OutlinedButton.icon(onPressed: showBackupList, icon: const Icon(Icons.folder_open), label: const Text('備份清單'))),
         ]),
         const SizedBox(height: 8),
-        Container(width: double.infinity, padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('最近備份路徑:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-          Text(_lastBackupPath, style: const TextStyle(fontSize: 10, color: Colors.black87)),
-        ]))
+        SizedBox(width: double.infinity, child: OutlinedButton.icon(onPressed: restoreLocalFile, icon: const Icon(Icons.restore), label: const Text('從檔案還原 (.json)'))),
+        const SizedBox(height: 8),
+        SizedBox(width: double.infinity, child: OutlinedButton.icon(onPressed: showWidgetDebugLog, icon: const Icon(Icons.bug_report), label: const Text('查看小工具調試日誌'), style: OutlinedButton.styleFrom(foregroundColor: Colors.deepPurple))),
+        const SizedBox(height: 8),
+        Container(width: double.infinity, padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('最近備份路徑:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+            Text(_lastBackupPath, style: const TextStyle(fontSize: 10, color: Colors.black87)),
+          ])),
       ]))),
       const SizedBox(height: 16),
       const Text('桌面小工具設定 (Widget)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -2107,15 +2240,10 @@ Widget patternTab() {
             label: widgetFontSize.toStringAsFixed(0),
             onChanged: (v) async {
               setState(() => widgetFontSize = v);
-              // 立即寫入並觸發 widget 重繪
               await HomeWidget.saveWidgetData<double>('widgetFontSize', v);
-              try {
-                await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
-              } catch (_) {}
+              try { await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider'); } catch (_) {}
             },
-            onChangeEnd: (v) async {
-              await save();
-            },
+            onChangeEnd: (v) async { await save(); },
           )),
           Text(widgetFontSize.toStringAsFixed(0), style: const TextStyle(fontWeight: FontWeight.bold)),
         ]),
@@ -2132,9 +2260,7 @@ Widget patternTab() {
                 onTap: () async {
                   setState(() => widgetTextColor = c.value);
                   await HomeWidget.saveWidgetData<int>('widgetTextColor', c.value);
-                  try {
-                    await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
-                  } catch (_) {}
+                  try { await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider'); } catch (_) {}
                   await save();
                   if (mounted) Navigator.pop(ctx);
                 },
@@ -2143,18 +2269,11 @@ Widget patternTab() {
             ));
           },
         ),
-        const Padding(
-          padding: EdgeInsets.only(top: 8),
-          child: Text('提示：修改後，桌面小工具可能需要幾秒鐘重新整理才會生效', style: TextStyle(fontSize: 11, color: Colors.grey)),
-        ),
+        const Padding(padding: EdgeInsets.only(top: 8), child: Text('提示：修改後，桌面小工具可能需要幾秒鐘重新整理才會生效', style: TextStyle(fontSize: 11, color: Colors.grey))),
       ]))),
       const SizedBox(height: 16),
       const Text('應用資訊', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-      Card(child: ListTile(
-        leading: const Icon(Icons.info_outline),
-        title: const Text('版本號'),
-        subtitle: Text(appVersion),
-      )),
+      Card(child: ListTile(leading: const Icon(Icons.info_outline), title: const Text('版本號'), subtitle: Text(appVersion))),
       const SizedBox(height: 16),
     ]));
   }
