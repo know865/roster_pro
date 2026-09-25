@@ -26,7 +26,6 @@ class MainActivity : FlutterActivity() {
                 "getCalendars" -> handleGetCalendars(result)
                 "scanImage" -> handleScanImage(call.argument<String>("path"), result)
                 "requestManageStorage" -> handleRequestManageStorage(result)
-                // 【新增】根據日曆 ID 強制刪除該日曆下所有事件
                 "deleteAllEventsInCalendar" -> {
                     val calendarId = call.argument<String>("calendarId")
                     if (calendarId == null) {
@@ -97,7 +96,6 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) { result.error("STORAGE_FAIL", e.message, null) }
     }
 
-    // 【核心】用原生 Android API 強制刪除該日曆下所有事件
     private fun handleDeleteAllEvents(calendarId: String, result: MethodChannel.Result) {
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
@@ -119,7 +117,6 @@ class MainActivity : FlutterActivity() {
                         contentResolver.delete(eventUri, null, null)
                         deleted++
                     } catch (e: Exception) {
-                        // 忽略個別失敗，繼續刪下一條
                     }
                 }
             }
