@@ -99,11 +99,7 @@ class LunarHelper {
     int month = 1;
     while (month < 13 && offset > 0) {
       int days;
-      if (leap > 0 && month == leap + 1 && !isLeap) {
-        isLeap = true; days = leapDays(year);
-      } else {
-        days = monthDays(year, month);
-      }
+      if (leap > 0 && month == leap + 1 && !isLeap) { isLeap = true; days = leapDays(year); } else { days = monthDays(year, month); }
       if (isLeap && month == leap + 1) isLeap = false;
       if (offset < days) break;
       offset -= days;
@@ -120,9 +116,7 @@ class LunarHelper {
       int m = r[0], d = r[1], isLeap = r[2];
       if (d == 1) return '${isLeap == 1 ? '閏' : ''}${lunarMonths[m - 1]}月';
       return lunarDays[d - 1];
-    } catch (_) {
-      return '';
-    }
+    } catch (_) { return ''; }
   }
 }
 
@@ -186,6 +180,9 @@ class MainPageState extends State<MainPage> {
   String _rosterAccountName = '';
   Map<String, String> _googleEventIdMap = {};
 
+  Set<String> _dirtyDates = <String>{};
+  bool _needsFullSync = true;
+
   double widgetFontSize = 55;
   int widgetTextColor = 0xFF333333;
   int widgetBgColor = 0xFFFFFFFF;
@@ -206,14 +203,12 @@ class MainPageState extends State<MainPage> {
       await HomeWidget.saveWidgetData('roster_json', jsonEncode(roster));
       await HomeWidget.saveWidgetData('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
       await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
-      await HomeWidget.saveWidgetData<int>('widgetTextColor', widgetTextColor);
+      await HomeWidget.saveWidgetData<double>('widgetTextColor', widgetTextColor.toDouble());
       DateTime now = DateTime.now();
       await HomeWidget.saveWidgetData('initial_year', now.year);
       await HomeWidget.saveWidgetData('initial_month', now.month);
       await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
-    } catch (e) {
-      print("Widget update error: $e");
-    }
+    } catch (e) { print("Widget update error: $e"); }
   }
 
   bool _isSyncing = false;
@@ -226,11 +221,7 @@ class MainPageState extends State<MainPage> {
     Map<String, String> m = {};
     if (region == '無') return m;
     if (region == '香港') {
-      m['${year}-01-01'] = '元旦';
-      m['${year}-05-01'] = '勞動節';
-      m['${year}-07-01'] = '回歸';
-      m['${year}-10-01'] = '國慶';
-      m['${year}-12-25'] = '聖誕';
+      m['${year}-01-01'] = '元旦'; m['${year}-05-01'] = '勞動節'; m['${year}-07-01'] = '回歸'; m['${year}-10-01'] = '國慶'; m['${year}-12-25'] = '聖誕';
       if (year == 2024) { m.addAll({'2024-02-10': '初一', '2024-02-11': '初二', '2024-02-12': '初三', '2024-04-04': '清明', '2024-05-15': '佛誕', '2024-06-10': '端午', '2024-09-18': '中秋翌日', '2024-10-11': '重陽', '2024-12-26': '聖誕後'}); }
       else if (year == 2025) { m.addAll({'2025-01-29': '初一', '2025-01-30': '初二', '2025-01-31': '初三', '2025-04-04': '清明', '2025-05-05': '佛誕', '2025-05-31': '端午', '2025-10-07': '中秋翌日', '2025-10-29': '重陽'}); }
       else if (year == 2026) { m.addAll({'2026-02-17': '初一', '2026-02-18': '初二', '2026-02-19': '初三', '2026-04-05': '清明', '2026-05-24': '佛誕', '2026-06-19': '端午', '2026-09-26': '中秋翌日', '2026-10-18': '重陽'}); }
@@ -260,9 +251,7 @@ class MainPageState extends State<MainPage> {
       if (!ok && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('需要日曆權限才能讀取日曆，請在設定中允許')));
       }
-      try {
-        await _realChannel.invokeMethod('requestManageStorage');
-      } catch (_) {}
+      try { await _realChannel.invokeMethod('requestManageStorage'); } catch (_) {}
       await updateWidget();
     });
   }
@@ -271,9 +260,7 @@ class MainPageState extends State<MainPage> {
     try {
       final info = await PackageInfo.fromPlatform();
       setState(() { appVersion = '${info.version}+${info.buildNumber}'; });
-    } catch (_) {
-      setState(() { appVersion = '7.1.9+71'; });
-    }
+    } catch (_) { setState(() { appVersion = '7.1.9+71'; }); }
   }
 
   Future<void> load() async {
@@ -290,6 +277,9 @@ class MainPageState extends State<MainPage> {
     var spSaved = sp.getString('savedPatternsV40'); if (spSaved != null) { try { savedPatterns = (jsonDecode(spSaved) as List).map((e) => SavedPattern.fromJson(Map<String, dynamic>.from(e))).toList(); } catch (_) {} }
     var evMap = sp.getString('googleEventIdMap'); if (evMap != null) { try { _googleEventIdMap = Map<String, String>.from(jsonDecode(evMap)); } catch (_) {} }
     var mh = sp.getString('manualHolidays'); if (mh != null) { try { manualHolidays = Map<String, String>.from(jsonDecode(mh)); } catch (_) {} }
+    var ddList = sp.getStringList('dirtyDates');
+    if (ddList != null) _dirtyDates = ddList.toSet();
+    _needsFullSync = sp.getBool('needsFullSync') ?? true;
     setState(() {
       carry = sp.getDouble('carry') ?? 0;
       customName = sp.getString('cName') ?? '我的排更-專屬日曆';
@@ -335,6 +325,8 @@ class MainPageState extends State<MainPage> {
     sp.setString('holidayRegion', holidayRegion);
     sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
     sp.setString('manualHolidays', jsonEncode(manualHolidays));
+    await sp.setStringList('dirtyDates', _dirtyDates.toList());
+    await sp.setBool('needsFullSync', _needsFullSync);
     if (_rosterCalendarId != null) sp.setString('rosterCalId', _rosterCalendarId!);
     sp.setString('rosterCalName', _rosterCalendarName);
     sp.setString('rosterAccName', _rosterAccountName);
@@ -344,28 +336,25 @@ class MainPageState extends State<MainPage> {
     sp.setString('roster_json', jsonEncode(roster));
     sp.setString('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
     sp.setBool('showLunar', showLunar);
-
-    // 用 HomeWidget 寫入 widget 設定（帶 flutter. 前綴）
-    await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
-    await HomeWidget.saveWidgetData<int>('widgetTextColor', widgetTextColor);
-    await HomeWidget.saveWidgetData<int>('widgetBgColor', widgetBgColor);
-
+    // 【關鍵修復】home_widget 不接受 int，改為 double
+    try {
+      await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
+      await HomeWidget.saveWidgetData<double>('widgetTextColor', widgetTextColor.toDouble());
+      await HomeWidget.saveWidgetData<double>('widgetBgColor', widgetBgColor.toDouble());
+    } catch (e) {
+      print("Widget save error: $e");
+    }
     await sp.setDouble('widgetFontSize', widgetFontSize);
     await sp.setInt('widgetTextColor', widgetTextColor);
     await sp.setInt('widgetBgColor', widgetBgColor);
-
     await updateWidget();
-
     Future.delayed(const Duration(milliseconds: 500), () async {
       try { await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider'); } catch (_) {}
     });
-
     if (autoSync && googleSyncEnabled && !_isSyncing) {
       _autoSyncTimer?.cancel();
       _autoSyncTimer = Timer(const Duration(seconds: 3), () {
-        if (!_isSyncing && autoSync && googleSyncEnabled) {
-          _syncToGoogle(silent: true);
-        }
+        if (!_isSyncing && autoSync && googleSyncEnabled) { _syncToGoogle(silent: true); }
       });
     }
   }
@@ -443,15 +432,9 @@ Future<List<Map<String, dynamic>>> _getRealCalendars() async {
 
 Future<String?> _pickGoogleCalendarDialog() async {
   bool ok = await handleCalendarPermission(silent: false);
-  if (!ok) {
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('未取得日曆權限，無法讀取日曆')));
-    return null;
-  }
+  if (!ok) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('未取得日曆權限，無法讀取日曆'))); return null; }
   var cals = await _getRealCalendars();
-  if (cals.isEmpty) {
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('未讀取到任何日曆，請檢查權限或新增Google帳號')));
-    return null;
-  }
+  if (cals.isEmpty) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('未讀取到任何日曆，請檢查權限或新增Google帳號'))); return null; }
   var googleCals = cals.where((c) => c['isGoogle'] == true).toList();
   var otherCals = cals.where((c) => c['isGoogle'] != true).toList();
   var pickedMap = await showDialog<Map<String, dynamic>>(context: context, builder: (ctx) {
@@ -495,11 +478,7 @@ Future<void> _requestGooglePerm() async {
       FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('立即同步'))
     ]
   ));
-  if (ok == true) {
-    setState(() => googleSyncEnabled = true);
-    await _syncToGoogle();
-    save();
-  }
+  if (ok == true) { setState(() => googleSyncEnabled = true); await _syncToGoogle(); save(); }
 }
 
 Future<void> _ensureCalendar() async {
@@ -507,7 +486,94 @@ Future<void> _ensureCalendar() async {
   await _pickGoogleCalendarDialog();
 }
 
-Future<void> _syncToGoogle({bool silent = false}) async {
+void _markDirty(String dateKey) { _dirtyDates.add(dateKey); }
+
+void _markDirtyRange(DateTime start, DateTime end) {
+  DateTime cur = DateTime(start.year, start.month, start.day);
+  DateTime last = DateTime(end.year, end.month, end.day);
+  while (!cur.isAfter(last)) {
+    _dirtyDates.add(DateFormat('yyyy-MM-dd').format(cur));
+    cur = cur.add(const Duration(days: 1));
+  }
+}
+
+DateTime _calcScanStart() {
+  if (roster.isEmpty) return DateTime(DateTime.now().year - 3, 1, 1);
+  int minYear = 9999;
+  for (String k in roster.keys) {
+    if (k.length >= 4) {
+      int? y = int.tryParse(k.substring(0, 4));
+      if (y != null && y < minYear) minYear = y;
+    }
+  }
+  if (minYear == 9999) minYear = DateTime.now().year;
+  return DateTime(minYear - 2, 1, 1);
+}
+
+DateTime _calcScanEnd() {
+  if (roster.isEmpty) return DateTime(DateTime.now().year + 3, 12, 31);
+  int maxYear = 0;
+  for (String k in roster.keys) {
+    if (k.length >= 4) {
+      int? y = int.tryParse(k.substring(0, 4));
+      if (y != null && y > maxYear) maxYear = y;
+    }
+  }
+  if (maxYear == 0) maxYear = DateTime.now().year;
+  return DateTime(maxYear + 2, 12, 31);
+}
+
+Future<bool> _buildAndInsertEvent(String dateKey, String code, Duration offset) async {
+  final def = defs[code];
+  if (def == null) return false;
+  final date = DateTime.parse(dateKey);
+  final note = rosterNote[dateKey] ?? '';
+  final tag = '[RosterPro]$dateKey';
+  final allDayFlag = def.isAllDay || def.code == 'O';
+
+  String desc, title;
+  if (allDayFlag) {
+    desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n類型: 全天${note.isNotEmpty ? '\n記事: $note' : ''}';
+    title = '${def.code}${note.isNotEmpty ? ' | $note' : ''}';
+  } else {
+    desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n時間: ${def.start}-${def.end}${note.isNotEmpty ? '\n記事: $note' : ''}';
+    title = '${def.code} ${def.start}-${def.end}${note.isNotEmpty ? ' | $note' : ''}';
+  }
+
+  Event ev;
+  if (allDayFlag) {
+    ev = Event(_rosterCalendarId!, title: title, description: desc,
+      start: tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0),
+      end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59),
+      allDay: true);
+  } else {
+    final sp1 = def.start.split(':');
+    final ep1 = def.end.split(':');
+    DateTime sLocal = DateTime(date.year, date.month, date.day, int.parse(sp1[0]), int.parse(sp1[1]));
+    DateTime eLocal = DateTime(date.year, date.month, date.day, int.parse(ep1[0]), int.parse(ep1[1]));
+    if (!eLocal.isAfter(sLocal)) eLocal = eLocal.add(const Duration(days: 1));
+    DateTime sUtc = sLocal.subtract(offset);
+    DateTime eUtc = eLocal.subtract(offset);
+    ev = Event(_rosterCalendarId!, title: title, description: desc,
+      start: tz.TZDateTime.utc(sUtc.year, sUtc.month, sUtc.day, sUtc.hour, sUtc.minute),
+      end: tz.TZDateTime.utc(eUtc.year, eUtc.month, eUtc.day, eUtc.hour, eUtc.minute),
+      allDay: false);
+  }
+
+  final res = await _calendarPlugin.createOrUpdateEvent(ev);
+  if (res != null && res.isSuccess && res.data != null) {
+    _googleEventIdMap[dateKey] = res.data!;
+    return true;
+  }
+  return false;
+}
+
+Future<void> _syncNow() async {
+  if (!googleSyncEnabled) return;
+  await _syncToGoogle(silent: true);
+}
+
+Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) async {
   if (!googleSyncEnabled && !silent) {
     bool? en = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
       title: const Text('未開啟同步'),
@@ -520,11 +586,21 @@ Future<void> _syncToGoogle({bool silent = false}) async {
     if (en == true) setState(() => googleSyncEnabled = true); else return;
   }
   if (_isSyncing) return;
+
+  bool needFull = forceFullSync || _needsFullSync;
+  if (!needFull && _googleEventIdMap.isEmpty && roster.isNotEmpty) needFull = true;
+
+  if (!needFull && _dirtyDates.isEmpty) {
+    if (!silent && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('沒有變更需要同步'), duration: Duration(seconds: 2)));
+    }
+    return;
+  }
+
   _isSyncing = true;
   _autoSyncTimer?.cancel();
-
   if (!silent && mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('開始同步...')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(needFull ? '開始完整同步...' : '開始增量同步...')));
   }
 
   try {
@@ -532,116 +608,92 @@ Future<void> _syncToGoogle({bool silent = false}) async {
     if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) throw '未選真 Google 日曆';
 
     final sp = await SharedPreferences.getInstance();
-    int del = 0, delOrphan = 0, add = 0;
-
-    // 步驟 1：優先按 _googleEventIdMap 精準刪除
-    final trackedIds = Map<String, String>.from(_googleEventIdMap);
-    for (var e in trackedIds.entries) {
-      try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.value); del++; } catch (_) {}
-    }
-    _googleEventIdMap.clear();
-    if (del > 0) await Future.delayed(const Duration(milliseconds: 1500));
-
-    // 步驟 2：掃描孤兒事件
-    DateTime scanStart, scanEnd;
-    if (roster.isEmpty) {
-      int currentYear = DateTime.now().year;
-      scanStart = DateTime(currentYear - 10, 1, 1);
-      scanEnd = DateTime(currentYear + 10, 12, 31);
-    } else {
-      DateTime minDate = DateTime(2100);
-      DateTime maxDate = DateTime(2000);
-      for (String dateKey in roster.keys) {
-        DateTime d = DateTime.parse(dateKey);
-        if (d.isBefore(minDate)) minDate = d;
-        if (d.isAfter(maxDate)) maxDate = d;
-      }
-      scanStart = DateTime(minDate.year - 2, 1, 1);
-      scanEnd = DateTime(maxDate.year + 2, 12, 31);
-    }
-    for (int attempt = 0; attempt < 3; attempt++) {
-      var existingEvents = await _calendarPlugin.retrieveEvents(
-        _rosterCalendarId!,
-        RetrieveEventsParams(startDate: scanStart, endDate: scanEnd),
-      );
-      bool hasRemaining = false;
-      for (var e in existingEvents.data ?? []) {
-        final desc = e.description ?? '';
-        final id = e.eventId;
-        if (id == null || !desc.contains('[RosterPro]')) continue;
-        try {
-          await _calendarPlugin.deleteEvent(_rosterCalendarId!, id);
-          delOrphan++;
-          hasRemaining = true;
-        } catch (_) {}
-      }
-      if (!hasRemaining) break;
-      await Future.delayed(const Duration(milliseconds: 1000));
-    }
-
-    // 步驟 3：重建
     final offset = DateTime.now().timeZoneOffset;
-    for (var entry in roster.entries) {
-      final dateKey = entry.key;
-      final code = entry.value;
-      final def = defs[code];
-      if (def == null) continue;
+    int del = 0, add = 0, upd = 0;
 
-      final date = DateTime.parse(dateKey);
-      final note = rosterNote[dateKey] ?? '';
-      final tag = '[RosterPro]$dateKey';
-      final allDayFlag = def.isAllDay || def.code == 'O';
+    if (needFull) {
+      DateTime scanStart = _calcScanStart();
+      DateTime scanEnd = _calcScanEnd();
 
-      String desc, title;
-      if (allDayFlag) {
-        desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n類型: 全天${note.isNotEmpty ? '\n記事: $note' : ''}';
-        title = '${def.code}${note.isNotEmpty ? ' | $note' : ''}';
-      } else {
-        desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n時間: ${def.start}-${def.end}${note.isNotEmpty ? '\n記事: $note' : ''}';
-        title = '${def.code} ${def.start}-${def.end}${note.isNotEmpty ? ' | $note' : ''}';
+      final trackedIds = Map<String, String>.from(_googleEventIdMap);
+      for (var e in trackedIds.entries) {
+        try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.value); del++; } catch (_) {}
+      }
+      _googleEventIdMap.clear();
+      if (del > 0) await Future.delayed(const Duration(milliseconds: 1500));
+
+      for (int attempt = 0; attempt < 5; attempt++) {
+        var existingEvents = await _calendarPlugin.retrieveEvents(
+          _rosterCalendarId!,
+          RetrieveEventsParams(startDate: scanStart, endDate: scanEnd),
+        );
+        bool hasRemaining = false;
+        for (var e in existingEvents.data ?? []) {
+          final desc = e.description ?? '';
+          final id = e.eventId;
+          if (id == null || !desc.contains('[RosterPro]')) continue;
+          try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, id); del++; hasRemaining = true; } catch (_) {}
+        }
+        if (!hasRemaining) break;
+        await Future.delayed(const Duration(milliseconds: 1000));
+      }
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      for (var entry in roster.entries) {
+        final added = await _buildAndInsertEvent(entry.key, entry.value, offset);
+        if (added) add++;
       }
 
-      Event ev;
-      if (allDayFlag) {
-        // 全天事件：用本地時區，不轉 UTC，避免跨天
-        ev = Event(_rosterCalendarId!, title: title, description: desc,
-          start: tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0),
-          end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59),
-          allDay: true);
-      } else {
-        final sp1 = def.start.split(':');
-        final ep1 = def.end.split(':');
-        DateTime sLocal = DateTime(date.year, date.month, date.day, int.parse(sp1[0]), int.parse(sp1[1]));
-        DateTime eLocal = DateTime(date.year, date.month, date.day, int.parse(ep1[0]), int.parse(ep1[1]));
-        if (!eLocal.isAfter(sLocal)) eLocal = eLocal.add(const Duration(days: 1));
-        DateTime sUtc = sLocal.subtract(offset);
-        DateTime eUtc = eLocal.subtract(offset);
-        ev = Event(_rosterCalendarId!, title: title, description: desc,
-          start: tz.TZDateTime.utc(sUtc.year, sUtc.month, sUtc.day, sUtc.hour, sUtc.minute),
-          end: tz.TZDateTime.utc(eUtc.year, eUtc.month, eUtc.day, eUtc.hour, eUtc.minute),
-          allDay: false);
-      }
+      _needsFullSync = false;
+      _dirtyDates.clear();
+    } else {
+      final datesToSync = List<String>.from(_dirtyDates);
+      for (var dateKey in datesToSync) {
+        if (_googleEventIdMap.containsKey(dateKey)) {
+          try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, _googleEventIdMap[dateKey]!); del++; } catch (_) {}
+          _googleEventIdMap.remove(dateKey);
+        }
 
-      final res = await _calendarPlugin.createOrUpdateEvent(ev);
-      if (res != null && res.isSuccess && res.data != null) {
-        _googleEventIdMap[dateKey] = res.data!;
-        add++;
+        try {
+          final date = DateTime.parse(dateKey);
+          var dayEvents = await _calendarPlugin.retrieveEvents(
+            _rosterCalendarId!,
+            RetrieveEventsParams(
+              startDate: date.subtract(const Duration(days: 1)),
+              endDate: date.add(const Duration(days: 2)),
+            ),
+          );
+          for (var e in dayEvents.data ?? []) {
+            final desc = e.description ?? '';
+            final id = e.eventId;
+            if (id == null) continue;
+            if (!desc.contains('[RosterPro]$dateKey')) continue;
+            try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, id); del++; } catch (_) {}
+          }
+        } catch (_) {}
+
+        if (roster.containsKey(dateKey)) {
+          final added = await _buildAndInsertEvent(dateKey, roster[dateKey]!, offset);
+          if (added) { add++; upd++; }
+        }
+
+        _dirtyDates.remove(dateKey);
       }
     }
 
     sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
+    await sp.setStringList('dirtyDates', _dirtyDates.toList());
+    await sp.setBool('needsFullSync', _needsFullSync);
     updateWidget();
 
     if (!silent && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('同步完成：精準刪$del / 掃除$delOrphan / 重建$add'),
-        duration: const Duration(seconds: 4),
+        content: Text(needFull ? '完整同步完成：刪$del / 建$add' : '增量同步完成：刪$del / 更新$upd'),
+        duration: const Duration(seconds: 3),
       ));
     }
   } catch (e) {
-    if (!silent && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('同步失敗 $e')));
-    }
+    if (!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('同步失敗 $e')));
   } finally {
     _isSyncing = false;
   }
@@ -657,124 +709,11 @@ Future<void> _forceFullResync() async {
     ]
   ));
   if (confirm != true) return;
-  if (_isSyncing) return;
-  _isSyncing = true;
-  _autoSyncTimer?.cancel();
-  if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('全清重建中...')));
-
-  try {
-    if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) await _ensureCalendar();
-    if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) throw '未選真 Google 日曆';
-
-    final sp = await SharedPreferences.getInstance();
-    int del = 0, delOrphan = 0, add = 0;
-
-    final trackedIds = Map<String, String>.from(_googleEventIdMap);
-    for (var e in trackedIds.entries) {
-      try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.value); del++; } catch (_) {}
-    }
-    _googleEventIdMap.clear();
-    if (del > 0) await Future.delayed(const Duration(milliseconds: 1500));
-
-    DateTime scanStart, scanEnd;
-    if (roster.isEmpty) {
-      int currentYear = DateTime.now().year;
-      scanStart = DateTime(currentYear - 10, 1, 1);
-      scanEnd = DateTime(currentYear + 10, 12, 31);
-    } else {
-      DateTime minDate = DateTime(2100);
-      DateTime maxDate = DateTime(2000);
-      for (String dateKey in roster.keys) {
-        DateTime d = DateTime.parse(dateKey);
-        if (d.isBefore(minDate)) minDate = d;
-        if (d.isAfter(maxDate)) maxDate = d;
-      }
-      scanStart = DateTime(minDate.year - 2, 1, 1);
-      scanEnd = DateTime(maxDate.year + 2, 12, 31);
-    }
-    for (int attempt = 0; attempt < 5; attempt++) {
-      var existingEvents = await _calendarPlugin.retrieveEvents(
-        _rosterCalendarId!,
-        RetrieveEventsParams(startDate: scanStart, endDate: scanEnd),
-      );
-      bool hasRemaining = false;
-      for (var e in existingEvents.data ?? []) {
-        final desc = e.description ?? '';
-        final id = e.eventId;
-        if (id == null || !desc.contains('[RosterPro]')) continue;
-        try {
-          await _calendarPlugin.deleteEvent(_rosterCalendarId!, id);
-          delOrphan++;
-          hasRemaining = true;
-        } catch (_) {}
-      }
-      if (!hasRemaining) break;
-      await Future.delayed(const Duration(seconds: 1));
-    }
-    await Future.delayed(const Duration(seconds: 2));
-    _googleEventIdMap.clear();
-    sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
-
-    final offset = DateTime.now().timeZoneOffset;
-    for (var entry in roster.entries) {
-      final code = entry.value;
-      final def = defs[code];
-      if (def == null) continue;
-      final dateKey = entry.key;
-      final date = DateTime.parse(dateKey);
-      final note = rosterNote[dateKey] ?? '';
-      final tag = '[RosterPro]$dateKey';
-      final allDayFlag = def.isAllDay || def.code == 'O';
-
-      String desc, title;
-      if (allDayFlag) {
-        desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n類型: 全天${note.isNotEmpty ? '\n記事: $note' : ''}';
-        title = '${def.code}${note.isNotEmpty ? ' | $note' : ''}';
-      } else {
-        desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n時間: ${def.start}-${def.end}${note.isNotEmpty ? '\n記事: $note' : ''}';
-        title = '${def.code} ${def.start}-${def.end}${note.isNotEmpty ? ' | $note' : ''}';
-      }
-
-      Event ev;
-      if (allDayFlag) {
-        ev = Event(_rosterCalendarId!, title: title, description: desc,
-          start: tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0),
-          end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59),
-          allDay: true);
-      } else {
-        final sp1 = def.start.split(':');
-        final ep1 = def.end.split(':');
-        DateTime sLocal = DateTime(date.year, date.month, date.day, int.parse(sp1[0]), int.parse(sp1[1]));
-        DateTime eLocal = DateTime(date.year, date.month, date.day, int.parse(ep1[0]), int.parse(ep1[1]));
-        if (!eLocal.isAfter(sLocal)) eLocal = eLocal.add(const Duration(days: 1));
-        DateTime sUtc = sLocal.subtract(offset);
-        DateTime eUtc = eLocal.subtract(offset);
-        ev = Event(_rosterCalendarId!, title: title, description: desc,
-          start: tz.TZDateTime.utc(sUtc.year, sUtc.month, sUtc.day, sUtc.hour, sUtc.minute),
-          end: tz.TZDateTime.utc(eUtc.year, eUtc.month, eUtc.day, eUtc.hour, eUtc.minute),
-          allDay: false);
-      }
-
-      var res = await _calendarPlugin.createOrUpdateEvent(ev);
-      if (res != null && res.isSuccess && res.data != null) {
-        _googleEventIdMap[dateKey] = res.data!;
-        add++;
-      }
-    }
-    sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
-    updateWidget();
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('✅ 全清重建完成：精準刪$del / 掃除$delOrphan / 重建$add'),
-      duration: const Duration(seconds: 4),
-    ));
-  } catch (e) {
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('全清重建失敗 $e')));
-  } finally {
-    _isSyncing = false;
-  }
+  _needsFullSync = true;
+  _dirtyDates.clear();
+  await _syncToGoogle(forceFullSync: true);
 }
 
-// ===== 取得備份目錄 =====
 Future<String> _getBackupDir() async {
   try {
     Directory dir = Directory('/storage/emulated/0/RosterPro_Backups');
@@ -791,7 +730,6 @@ Future<String> _getBackupDir() async {
   }
 }
 
-// ===== 從檔案還原 =====
 Future<void> restoreFromFile(String path) async {
   try {
     String c = await File(path).readAsString();
@@ -826,6 +764,8 @@ Future<void> restoreFromFile(String path) async {
       if (j['widgetFontSize'] != null) widgetFontSize = (j['widgetFontSize'] as num).toDouble();
       if (j['widgetTextColor'] != null) widgetTextColor = j['widgetTextColor'];
     });
+    _needsFullSync = true;
+    _dirtyDates.clear();
     await save();
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('還原成功')));
   } catch (e) {
@@ -833,43 +773,28 @@ Future<void> restoreFromFile(String path) async {
   }
 }
 
-// ===== 從檔案選擇還原（保留）=====
 Future<void> restoreLocalFile() async {
   var res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['json']);
   if (res == null) return;
   await restoreFromFile(res.files.single.path!);
 }
 
-// ===== 顯示備份清單 =====
 Future<void> showBackupList() async {
   final dirPath = await _getBackupDir();
   final dir = Directory(dirPath);
-  if (!await dir.exists()) {
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('沒有備份')));
-    return;
-  }
+  if (!await dir.exists()) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('沒有備份'))); return; }
   List<FileSystemEntity> entities = dir.listSync();
   List<File> files = entities.whereType<File>().where((f) => f.path.endsWith('.json')).toList();
   files.sort((a, b) => b.path.compareTo(a.path));
-
-  if (files.isEmpty) {
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('沒有備份')));
-    return;
-  }
-
+  if (files.isEmpty) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('沒有備份'))); return; }
   Set<String> selectedPaths = <String>{};
   bool multiSelectMode = false;
-
   await showDialog(context: context, builder: (ctx) {
     return StatefulBuilder(builder: (ctx2, setD) {
       return AlertDialog(
         title: Text(multiSelectMode ? '已選 ${selectedPaths.length} 個' : '備份清單 (${files.length})'),
         content: SizedBox(width: 500, height: 500, child: Column(children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-            child: Text('目錄: $dirPath', style: const TextStyle(fontSize: 10)),
-          ),
+          Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: Text('目錄: $dirPath', style: const TextStyle(fontSize: 10))),
           const SizedBox(height: 8),
           Expanded(child: ListView.builder(
             itemCount: files.length,
@@ -880,25 +805,12 @@ Future<void> showBackupList() async {
               final isSelected = selectedPaths.contains(f.path);
               return ListTile(
                 dense: true,
-                leading: multiSelectMode
-                    ? Checkbox(
-                        value: isSelected,
-                        onChanged: (v) {
-                          setD(() {
-                            if (v == true) selectedPaths.add(f.path);
-                            else selectedPaths.remove(f.path);
-                          });
-                        },
-                      )
-                    : const Icon(Icons.description, size: 20),
+                leading: multiSelectMode ? Checkbox(value: isSelected, onChanged: (v) { setD(() { if (v == true) selectedPaths.add(f.path); else selectedPaths.remove(f.path); }); }) : const Icon(Icons.description, size: 20),
                 title: Text(name, style: const TextStyle(fontSize: 12)),
                 subtitle: Text('${sizeKB} KB', style: const TextStyle(fontSize: 10)),
                 onTap: () async {
                   if (multiSelectMode) {
-                    setD(() {
-                      if (isSelected) selectedPaths.remove(f.path);
-                      else selectedPaths.add(f.path);
-                    });
+                    setD(() { if (isSelected) selectedPaths.remove(f.path); else selectedPaths.add(f.path); });
                   } else {
                     bool? c = await showDialog<bool>(context: context, builder: (c2) => AlertDialog(
                       title: const Text('確認還原'),
@@ -908,10 +820,7 @@ Future<void> showBackupList() async {
                         FilledButton(onPressed: () => Navigator.pop(c2, true), child: const Text('還原')),
                       ],
                     ));
-                    if (c == true && mounted) {
-                      Navigator.pop(ctx2);
-                      await restoreFromFile(f.path);
-                    }
+                    if (c == true && mounted) { Navigator.pop(ctx2); await restoreFromFile(f.path); }
                   }
                 },
               );
@@ -919,127 +828,65 @@ Future<void> showBackupList() async {
           )),
         ])),
         actions: [
-          if (!multiSelectMode)
-            TextButton(onPressed: () => setD(() => multiSelectMode = true), child: const Text('多選刪除')),
-          if (multiSelectMode)
-            TextButton(
-              onPressed: () async {
-                if (selectedPaths.isEmpty) return;
-                bool? c = await showDialog<bool>(context: context, builder: (c2) => AlertDialog(
-                  title: const Text('確認刪除'),
-                  content: Text('刪除 ${selectedPaths.length} 個備份？\n\n此操作無法復原。'),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(c2, false), child: const Text('取消')),
-                    FilledButton(
-                      onPressed: () => Navigator.pop(c2, true),
-                      style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                      child: const Text('刪除'),
-                    ),
-                  ],
-                ));
-                if (c == true) {
-                  int deleted = 0;
-                  for (var p in selectedPaths) {
-                    try { await File(p).delete(); deleted++; } catch (_) {}
-                  }
-                  if (mounted) {
-                    Navigator.pop(ctx2);
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已刪除 $deleted 個備份')));
-                  }
-                }
-              },
-              child: const Text('刪除選中', style: TextStyle(color: Colors.red)),
-            ),
-          TextButton(
-            onPressed: () {
-              if (multiSelectMode) {
-                setD(() { multiSelectMode = false; selectedPaths.clear(); });
-              } else {
-                Navigator.pop(ctx2);
+          if (!multiSelectMode) TextButton(onPressed: () => setD(() => multiSelectMode = true), child: const Text('多選刪除')),
+          if (multiSelectMode) TextButton(
+            onPressed: () async {
+              if (selectedPaths.isEmpty) return;
+              bool? c = await showDialog<bool>(context: context, builder: (c2) => AlertDialog(
+                title: const Text('確認刪除'),
+                content: Text('刪除 ${selectedPaths.length} 個備份？\n\n此操作無法復原。'),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(c2, false), child: const Text('取消')),
+                  FilledButton(onPressed: () => Navigator.pop(c2, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('刪除')),
+                ],
+              ));
+              if (c == true) {
+                int deleted = 0;
+                for (var p in selectedPaths) { try { await File(p).delete(); deleted++; } catch (_) {} }
+                if (mounted) { Navigator.pop(ctx2); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已刪除 $deleted 個備份'))); }
               }
             },
-            child: Text(multiSelectMode ? '取消多選' : '關閉'),
+            child: const Text('刪除選中', style: TextStyle(color: Colors.red)),
           ),
+          TextButton(onPressed: () { if (multiSelectMode) { setD(() { multiSelectMode = false; selectedPaths.clear(); }); } else { Navigator.pop(ctx2); } }, child: Text(multiSelectMode ? '取消多選' : '關閉')),
         ],
       );
     });
   });
 }
-
-// ===== 查看小工具調試日誌 =====
-Future<void> showWidgetDebugLog() async {
+  Future<void> showWidgetDebugLog() async {
   String content = '';
   String usedPath = '';
-
   try {
     final dir = await getExternalStorageDirectory();
     if (dir != null) {
       final f = File('${dir.path}/roster_widget_debug.txt');
-      if (await f.exists()) {
-        content = await f.readAsString();
-        usedPath = f.path;
-      }
+      if (await f.exists()) { content = await f.readAsString(); usedPath = f.path; }
     }
   } catch (_) {}
-
   if (content.isEmpty) {
     try {
       final dl = Directory('/storage/emulated/0/Download');
       final f = File('${dl.path}/roster_widget_debug.txt');
-      if (await f.exists()) {
-        content = await f.readAsString();
-        usedPath = f.path;
-      }
+      if (await f.exists()) { content = await f.readAsString(); usedPath = f.path; }
     } catch (_) {}
   }
-
   if (content.isEmpty) {
-    try {
-      final appDir = await getApplicationDocumentsDirectory();
-      final f = File('${appDir.path}/roster_widget_debug.txt');
-      if (await f.exists()) {
-        content = await f.readAsString();
-        usedPath = f.path;
-      }
-    } catch (_) {}
-  }
-
-  if (content.isEmpty) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('尚未產生除錯日誌。請先修改字體大小或顏色，讓小工具更新一次。'),
-        duration: Duration(seconds: 5),
-      ));
-    }
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('尚未產生除錯日誌。請先修改字體大小或顏色，讓小工具更新一次。'), duration: Duration(seconds: 5)));
     return;
   }
-
   if (!mounted) return;
   await showDialog(context: context, builder: (ctx) => AlertDialog(
     title: const Text('小工具調試日誌'),
-    content: SizedBox(
-      width: 500, height: 500,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(6)),
-          child: Text('路徑: $usedPath', style: const TextStyle(fontSize: 9)),
-        ),
-        const SizedBox(height: 8),
-        Expanded(
-          child: SingleChildScrollView(
-            child: SelectableText(content, style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
-          ),
-        ),
-      ]),
-    ),
-    actions: [
-      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('關閉')),
-    ],
+    content: SizedBox(width: 500, height: 500, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(6)), child: Text('路徑: $usedPath', style: const TextStyle(fontSize: 9))),
+      const SizedBox(height: 8),
+      Expanded(child: SingleChildScrollView(child: SelectableText(content, style: const TextStyle(fontSize: 11, fontFamily: 'monospace')))),
+    ])),
+    actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('關閉'))],
   ));
 }
 
-// ===== 備份 =====
 Future<void> backupAnywhere() async {
   try {
     final dirPath = await _getBackupDir();
@@ -1066,26 +913,19 @@ Future<void> backupAnywhere() async {
     await f.writeAsString(jsonEncode(backup));
     setState(() => _lastBackupPath = '$dirPath/$fileName');
     await save();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已備份: $fileName'), duration: const Duration(seconds: 3)));
-    }
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已備份: $fileName'), duration: const Duration(seconds: 3)));
   } catch (e) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('備份失敗 $e')));
   }
 }
 
-// ===== 清除排更（範圍）=====
 Future<void> clearRosterByRange() async {
-  DateTimeRange? range = await showDateRangePicker(
-    context: context,
-    firstDate: DateTime(2023),
-    lastDate: DateTime(DateTime.now().year + 30, 12, 31),
-    helpText: '選擇要清除的排更範圍'
-  );
+  DateTimeRange? range = await showDateRangePicker(context: context, firstDate: DateTime(2023), lastDate: DateTime(DateTime.now().year + 30, 12, 31), helpText: '選擇要清除的排更範圍');
   if (range == null) return;
   int count = 0;
   for (DateTime d = range.start; !d.isAfter(range.end); d = d.add(const Duration(days: 1))) {
     String k = DateFormat('yyyy-MM-dd').format(d);
+    _markDirty(k);
     if (roster.containsKey(k)) {
       count++;
       roster.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); rosterExtraType.remove(k);
@@ -1097,6 +937,7 @@ Future<void> clearRosterByRange() async {
   }
   await save();
   setState(() {});
+  await _syncNow();
   if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已清除 $count 天排更')));
 }
 
@@ -1143,21 +984,18 @@ Future<void> exportShareImage() async {
     final img0 = await pic.toImage(width.toInt(), (y + 20).toInt());
     final byte = await img0.toByteData(format: ui.ImageByteFormat.png);
     final pngBytes = byte!.buffer.asUint8List();
-
     Uint8List jpgBytes;
     try {
       final decoded = img.decodeImage(pngBytes);
       if (decoded != null) jpgBytes = Uint8List.fromList(img.encodeJpg(decoded, quality: 90));
       else jpgBytes = pngBytes;
     } catch (_) { jpgBytes = pngBytes; }
-
     Directory dcimDir = Directory('/storage/emulated/0/DCIM/Screenshots');
     if (!await dcimDir.exists()) await dcimDir.create(recursive: true);
     String path = '${dcimDir.path}/Roster_${focused.year}${focused.month.toString().padLeft(2, '0')}_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.jpg';
     File f = File(path);
     await f.writeAsBytes(jpgBytes);
     try { await _realChannel.invokeMethod('scanImage', {'path': path}); } catch (_) {}
-
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('截圖已保存到相冊')));
       await Share.shareXFiles([XFile(path)], text: '${focused.year}年${focused.month}月 $customName');
@@ -1166,7 +1004,8 @@ Future<void> exportShareImage() async {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('截圖失敗 $e')));
   }
 }
-  Future<void> exportReport() async {
+
+Future<void> exportReport() async {
   try {
     StringBuffer sb = StringBuffer();
     if (!isYearReport) {
@@ -1198,10 +1037,7 @@ Future<void> exportShareImage() async {
       sb.writeln('${focused.year}年${focused.month}月 報表');
       sb.writeln('班次統計:');
       shiftCount.forEach((k, v) => sb.writeln('$k, $v次'));
-      if (extraByType.isNotEmpty) {
-        sb.writeln('津貼類別:');
-        extraByType.forEach((t, a) => sb.writeln('$t, \$$a'));
-      }
+      if (extraByType.isNotEmpty) { sb.writeln('津貼類別:'); extraByType.forEach((t, a) => sb.writeln('$t, \$$a')); }
       sb.writeln('總工時, $hrs');
       sb.writeln('OT, $ot');
       sb.writeln('津貼, ${allow + ot * overtimeRate}');
@@ -1228,12 +1064,8 @@ Future<void> exportShareImage() async {
         sb.writeln('$mon月, ${hrs}h');
       }
     }
-
     String? dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇匯出資料夾');
-    if (dir == null) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已取消')));
-      return;
-    }
+    if (dir == null) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已取消'))); return; }
     String fileName = 'report_${isYearReport ? 'year${focused.year}' : '${focused.year}${focused.month.toString().padLeft(2, '0')}'}.csv';
     String path = '$dir/$fileName';
     final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(sb.toString())];
@@ -1282,32 +1114,19 @@ Future<void> showNotesListDialog() async {
           ]),
           const SizedBox(height: 8),
           Row(children: [
-            IconButton(icon: const Icon(Icons.chevron_left), onPressed: () {
-              setD(() {
-                if (yearMode) { queryYear--; }
-                else { queryMonth--; if (queryMonth < 1) { queryMonth = 12; queryYear--; } }
-              });
-            }),
+            IconButton(icon: const Icon(Icons.chevron_left), onPressed: () { setD(() { if (yearMode) { queryYear--; } else { queryMonth--; if (queryMonth < 1) { queryMonth = 12; queryYear--; } } }); }),
             Expanded(child: Text(yearMode ? '$queryYear年' : '$queryYear年$queryMonth月', textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
-            IconButton(icon: const Icon(Icons.chevron_right), onPressed: () {
-              setD(() {
-                if (yearMode) { queryYear++; }
-                else { queryMonth++; if (queryMonth > 12) { queryMonth = 1; queryYear++; } }
-              });
-            }),
+            IconButton(icon: const Icon(Icons.chevron_right), onPressed: () { setD(() { if (yearMode) { queryYear++; } else { queryMonth++; if (queryMonth > 12) { queryMonth = 1; queryYear++; } } }); }),
           ]),
           const Divider(),
-          Expanded(child: notes.isEmpty
-            ? const Center(child: Text('沒有記事'))
-            : ListView.builder(itemCount: notes.length, itemBuilder: (c, i) {
-                return ListTile(
-                  dense: true,
-                  title: Text(notes[i].key, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text(notes[i].value),
-                  onTap: () { Navigator.pop(ctx2); setState(() { selectedDay = DateTime.parse(notes[i].key); focused = DateTime(selectedDay.year, selectedDay.month, 1); }); showDetail(selectedDay); },
-                );
-              })
-          ),
+          Expanded(child: notes.isEmpty ? const Center(child: Text('沒有記事')) : ListView.builder(itemCount: notes.length, itemBuilder: (c, i) {
+            return ListTile(
+              dense: true,
+              title: Text(notes[i].key, style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text(notes[i].value),
+              onTap: () { Navigator.pop(ctx2); setState(() { selectedDay = DateTime.parse(notes[i].key); focused = DateTime(selectedDay.year, selectedDay.month, 1); }); showDetail(selectedDay); },
+            );
+          })),
         ])),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx2), child: const Text('關閉')),
@@ -1332,75 +1151,47 @@ Future<void> showNotesListDialog() async {
 }
 
 Future<void> smartSchedule() async {
-  if (savedPatterns.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請先建立至少一個已存模式')));
-    return;
-  }
+  if (savedPatterns.isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請先建立至少一個已存模式'))); return; }
   int? selectedIdx = await showDialog<int>(context: context, builder: (ctx) {
     return AlertDialog(
       title: const Text('選擇要使用的模式'),
       content: SizedBox(width: 300, child: ListView(shrinkWrap: true, children: [
-        ...savedPatterns.asMap().entries.map((en) => ListTile(
-          title: Text(en.value.name),
-          subtitle: Text('${en.value.data.length}行 (${en.value.data.length * 7}天)'),
-          leading: const Icon(Icons.folder),
-          onTap: () => Navigator.pop(ctx, en.key),
-        )),
+        ...savedPatterns.asMap().entries.map((en) => ListTile(title: Text(en.value.name), subtitle: Text('${en.value.data.length}行 (${en.value.data.length * 7}天)'), leading: const Icon(Icons.folder), onTap: () => Navigator.pop(ctx, en.key))),
       ])),
       actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消'))]
     );
   });
   if (selectedIdx == null) return;
-
   var selectedPattern = savedPatterns[selectedIdx].data;
   int rows = selectedPattern.length;
   int cycleDays = rows * 7;
   int totalDays = 4 * cycleDays;
-
-  DateTime? startDate = await showDatePicker(
-    context: context,
-    initialDate: DateTime.now(),
-    firstDate: DateTime(2023),
-    lastDate: DateTime(DateTime.now().year + 30, 12, 31),
-    helpText: '選擇開始日期',
-  );
+  DateTime? startDate = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2023), lastDate: DateTime(DateTime.now().year + 30, 12, 31), helpText: '選擇開始日期');
   if (startDate == null) return;
-
   DateTime endDate = startDate.add(Duration(days: totalDays - 1));
-
   bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
     title: const Text('智能排班確認'),
-    content: Text(
-      '模式: ${savedPatterns[selectedIdx].name}\n'
-      '模式行數: $rows 行\n'
-      '一個週期: $cycleDays 天 (${rows} 週)\n'
-      '開始日期: ${DateFormat('yyyy-MM-dd').format(startDate)}\n'
-      '結束日期: ${DateFormat('yyyy-MM-dd').format(endDate)}\n'
-      '總共排班: $totalDays 天 (4 個週期)\n\n'
-      '確定要執行嗎？',
-    ),
+    content: Text('模式: ${savedPatterns[selectedIdx].name}\n模式行數: $rows 行\n一個週期: $cycleDays 天 (${rows} 週)\n開始日期: ${DateFormat('yyyy-MM-dd').format(startDate)}\n結束日期: ${DateFormat('yyyy-MM-dd').format(endDate)}\n總共排班: $totalDays 天 (4 個週期)\n\n確定要執行嗎？'),
     actions: [
       TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
       FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('確認排班')),
     ]
   ));
   if (confirm != true) return;
-
   List<String> flat = [];
   for (var row in selectedPattern) flat.addAll(row);
-
   setState(() {
     for (int i = 0; i < totalDays; i++) {
       DateTime d = startDate.add(Duration(days: i));
       String dateKey = DateFormat('yyyy-MM-dd').format(d);
       roster[dateKey] = flat[i % flat.length];
+      _markDirty(dateKey);
     }
   });
-  save();
+  await save();
   setState(() => tab = 0);
-  if (mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('智能排班完成：$totalDays 天'), duration: const Duration(seconds: 4)));
-  }
+  await _syncNow();
+  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('智能排班完成：$totalDays 天'), duration: const Duration(seconds: 4)));
 }
 
 void _goToPrevMonth() { setState(() { focused = DateTime(focused.year, focused.month - 1, 1); }); }
@@ -1425,16 +1216,10 @@ Widget calTab() {
       Padding(
         padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
         child: Row(children: [
-          Flexible(
-            flex: 2,
-            child: InkWell(
-              onTap: () => quickJumpMonth(),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text('${focused.year}年${focused.month}月', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)))),
-                const Icon(Icons.arrow_drop_down)
-              ]),
-            ),
-          ),
+          Flexible(flex: 2, child: InkWell(onTap: () => quickJumpMonth(), child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text('${focused.year}年${focused.month}月', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)))),
+            const Icon(Icons.arrow_drop_down)
+          ]))),
           const Spacer(),
           IconButton(icon: const Icon(Icons.list_alt), tooltip: '記事查詢', onPressed: showNotesListDialog, visualDensity: VisualDensity.compact),
           IconButton(icon: const Icon(Icons.camera_alt_outlined), tooltip: '整月截圖分享', onPressed: shareScreenshotDialog, visualDensity: VisualDensity.compact),
@@ -1603,10 +1388,12 @@ void showDetail(DateTime day) {
                   try { await _calendarPlugin.deleteEvent(calId, eventId); } catch (_) {}
                   _googleEventIdMap.remove(k);
                 }
-                save();
+                _markDirty(k);
+                await save();
+                await _syncNow();
               }, child: const Text('清除班次(保留記事)', style: TextStyle(color: Colors.orange)))),
               const SizedBox(width: 8),
-              Expanded(child: FilledButton(onPressed: () {
+              Expanded(child: FilledButton(onPressed: () async {
                 final otVal = double.tryParse(otc.text);
                 final exVal = double.tryParse(exCtrl.text);
                 final exHVal = double.tryParse(exHCtrl.text);
@@ -1622,7 +1409,9 @@ void showDetail(DateTime day) {
                   if (exVal != null && exVal != 0) rosterExtra[k] = exVal; else if (exVal == 0) rosterExtra.remove(k);
                   if (exHVal != null && exHVal != 0) rosterExtraHrs[k] = exHVal; else rosterExtraHrs.remove(k);
                 });
-                save();
+                _markDirty(k);
+                await save();
+                await _syncNow();
               }, child: const Text('儲存'))),
             ]),
           ])
@@ -1631,290 +1420,296 @@ void showDetail(DateTime day) {
     });
   });
 }
+    Future<TimeOfDay?> _pickWheelTime(BuildContext ctx, TimeOfDay init) async {
+    return await showTimePicker(context: ctx, initialTime: init, builder: (ctx, child) {
+      return MediaQuery(data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true), child: child!);
+    });
+  }
 
-Future<TimeOfDay?> _pickWheelTime(BuildContext ctx, TimeOfDay init) async {
-  return await showTimePicker(context: ctx, initialTime: init, builder: (ctx, child) {
-    return MediaQuery(data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true), child: child!);
-  });
-}
-
-void editShiftDialog({ShiftDef? oldDef}) {
-  var codeCtrl = TextEditingController(text: oldDef?.code ?? '');
-  var labelCtrl = TextEditingController(text: oldDef?.label ?? '');
-  var hoursCtrl = TextEditingController(text: oldDef?.hours.toString() ?? '8');
-  var otCtrl = TextEditingController(text: oldDef?.ot.toString() ?? '0');
-  var startCtrl = TextEditingController(text: oldDef?.start ?? '07:00');
-  var endCtrl = TextEditingController(text: oldDef?.end ?? '15:30');
-  var allowCtrl = TextEditingController(text: oldDef?.allowance.toString() ?? '0');
-  bool hasAllow = oldDef?.hasAllowance ?? false;
-  bool isAllDay = oldDef?.isAllDay ?? false;
-  Color picked = oldDef?.color ?? Colors.orange;
-  String oldKey = oldDef?.code ?? '';
-  List<Color> palette = [Colors.orange, Colors.blue, Colors.purple, Colors.green, Colors.red, Colors.teal, Colors.brown, Colors.pink, Colors.indigo, Colors.amber, Colors.cyan, Colors.lime, Colors.deepOrange, Colors.lightBlue, Colors.deepPurple, Colors.blueGrey];
-  showDialog(context: context, builder: (ctx) {
-    return StatefulBuilder(builder: (ctx2, setS) {
-      void calcHours() {
-        if (isAllDay) return;
-        try {
-          var s = DateFormat('HH:mm').parse(startCtrl.text);
-          var e = DateFormat('HH:mm').parse(endCtrl.text);
-          var diff = e.difference(s).inMinutes / 60.0;
-          if (diff < 0) diff += 24;
-          setS(() => hoursCtrl.text = diff.toStringAsFixed(1));
-        } catch (_) {}
-      }
-      return AlertDialog(
-        title: Text(oldDef == null ? '新增班次' : '編輯 ${oldDef.code}'),
-        content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          TextField(controller: codeCtrl, decoration: const InputDecoration(labelText: '代號')),
-          TextField(controller: labelCtrl, decoration: const InputDecoration(labelText: '名稱')),
-          const SizedBox(height: 10),
-          Row(children: [
-            Expanded(child: InkWell(onTap: () async {
-              if (isAllDay) return;
-              TimeOfDay? t = await _pickWheelTime(ctx2, TimeOfDay(hour: int.parse(startCtrl.text.split(':')[0]), minute: int.parse(startCtrl.text.split(':')[1])));
-              if (t != null) { setS(() => startCtrl.text = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}'); calcHours(); }
-            }, child: InputDecorator(decoration: const InputDecoration(labelText: '開始 HH:mm', border: OutlineInputBorder()), child: Text(startCtrl.text)))),
-            const SizedBox(width: 8),
-            Expanded(child: InkWell(onTap: () async {
-              if (isAllDay) return;
-              TimeOfDay? t = await _pickWheelTime(ctx2, TimeOfDay(hour: int.parse(endCtrl.text.split(':')[0]), minute: int.parse(endCtrl.text.split(':')[1])));
-              if (t != null) { setS(() => endCtrl.text = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}'); calcHours(); }
-            }, child: InputDecorator(decoration: const InputDecoration(labelText: '結束 HH:mm', border: OutlineInputBorder()), child: Text(endCtrl.text)))),
-          ]),
-          const SizedBox(height: 8),
-          Row(children: [
-            Checkbox(value: isAllDay, onChanged: (v) { setS(() { isAllDay = v ?? false; if (isAllDay) { startCtrl.text = '00:00'; endCtrl.text = '00:00'; } else { calcHours(); } }); }),
-            const Text('全天', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(width: 8),
-            const Expanded(child: Text('核實全天後時間變00:00，工時可任意輸入', style: TextStyle(fontSize: 10, color: Colors.grey))),
-          ]),
-          Row(children: [
-            Expanded(child: SizedBox(height: 78, child: TextField(controller: hoursCtrl, decoration: InputDecoration(labelText: '工時', border: const OutlineInputBorder(), helperText: isAllDay ? '全天可任意輸入' : ' ', helperStyle: const TextStyle(fontSize: 10)), keyboardType: TextInputType.number))),
-            const SizedBox(width: 8),
-            Expanded(child: SizedBox(height: 78, child: TextField(controller: otCtrl, decoration: const InputDecoration(labelText: 'OT', border: OutlineInputBorder(), helperText: ' ', helperStyle: TextStyle(fontSize: 10)), keyboardType: TextInputType.number))),
-          ]),
-          const SizedBox(height: 12),
-          Row(children: [Checkbox(value: hasAllow, onChanged: (v) => setS(() => hasAllow = v ?? false)), const Text('有津貼核實', style: TextStyle(fontWeight: FontWeight.bold))]),
-          if (hasAllow) TextField(controller: allowCtrl, decoration: const InputDecoration(labelText: '津貼金額', prefixText: '\$ ', border: OutlineInputBorder()), keyboardType: TextInputType.number),
-          const SizedBox(height: 12),
-          const Text('自定班次顏色', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Wrap(spacing: 8, runSpacing: 8, children: palette.map((c) => GestureDetector(onTap: () => setS(() => picked = c), child: Container(width: 36, height: 36, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: picked == c ? Border.all(width: 3, color: Colors.black) : null), child: picked == c ? const Icon(Icons.check, color: Colors.white, size: 18) : null))).toList()),
-        ])),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx2), child: const Text('取消')),
-          FilledButton(onPressed: () {
-            String newCode = codeCtrl.text.trim();
-            if (newCode.isEmpty) return;
-            double hrs = double.tryParse(hoursCtrl.text) ?? 8;
-            double allowVal = double.tryParse(allowCtrl.text) ?? 0;
-            setState(() {
-              if (oldKey.isNotEmpty && oldKey != newCode) {
-                defs.remove(oldKey);
-                roster.forEach((k, v) { if (v == oldKey) roster[k] = newCode; });
-                for (int i = 0; i < pattern.length; i++) {
-                  for (int j = 0; j < pattern[i].length; j++) {
-                    if (pattern[i][j] == oldKey) pattern[i][j] = newCode;
+  void editShiftDialog({ShiftDef? oldDef}) {
+    var codeCtrl = TextEditingController(text: oldDef?.code ?? '');
+    var labelCtrl = TextEditingController(text: oldDef?.label ?? '');
+    var hoursCtrl = TextEditingController(text: oldDef?.hours.toString() ?? '8');
+    var otCtrl = TextEditingController(text: oldDef?.ot.toString() ?? '0');
+    var startCtrl = TextEditingController(text: oldDef?.start ?? '07:00');
+    var endCtrl = TextEditingController(text: oldDef?.end ?? '15:30');
+    var allowCtrl = TextEditingController(text: oldDef?.allowance.toString() ?? '0');
+    bool hasAllow = oldDef?.hasAllowance ?? false;
+    bool isAllDay = oldDef?.isAllDay ?? false;
+    Color picked = oldDef?.color ?? Colors.orange;
+    String oldKey = oldDef?.code ?? '';
+    List<Color> palette = [Colors.orange, Colors.blue, Colors.purple, Colors.green, Colors.red, Colors.teal, Colors.brown, Colors.pink, Colors.indigo, Colors.amber, Colors.cyan, Colors.lime, Colors.deepOrange, Colors.lightBlue, Colors.deepPurple, Colors.blueGrey];
+    showDialog(context: context, builder: (ctx) {
+      return StatefulBuilder(builder: (ctx2, setS) {
+        void calcHours() {
+          if (isAllDay) return;
+          try {
+            var s = DateFormat('HH:mm').parse(startCtrl.text);
+            var e = DateFormat('HH:mm').parse(endCtrl.text);
+            var diff = e.difference(s).inMinutes / 60.0;
+            if (diff < 0) diff += 24;
+            setS(() => hoursCtrl.text = diff.toStringAsFixed(1));
+          } catch (_) {}
+        }
+        return AlertDialog(
+          title: Text(oldDef == null ? '新增班次' : '編輯 ${oldDef.code}'),
+          content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            TextField(controller: codeCtrl, decoration: const InputDecoration(labelText: '代號')),
+            TextField(controller: labelCtrl, decoration: const InputDecoration(labelText: '名稱')),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: InkWell(onTap: () async {
+                if (isAllDay) return;
+                TimeOfDay? t = await _pickWheelTime(ctx2, TimeOfDay(hour: int.parse(startCtrl.text.split(':')[0]), minute: int.parse(startCtrl.text.split(':')[1])));
+                if (t != null) { setS(() => startCtrl.text = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}'); calcHours(); }
+              }, child: InputDecorator(decoration: const InputDecoration(labelText: '開始 HH:mm', border: OutlineInputBorder()), child: Text(startCtrl.text)))),
+              const SizedBox(width: 8),
+              Expanded(child: InkWell(onTap: () async {
+                if (isAllDay) return;
+                TimeOfDay? t = await _pickWheelTime(ctx2, TimeOfDay(hour: int.parse(endCtrl.text.split(':')[0]), minute: int.parse(endCtrl.text.split(':')[1])));
+                if (t != null) { setS(() => endCtrl.text = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}'); calcHours(); }
+              }, child: InputDecorator(decoration: const InputDecoration(labelText: '結束 HH:mm', border: OutlineInputBorder()), child: Text(endCtrl.text)))),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
+              Checkbox(value: isAllDay, onChanged: (v) { setS(() { isAllDay = v ?? false; if (isAllDay) { startCtrl.text = '00:00'; endCtrl.text = '00:00'; } else { calcHours(); } }); }),
+              const Text('全天', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('核實全天後時間變00:00，工時可任意輸入', style: TextStyle(fontSize: 10, color: Colors.grey))),
+            ]),
+            Row(children: [
+              Expanded(child: SizedBox(height: 78, child: TextField(controller: hoursCtrl, decoration: InputDecoration(labelText: '工時', border: const OutlineInputBorder(), helperText: isAllDay ? '全天可任意輸入' : ' ', helperStyle: const TextStyle(fontSize: 10)), keyboardType: TextInputType.number))),
+              const SizedBox(width: 8),
+              Expanded(child: SizedBox(height: 78, child: TextField(controller: otCtrl, decoration: const InputDecoration(labelText: 'OT', border: OutlineInputBorder(), helperText: ' ', helperStyle: TextStyle(fontSize: 10)), keyboardType: TextInputType.number))),
+            ]),
+            const SizedBox(height: 12),
+            Row(children: [Checkbox(value: hasAllow, onChanged: (v) => setS(() => hasAllow = v ?? false)), const Text('有津貼核實', style: TextStyle(fontWeight: FontWeight.bold))]),
+            if (hasAllow) TextField(controller: allowCtrl, decoration: const InputDecoration(labelText: '津貼金額', prefixText: '\$ ', border: OutlineInputBorder()), keyboardType: TextInputType.number),
+            const SizedBox(height: 12),
+            const Text('自定班次顏色', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 8, children: palette.map((c) => GestureDetector(onTap: () => setS(() => picked = c), child: Container(width: 36, height: 36, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: picked == c ? Border.all(width: 3, color: Colors.black) : null), child: picked == c ? const Icon(Icons.check, color: Colors.white, size: 18) : null))).toList()),
+          ])),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx2), child: const Text('取消')),
+            FilledButton(onPressed: () async {
+              String newCode = codeCtrl.text.trim();
+              if (newCode.isEmpty) return;
+              double hrs = double.tryParse(hoursCtrl.text) ?? 8;
+              double allowVal = double.tryParse(allowCtrl.text) ?? 0;
+              Set<String> affectedDates = <String>{};
+              Navigator.pop(ctx2);
+              setState(() {
+                if (oldKey.isNotEmpty && oldKey != newCode) {
+                  defs.remove(oldKey);
+                  roster.forEach((k, v) { if (v == oldKey) { roster[k] = newCode; affectedDates.add(k); } });
+                  for (int i = 0; i < pattern.length; i++) {
+                    for (int j = 0; j < pattern[i].length; j++) {
+                      if (pattern[i][j] == oldKey) pattern[i][j] = newCode;
+                    }
                   }
                 }
-              }
-              defs[newCode] = ShiftDef(newCode, labelCtrl.text.isEmpty ? newCode : labelCtrl.text, hrs, picked, ot: double.tryParse(otCtrl.text) ?? 0, start: startCtrl.text, end: endCtrl.text, hasAllowance: hasAllow, allowance: hasAllow ? allowVal : 0, isAllDay: isAllDay);
-            });
-            save();
-            Navigator.pop(ctx2);
-          }, child: const Text('儲存'))
-        ]
-      );
+                defs[newCode] = ShiftDef(newCode, labelCtrl.text.isEmpty ? newCode : labelCtrl.text, hrs, picked, ot: double.tryParse(otCtrl.text) ?? 0, start: startCtrl.text, end: endCtrl.text, hasAllowance: hasAllow, allowance: hasAllow ? allowVal : 0, isAllDay: isAllDay);
+                for (var entry in roster.entries) {
+                  if (entry.value == newCode) affectedDates.add(entry.key);
+                }
+              });
+              affectedDates.forEach(_markDirty);
+              await save();
+              await _syncNow();
+            }, child: const Text('儲存'))
+          ]
+        );
+      });
     });
-  });
-}
-
-Future<void> pickRangeAndApply() async {
-  List<List<String>> chosenPattern = pattern;
-  if (savedPatterns.isNotEmpty) {
-    int? selected = await showDialog<int>(context: context, builder: (ctx) {
-      return AlertDialog(
-        title: const Text('選擇排更模式'),
-        content: SizedBox(width: 300, child: ListView(shrinkWrap: true, children: [
-          ListTile(title: const Text('當前版面'), subtitle: Text('${pattern.length}行'), leading: const Icon(Icons.edit), onTap: () => Navigator.pop(ctx, -1)),
-          const Divider(),
-          ...savedPatterns.asMap().entries.map((en) => ListTile(title: Text(en.value.name), subtitle: Text('${en.value.data.length}行'), leading: const Icon(Icons.folder), onTap: () => Navigator.pop(ctx, en.key))),
-        ])),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消'))]
-      );
-    });
-    if (selected == null) return;
-    if (selected == -1) chosenPattern = pattern; else chosenPattern = savedPatterns[selected].data.map((r) => List<String>.from(r)).toList();
   }
-  DateTimeRange? p = await showDateRangePicker(context: context, firstDate: DateTime(2023), lastDate: DateTime(DateTime.now().year + 30, 12, 31));
-  if (p == null) return;
-  var flat = chosenPattern.expand((e) => e).toList();
-  setState(() {
-    int i = 0;
-    for (DateTime d = p.start; !d.isAfter(p.end); d = d.add(const Duration(days: 1))) {
-      roster[DateFormat('yyyy-MM-dd').format(d)] = flat[i % flat.length];
-      i++;
-    }
-  });
-  save();
-  setState(() => tab = 0);
-}
 
-Widget patternTab() {
-  return SafeArea(child: Column(children: [
-    const Padding(padding: EdgeInsets.only(top: 12), child: Center(child: Text('排更模式', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)))),
-    Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Column(children: [
-        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          FilledButton.tonalIcon(icon: const Icon(Icons.playlist_add), label: const Text('自定行數'), onPressed: () {
-            var c = TextEditingController(text: '3');
-            showDialog(context: context, builder: (ctx) => AlertDialog(
-              title: const Text('自定行數'),
-              content: SizedBox(height: 56, child: TextField(controller: c, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '行數', isDense: true, border: OutlineInputBorder()))),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-                FilledButton(onPressed: () { int n = int.tryParse(c.text) ?? 1; setState(() => pattern.addAll(List.generate(n, (_) => List.filled(7, 'O')))); save(); Navigator.pop(ctx); }, child: const Text('確定'))
-              ]
-            ));
-          }),
-          const SizedBox(width: 8),
-          FilledButton(onPressed: () async { await pickRangeAndApply(); }, child: const Text('自動排班')),
-          const SizedBox(width: 8),
-          FilledButton.tonalIcon(icon: const Icon(Icons.auto_awesome), label: const Text('智能排班'), onPressed: smartSchedule, style: FilledButton.styleFrom(backgroundColor: Colors.amber.shade200)),
-        ]),
-        const SizedBox(height: 8),
-        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          FilledButton.tonalIcon(icon: const Icon(Icons.folder), label: Text('已存模式${savedPatterns.isEmpty ? '' : '(${savedPatterns.length})'}'), onPressed: () {
-            if (savedPatterns.isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('未有已存模式'))); return; }
-            showModalBottomSheet(context: context, builder: (ctx) => SafeArea(child: ListView(children: [
-              const ListTile(title: Text('已存排班模式', style: TextStyle(fontWeight: FontWeight.bold))),
-              ...savedPatterns.asMap().entries.map((en) => ListTile(
-                title: Text(en.value.name),
-                subtitle: Text('${en.value.data.length}行 (${en.value.data.length * 7}天)'),
-                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                  IconButton(icon: const Icon(Icons.upload), tooltip: '載入', onPressed: () { setState(() { pattern = en.value.data.map((r) => List<String>.from(r)).toList(); editingPatternName = en.value.name; editingPatternIndex = en.key; }); save(); Navigator.pop(ctx); }),
-                  IconButton(icon: const Icon(Icons.edit), tooltip: '改名', onPressed: () {
-                    var ctrl = TextEditingController(text: en.value.name);
-                    showDialog(context: context, builder: (ctx2) => AlertDialog(
-                      title: const Text('改排班名稱'),
-                      content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: '自定義名稱')),
-                      actions: [FilledButton(onPressed: () { String nn = ctrl.text.trim(); if (nn.isNotEmpty) { setState(() => savedPatterns[en.key] = SavedPattern(nn, en.value.data)); save(); Navigator.pop(ctx2); Navigator.pop(ctx); } }, child: const Text('保存'))]
-                    ));
-                  }),
-                  IconButton(icon: const Icon(Icons.delete), onPressed: () { setState(() => savedPatterns.removeAt(en.key)); save(); Navigator.pop(ctx); }),
-                ])
-              )),
-            ])));
-          }),
-          const SizedBox(width: 8),
-          FilledButton.tonalIcon(icon: const Icon(Icons.save_as), label: const Text('另存為新模式'), onPressed: () {
-            var ctrl = TextEditingController(text: '模式_${DateFormat('MMdd_HHmm').format(DateTime.now())}');
-            showDialog(context: context, builder: (ctx) => AlertDialog(
-              title: const Text('另存排更模式 自定義名稱'),
-              content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: '模式名稱', border: OutlineInputBorder())),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-                FilledButton(onPressed: () {
-                  String n = ctrl.text.trim();
-                  if (n.isEmpty) return;
-                  if (savedPatterns.any((e) => e.name == n)) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('名稱 $n 已存在'))); return; }
-                  setState(() {
-                    savedPatterns.add(SavedPattern(n, pattern.map((r) => List<String>.from(r)).toList()));
-                    pattern = _defaultPattern.map((r) => List<String>.from(r)).toList();
-                    editingPatternName = null; editingPatternIndex = null;
-                  });
-                  save();
-                  Navigator.pop(ctx);
-                }, child: const Text('保存'))
-              ]
-            ));
-          }),
-        ]),
-        if (editingPatternName != null) Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(color: Colors.orange.withOpacity(0.15), borderRadius: BorderRadius.circular(20)),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Text('正在編輯: $editingPatternName', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-              const SizedBox(width: 8),
-              FilledButton.tonal(onPressed: () { if (editingPatternIndex != null) { setState(() => savedPatterns[editingPatternIndex!] = SavedPattern(editingPatternName!, pattern.map((r) => List<String>.from(r)).toList())); save(); } }, child: const Text('更新同名')),
-              IconButton(icon: const Icon(Icons.close, size: 16), onPressed: () { setState(() { editingPatternName = null; editingPatternIndex = null; }); })
+  Future<void> pickRangeAndApply() async {
+    List<List<String>> chosenPattern = pattern;
+    if (savedPatterns.isNotEmpty) {
+      int? selected = await showDialog<int>(context: context, builder: (ctx) {
+        return AlertDialog(
+          title: const Text('選擇排更模式'),
+          content: SizedBox(width: 300, child: ListView(shrinkWrap: true, children: [
+            ListTile(title: const Text('當前版面'), subtitle: Text('${pattern.length}行'), leading: const Icon(Icons.edit), onTap: () => Navigator.pop(ctx, -1)),
+            const Divider(),
+            ...savedPatterns.asMap().entries.map((en) => ListTile(title: Text(en.value.name), subtitle: Text('${en.value.data.length}行'), leading: const Icon(Icons.folder), onTap: () => Navigator.pop(ctx, en.key))),
+          ])),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消'))]
+        );
+      });
+      if (selected == null) return;
+      if (selected == -1) chosenPattern = pattern; else chosenPattern = savedPatterns[selected].data.map((r) => List<String>.from(r)).toList();
+    }
+    DateTimeRange? p = await showDateRangePicker(context: context, firstDate: DateTime(2023), lastDate: DateTime(DateTime.now().year + 30, 12, 31));
+    if (p == null) return;
+    var flat = chosenPattern.expand((e) => e).toList();
+    setState(() {
+      int i = 0;
+      for (DateTime d = p.start; !d.isAfter(p.end); d = d.add(const Duration(days: 1))) {
+        String dateKey = DateFormat('yyyy-MM-dd').format(d);
+        roster[dateKey] = flat[i % flat.length];
+        _markDirty(dateKey);
+        i++;
+      }
+    });
+    await save();
+    setState(() => tab = 0);
+    await _syncNow();
+  }
+
+  Widget patternTab() {
+    return SafeArea(child: Column(children: [
+      const Padding(padding: EdgeInsets.only(top: 12), child: Center(child: Text('排更模式', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)))),
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Column(children: [
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            FilledButton.tonalIcon(icon: const Icon(Icons.playlist_add), label: const Text('自定行數'), onPressed: () {
+              var c = TextEditingController(text: '3');
+              showDialog(context: context, builder: (ctx) => AlertDialog(
+                title: const Text('自定行數'),
+                content: SizedBox(height: 56, child: TextField(controller: c, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '行數', isDense: true, border: OutlineInputBorder()))),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+                  FilledButton(onPressed: () { int n = int.tryParse(c.text) ?? 1; setState(() => pattern.addAll(List.generate(n, (_) => List.filled(7, 'O')))); save(); Navigator.pop(ctx); }, child: const Text('確定'))
+                ]
+              ));
+            }),
+            const SizedBox(width: 8),
+            FilledButton(onPressed: () async { await pickRangeAndApply(); }, child: const Text('自動排班')),
+            const SizedBox(width: 8),
+            FilledButton.tonalIcon(icon: const Icon(Icons.auto_awesome), label: const Text('智能排班'), onPressed: smartSchedule, style: FilledButton.styleFrom(backgroundColor: Colors.amber.shade200)),
+          ]),
+          const SizedBox(height: 8),
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            FilledButton.tonalIcon(icon: const Icon(Icons.folder), label: Text('已存模式${savedPatterns.isEmpty ? '' : '(${savedPatterns.length})'}'), onPressed: () {
+              if (savedPatterns.isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('未有已存模式'))); return; }
+              showModalBottomSheet(context: context, builder: (ctx) => SafeArea(child: ListView(children: [
+                const ListTile(title: Text('已存排班模式', style: TextStyle(fontWeight: FontWeight.bold))),
+                ...savedPatterns.asMap().entries.map((en) => ListTile(
+                  title: Text(en.value.name),
+                  subtitle: Text('${en.value.data.length}行 (${en.value.data.length * 7}天)'),
+                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                    IconButton(icon: const Icon(Icons.upload), tooltip: '載入', onPressed: () { setState(() { pattern = en.value.data.map((r) => List<String>.from(r)).toList(); editingPatternName = en.value.name; editingPatternIndex = en.key; }); save(); Navigator.pop(ctx); }),
+                    IconButton(icon: const Icon(Icons.edit), tooltip: '改名', onPressed: () {
+                      var ctrl = TextEditingController(text: en.value.name);
+                      showDialog(context: context, builder: (ctx2) => AlertDialog(
+                        title: const Text('改排班名稱'),
+                        content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: '自定義名稱')),
+                        actions: [FilledButton(onPressed: () { String nn = ctrl.text.trim(); if (nn.isNotEmpty) { setState(() => savedPatterns[en.key] = SavedPattern(nn, en.value.data)); save(); Navigator.pop(ctx2); Navigator.pop(ctx); } }, child: const Text('保存'))]
+                      ));
+                    }),
+                    IconButton(icon: const Icon(Icons.delete), onPressed: () { setState(() => savedPatterns.removeAt(en.key)); save(); Navigator.pop(ctx); }),
+                  ])
+                )),
+              ])));
+            }),
+            const SizedBox(width: 8),
+            FilledButton.tonalIcon(icon: const Icon(Icons.save_as), label: const Text('另存為新模式'), onPressed: () {
+              var ctrl = TextEditingController(text: '模式_${DateFormat('MMdd_HHmm').format(DateTime.now())}');
+              showDialog(context: context, builder: (ctx) => AlertDialog(
+                title: const Text('另存排更模式 自定義名稱'),
+                content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: '模式名稱', border: OutlineInputBorder())),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+                  FilledButton(onPressed: () {
+                    String n = ctrl.text.trim();
+                    if (n.isEmpty) return;
+                    if (savedPatterns.any((e) => e.name == n)) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('名稱 $n 已存在'))); return; }
+                    setState(() {
+                      savedPatterns.add(SavedPattern(n, pattern.map((r) => List<String>.from(r)).toList()));
+                      pattern = _defaultPattern.map((r) => List<String>.from(r)).toList();
+                      editingPatternName = null; editingPatternIndex = null;
+                    });
+                    save();
+                    Navigator.pop(ctx);
+                  }, child: const Text('保存'))
+                ]
+              ));
+            }),
+          ]),
+          if (editingPatternName != null) Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(color: Colors.orange.withOpacity(0.15), borderRadius: BorderRadius.circular(20)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Text('正在編輯: $editingPatternName', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                const SizedBox(width: 8),
+                FilledButton.tonal(onPressed: () { if (editingPatternIndex != null) { setState(() => savedPatterns[editingPatternIndex!] = SavedPattern(editingPatternName!, pattern.map((r) => List<String>.from(r)).toList())); save(); } }, child: const Text('更新同名')),
+                IconButton(icon: const Icon(Icons.close, size: 16), onPressed: () { setState(() { editingPatternName = null; editingPatternIndex = null; }); })
+              ])
+            )
+          ),
+        ])
+      ),
+      Container(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: defs.keys.map((k) {
+            var d = defs[k]!;
+            bool isSelected = selectedPatternCode == k;
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: GestureDetector(
+                onTap: () { setState(() => selectedPatternCode = k); },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isSelected ? d.color : d.color.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: isSelected ? Colors.black : d.color, width: isSelected ? 3 : 1.5),
+                  ),
+                  child: Row(children: [
+                    if (isSelected) Padding(padding: const EdgeInsets.only(right: 4), child: Icon(Icons.check_circle, color: Colors.white, size: 16)),
+                    Text(k, style: TextStyle(color: isSelected ? Colors.white : d.color, fontWeight: FontWeight.bold, fontSize: 16)),
+                  ]),
+                ),
+              ),
+            );
+          }).toList()),
+        ),
+      ),
+      Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: Text('已選班次: $selectedPatternCode (點下方格子填入)', style: const TextStyle(fontSize: 12, color: Colors.grey))),
+      Expanded(child: ListView.builder(itemCount: pattern.length, itemBuilder: (ctx, r) {
+        return Card(
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: Row(children: [
+              SizedBox(width: 28, child: Text('${r + 1}', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold))),
+              Expanded(child: Row(children: List.generate(7, (c) {
+                String code = pattern[r][c];
+                var def = defs[code];
+                Color chipColor = def?.color ?? Colors.grey;
+                return Expanded(child: GestureDetector(
+                  onTap: () { setState(() => pattern[r][c] = selectedPatternCode); save(); },
+                  onLongPress: () {
+                    showModalBottomSheet(context: context, builder: (ctx) => Wrap(children: defs.keys.map((k) => ListTile(
+                      leading: CircleAvatar(backgroundColor: defs[k]!.color, child: Text(k, style: const TextStyle(color: Colors.white, fontSize: 12))),
+                      title: Text(k),
+                      onTap: () { setState(() => pattern[r][c] = k); save(); Navigator.pop(ctx); },
+                    )).toList()));
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.all(2),
+                    height: 60,
+                    decoration: BoxDecoration(color: chipColor.withOpacity(0.3), borderRadius: BorderRadius.circular(8), border: Border.all(color: chipColor, width: 2)),
+                    child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: Text(code, style: TextStyle(fontSize: calendarFontSize, fontWeight: FontWeight.bold)))),
+                  )
+                ));
+              }))),
+              IconButton(icon: const Icon(Icons.delete), onPressed: () { setState(() => pattern.removeAt(r)); save(); })
             ])
           )
-        ),
-      ])
-    ),
-    Container(
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(children: defs.keys.map((k) {
-          var d = defs[k]!;
-          bool isSelected = selectedPatternCode == k;
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: GestureDetector(
-              onTap: () { setState(() => selectedPatternCode = k); },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: BoxDecoration(
-                  color: isSelected ? d.color : d.color.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: isSelected ? Colors.black : d.color, width: isSelected ? 3 : 1.5),
-                ),
-                child: Row(children: [
-                  if (isSelected) Padding(padding: const EdgeInsets.only(right: 4), child: Icon(Icons.check_circle, color: Colors.white, size: 16)),
-                  Text(k, style: TextStyle(color: isSelected ? Colors.white : d.color, fontWeight: FontWeight.bold, fontSize: 16)),
-                ]),
-              ),
-            ),
-          );
-        }).toList()),
-      ),
-    ),
-    Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Text('已選班次: $selectedPatternCode (點下方格子填入)', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-    ),
-    Expanded(child: ListView.builder(itemCount: pattern.length, itemBuilder: (ctx, r) {
-      return Card(
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: Row(children: [
-            SizedBox(width: 28, child: Text('${r + 1}', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold))),
-            Expanded(child: Row(children: List.generate(7, (c) {
-              String code = pattern[r][c];
-              var def = defs[code];
-              Color chipColor = def?.color ?? Colors.grey;
-              return Expanded(child: GestureDetector(
-                onTap: () { setState(() => pattern[r][c] = selectedPatternCode); save(); },
-                onLongPress: () {
-                  showModalBottomSheet(context: context, builder: (ctx) => Wrap(children: defs.keys.map((k) => ListTile(
-                    leading: CircleAvatar(backgroundColor: defs[k]!.color, child: Text(k, style: const TextStyle(color: Colors.white, fontSize: 12))),
-                    title: Text(k),
-                    onTap: () { setState(() => pattern[r][c] = k); save(); Navigator.pop(ctx); },
-                  )).toList()));
-                },
-                child: Container(
-                  margin: const EdgeInsets.all(2),
-                  height: 60,
-                  decoration: BoxDecoration(color: chipColor.withOpacity(0.3), borderRadius: BorderRadius.circular(8), border: Border.all(color: chipColor, width: 2)),
-                  child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: Text(code, style: TextStyle(fontSize: calendarFontSize, fontWeight: FontWeight.bold)))),
-                )
-              ));
-            }))),
-            IconButton(icon: const Icon(Icons.delete), onPressed: () { setState(() => pattern.removeAt(r)); save(); })
-          ])
-        )
-      );
-    })),
-  ]));
-}
-    Widget reportTab() {
+        );
+      })),
+    ]));
+  }
+
+  Widget reportTab() {
     int year = focused.year;
     int month = focused.month;
     double totalYearHrs = 0;
@@ -1957,10 +1752,7 @@ Widget patternTab() {
       }
       ot += curOt;
       allow += (rosterExtra[k] ?? 0);
-      if (rosterExtra.containsKey(k) && rosterExtraType.containsKey(k)) {
-        String t = rosterExtraType[k]!;
-        extraByType[t] = (extraByType[t] ?? 0) + rosterExtra[k]!;
-      }
+      if (rosterExtra.containsKey(k) && rosterExtraType.containsKey(k)) { String t = rosterExtraType[k]!; extraByType[t] = (extraByType[t] ?? 0) + rosterExtra[k]!; }
       hrs += (rosterExtraHrs[k] ?? 0);
     }
     double otAmount = ot * overtimeRate;
@@ -2111,7 +1903,7 @@ Widget patternTab() {
       const Text('日曆同步', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
         SwitchListTile(title: const Text('啟用日曆同步'), subtitle: Text(googleSyncEnabled ? '已授權' : '未授權'), value: googleSyncEnabled, onChanged: (v) async { if (v) { await _requestGooglePerm(); } else { setState(() => googleSyncEnabled = false); save(); } }),
-        SwitchListTile(title: const Text('自動同步(全刪重建)'), value: autoSync, onChanged: googleSyncEnabled ? (v) { setState(() => autoSync = v); save(); } : null),
+        SwitchListTile(title: const Text('自動同步'), value: autoSync, onChanged: googleSyncEnabled ? (v) { setState(() => autoSync = v); save(); } : null),
         Row(children: [
           Expanded(child: OutlinedButton.icon(onPressed: googleSyncEnabled ? () => _syncToGoogle() : null, icon: const Icon(Icons.sync), label: const Text('手動同步'))),
           const SizedBox(width: 8),
@@ -2240,7 +2032,7 @@ Widget patternTab() {
             label: widgetFontSize.toStringAsFixed(0),
             onChanged: (v) async {
               setState(() => widgetFontSize = v);
-              await HomeWidget.saveWidgetData<double>('widgetFontSize', v);
+              try { await HomeWidget.saveWidgetData<double>('widgetFontSize', v); } catch (_) {}
               try { await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider'); } catch (_) {}
             },
             onChangeEnd: (v) async { await save(); },
@@ -2258,11 +2050,15 @@ Widget patternTab() {
                 Colors.black, Colors.white, Colors.red, Colors.blue, Colors.green, Colors.orange, Colors.purple, Colors.grey, Colors.pink, Colors.teal
               ].map((c) => GestureDetector(
                 onTap: () async {
+                  Navigator.pop(ctx);
                   setState(() => widgetTextColor = c.value);
-                  await HomeWidget.saveWidgetData<int>('widgetTextColor', c.value);
-                  try { await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider'); } catch (_) {}
+                  try {
+                    await HomeWidget.saveWidgetData<double>('widgetTextColor', c.value.toDouble());
+                  } catch (_) {}
+                  try {
+                    await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
+                  } catch (_) {}
                   await save();
-                  if (mounted) Navigator.pop(ctx);
                 },
                 child: Container(width: 40, height: 40, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: Colors.black26)))
               )).toList())
