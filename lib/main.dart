@@ -60,7 +60,6 @@ class SavedPattern {
   factory SavedPattern.fromJson(Map<String, dynamic> j) => SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r) => (r as List).map<String>((e) => e.toString()).toList()).toList());
 }
 
-// ===== 農曆演算法 =====
 class LunarHelper {
   static final List<int> lunarInfo = [
     0x04bd8, 0x04ae0, 0x0a570, 0x054d5, 0x0d260, 0x0d950, 0x16554, 0x056a0, 0x09ad0, 0x055d2,
@@ -206,8 +205,8 @@ class MainPageState extends State<MainPage> {
       await HomeWidget.saveWidgetData('today_border', todayBorderColor.value);
       await HomeWidget.saveWidgetData('roster_json', jsonEncode(roster));
       await HomeWidget.saveWidgetData('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
-      await HomeWidget.saveWidgetData('widgetFontSize', widgetFontSize);
-      await HomeWidget.saveWidgetData('widgetTextColor', widgetTextColor);
+      await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
+      await HomeWidget.saveWidgetData<int>('widgetTextColor', widgetTextColor);
       DateTime now = DateTime.now();
       await HomeWidget.saveWidgetData('initial_year', now.year);
       await HomeWidget.saveWidgetData('initial_month', now.month);
@@ -345,11 +344,24 @@ class MainPageState extends State<MainPage> {
     sp.setString('roster_json', jsonEncode(roster));
     sp.setString('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
     sp.setBool('showLunar', showLunar);
-    sp.setDouble('widgetFontSize', widgetFontSize);
-    sp.setInt('widgetTextColor', widgetTextColor);
-    sp.setInt('widgetBgColor', widgetBgColor);
-    await sp.reload();
-    updateWidget();
+
+    // ===== 關鍵：用 HomeWidget 直接寫入帶 flutter. 前綴的 key =====
+    await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
+    await HomeWidget.saveWidgetData<int>('widgetTextColor', widgetTextColor);
+    await HomeWidget.saveWidgetData<int>('widgetBgColor', widgetBgColor);
+
+    await sp.setDouble('widgetFontSize', widgetFontSize);
+    await sp.setInt('widgetTextColor', widgetTextColor);
+    await sp.setInt('widgetBgColor', widgetBgColor);
+
+    await updateWidget();
+
+    // 延遲 500ms 再觸發一次，確保 SharedPreferences 落盤 + Android 重繪
+    Future.delayed(const Duration(milliseconds: 500), () async {
+      try {
+        await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
+      } catch (_) {}
+    });
 
     if (autoSync && googleSyncEnabled && !_isSyncing) {
       _autoSyncTimer?.cancel();
@@ -498,7 +510,7 @@ Future<void> _ensureCalendar() async {
   await _pickGoogleCalendarDialog();
 }
 
-// ===== 同步：優先用 eventId 精準刪除 + 設備時區偏移 =====
+// ===== 同步：eventId 精準刪除 + 設備時區偏移 + 全天用 local 不跨天 =====
 Future<void> _syncToGoogle({bool silent = false}) async {
   if (!googleSyncEnabled && !silent) {
     bool? en = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
@@ -576,7 +588,7 @@ Future<void> _syncToGoogle({bool silent = false}) async {
       await Future.delayed(const Duration(milliseconds: 1000));
     }
 
-    // 步驟 3：重建，使用設備時區偏移轉 UTC
+    // 步驟 3：重建
     final offset = DateTime.now().timeZoneOffset;
 
     for (var entry in roster.entries) {
@@ -601,15 +613,13 @@ Future<void> _syncToGoogle({bool silent = false}) async {
 
       Event ev;
       if (allDayFlag) {
-        DateTime sLocal = DateTime(date.year, date.month, date.day, 0, 0, 0);
-        DateTime eLocal = DateTime(date.year, date.month, date.day, 23, 59, 59);
-        DateTime sUtc = sLocal.subtract(offset);
-        DateTime eUtc = eLocal.subtract(offset);
+        // 【關鍵】全天事件：直接用本地時間，不轉 UTC，避免跨天
         ev = Event(_rosterCalendarId!, title: title, description: desc,
-          start: tz.TZDateTime.utc(sUtc.year, sUtc.month, sUtc.day, sUtc.hour, sUtc.minute),
-          end: tz.TZDateTime.utc(eUtc.year, eUtc.month, eUtc.day, eUtc.hour, eUtc.minute),
+          start: tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0),
+          end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59),
           allDay: true);
       } else {
+        // 【關鍵】定時事件：用設備時區偏移明確轉 UTC
         final sp1 = def.start.split(':');
         final ep1 = def.end.split(':');
         DateTime sLocal = DateTime(date.year, date.month, date.day, int.parse(sp1[0]), int.parse(sp1[1]));
@@ -648,7 +658,7 @@ Future<void> _syncToGoogle({bool silent = false}) async {
   }
 }
 
-// ===== 全清重建：優先用 eventId 精準刪除 + 設備時區偏移 =====
+// ===== 全清重建：eventId 精準刪除 + 設備時區偏移 + 全天用 local =====
 Future<void> _forceFullResync() async {
   bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
     title: const Text('⚠️ 全清重建確認'),
@@ -725,7 +735,7 @@ Future<void> _forceFullResync() async {
     _googleEventIdMap.clear();
     sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
 
-    // 步驟 3：重建，使用設備時區偏移
+    // 步驟 3：重建
     final offset = DateTime.now().timeZoneOffset;
 
     for (var entry in roster.entries) {
@@ -749,13 +759,10 @@ Future<void> _forceFullResync() async {
 
       Event ev;
       if (allDayFlag) {
-        DateTime sLocal = DateTime(date.year, date.month, date.day, 0, 0, 0);
-        DateTime eLocal = DateTime(date.year, date.month, date.day, 23, 59, 59);
-        DateTime sUtc = sLocal.subtract(offset);
-        DateTime eUtc = eLocal.subtract(offset);
+        // 【關鍵】全天事件：直接用本地時間，不轉 UTC
         ev = Event(_rosterCalendarId!, title: title, description: desc,
-          start: tz.TZDateTime.utc(sUtc.year, sUtc.month, sUtc.day, sUtc.hour, sUtc.minute),
-          end: tz.TZDateTime.utc(eUtc.year, eUtc.month, eUtc.day, eUtc.hour, eUtc.minute),
+          start: tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0),
+          end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59),
           allDay: true);
       } else {
         final sp1 = def.start.split(':');
@@ -1410,11 +1417,15 @@ void showDetail(DateTime day) {
                   try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, _googleEventIdMap[k]); } catch (_) {}
                   _googleEventIdMap.remove(k);
                 }
-                save();
-                Navigator.pop(ctx2);
+                await save();
+                // 立即觸發 widget 重繪
+                Future.delayed(const Duration(milliseconds: 300), () async {
+                  try { await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider'); } catch (_) {}
+                });
+                if (mounted) Navigator.pop(ctx2);
               }, child: const Text('清除班次(保留記事)', style: TextStyle(color: Colors.orange)))),
               const SizedBox(width: 8),
-              Expanded(child: FilledButton(onPressed: () {
+              Expanded(child: FilledButton(onPressed: () async {
                 double? otVal = double.tryParse(otc.text);
                 double? exVal = double.tryParse(exCtrl.text);
                 double? exHVal = double.tryParse(exHCtrl.text);
@@ -1426,8 +1437,12 @@ void showDetail(DateTime day) {
                   if (exVal != null && exVal != 0) rosterExtra[k] = exVal; else if (exVal == 0) rosterExtra.remove(k);
                   if (exHVal != null && exHVal != 0) rosterExtraHrs[k] = exHVal; else rosterExtraHrs.remove(k);
                 });
-                save();
-                Navigator.pop(ctx2);
+                await save();
+                // 立即觸發 widget 重繪
+                Future.delayed(const Duration(milliseconds: 300), () async {
+                  try { await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider'); } catch (_) {}
+                });
+                if (mounted) Navigator.pop(ctx2);
               }, child: const Text('儲存'))),
             ]),
           ])
@@ -2090,9 +2105,16 @@ Widget patternTab() {
             value: widgetFontSize,
             min: 20, max: 100, divisions: 16,
             label: widgetFontSize.toStringAsFixed(0),
-            onChanged: (v) {
+            onChanged: (v) async {
               setState(() => widgetFontSize = v);
-              save();
+              // 立即寫入並觸發 widget 重繪
+              await HomeWidget.saveWidgetData<double>('widgetFontSize', v);
+              try {
+                await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
+              } catch (_) {}
+            },
+            onChangeEnd: (v) async {
+              await save();
             },
           )),
           Text(widgetFontSize.toStringAsFixed(0), style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -2107,10 +2129,14 @@ Widget patternTab() {
               content: Wrap(spacing: 8, runSpacing: 8, children: [
                 Colors.black, Colors.white, Colors.red, Colors.blue, Colors.green, Colors.orange, Colors.purple, Colors.grey, Colors.pink, Colors.teal
               ].map((c) => GestureDetector(
-                onTap: () {
+                onTap: () async {
                   setState(() => widgetTextColor = c.value);
-                  save();
-                  Navigator.pop(ctx);
+                  await HomeWidget.saveWidgetData<int>('widgetTextColor', c.value);
+                  try {
+                    await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
+                  } catch (_) {}
+                  await save();
+                  if (mounted) Navigator.pop(ctx);
                 },
                 child: Container(width: 40, height: 40, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: Colors.black26)))
               )).toList())
