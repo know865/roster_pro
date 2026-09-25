@@ -19,6 +19,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
     private val TAG = "RosterWidget"
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+        Log.d(TAG, "=== onUpdate: ${appWidgetIds.size} widgets ===")
         for (appWidgetId in appWidgetIds) {
             try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (e: Exception) { Log.e(TAG, "onUpdate error", e) }
         }
@@ -32,6 +33,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         val action = intent.action ?: return
+        Log.d(TAG, "=== onReceive: $action ===")
         if (action == "PREV_MONTH" || action == "NEXT_MONTH" || action == "REFRESH_WIDGET") {
             try {
                 val appWidgetManager = AppWidgetManager.getInstance(context)
@@ -43,6 +45,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 if (action == "PREV_MONTH") { month--; if (month < 0) { month = 11; year-- } }
                 else if (action == "NEXT_MONTH") { month++; if (month > 11) { month = 0; year++ } }
                 prefs.edit().putInt("year", year).putInt("month", month).apply()
+                Log.d(TAG, "Month changed to: $year-$month")
                 for (appWidgetId in allWidgetIds) {
                     try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (e: Exception) {}
                 }
@@ -75,7 +78,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
 
                 val fp: SharedPreferences = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
 
-                // 嘗試多種鍵名，確保讀到
+                // ===== 嘗試多種鍵名，確保讀到 =====
                 var fontSize = getSafeFloat(fp, "flutter.widgetFontSize", 0f)
                 if (fontSize <= 0f) fontSize = getSafeFloat(fp, "flutter.widget_font_size", 0f)
                 if (fontSize <= 0f) fontSize = 55f
@@ -87,12 +90,31 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 val bgColor = getSafeInt(fp, "flutter.widgetBgColor", 0xFFFFFFFF.toInt())
                 val todayBgColor = getSafeInt(fp, "flutter.today_bg", 0xFFFFF9C4.toInt())
 
-                Log.d(TAG, "Widget Settings -> FontSize: $fontSize, TextColor: $textColor")
+                // ===== 詳細 Debug Log =====
+                Log.d(TAG, "========== Widget Update ==========")
+                Log.d(TAG, "AppWidgetId: $appWidgetId")
+                Log.d(TAG, "Year: $year, Month: $month")
+                Log.d(TAG, "FontSize: $fontSize")
+                Log.d(TAG, "TextColor: 0x${Integer.toHexString(textColor)}")
+                Log.d(TAG, "BgColor: 0x${Integer.toHexString(bgColor)}")
+                Log.d(TAG, "TodayBgColor: 0x${Integer.toHexString(todayBgColor)}")
+                try {
+                    Log.d(TAG, "FlutterSharedPrefs All Keys: ${fp.all.keys}")
+                    Log.d(TAG, "flutter.widgetFontSize raw value: ${fp.all["flutter.widgetFontSize"]}")
+                    Log.d(TAG, "flutter.widgetTextColor raw value: ${fp.all["flutter.widgetTextColor"]}")
+                    Log.d(TAG, "flutter.widgetBgColor raw value: ${fp.all["flutter.widgetBgColor"]}")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to dump FlutterSharedPrefs keys", e)
+                }
+                Log.d(TAG, "===================================")
 
                 val rosterJsonStr = fp.getString("flutter.roster_json", "{}") ?: "{}"
                 val defsJsonStr = fp.getString("flutter.defs_json", "{}") ?: "{}"
                 val rosterJson = try { JSONObject(rosterJsonStr) } catch (e: Exception) { JSONObject() }
                 val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
+
+                Log.d(TAG, "Roster entries count: ${rosterJson.length()}")
+                Log.d(TAG, "Defs entries count: ${defsJson.length()}")
 
                 views.setTextViewText(R.id.tv_month_title, "${year}年${monthNames[month]}")
                 views.setTextColor(R.id.tv_month_title, textColor)
@@ -143,7 +165,9 @@ class RosterWidgetProvider : AppWidgetProvider() {
                             views.setTextViewText(tvId, "")
                             views.setViewVisibility(tvId, View.INVISIBLE)
                         }
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        Log.e(TAG, "cell $i error: ${e.message}")
+                    }
                 }
 
                 try { views.setInt(R.id.widget_root, "setBackgroundColor", bgColor) } catch (e: Exception) {}
@@ -154,6 +178,8 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 views.setOnClickPendingIntent(R.id.btn_next, PendingIntent.getBroadcast(context, 1, nextIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                 val refreshIntent = Intent(context, RosterWidgetProvider::class.java).setAction("REFRESH_WIDGET")
                 views.setOnClickPendingIntent(R.id.btn_refresh, PendingIntent.getBroadcast(context, 2, refreshIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+
+                Log.d(TAG, "Widget rendered successfully for id=$appWidgetId")
             } catch (e: Exception) {
                 Log.e(TAG, "updateAppWidget error: ${e.message}", e)
             }
