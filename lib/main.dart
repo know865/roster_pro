@@ -87,6 +87,7 @@ class LunarHelper {
     int day = offset + 1;
     return [month, day, isLeap ? 1 : 0];
   }
+  // 日期格子用：只顯示「日」，初一顯示月份（避免溢出）
   static String getLunarDayText(DateTime date) {
     try {
       if (date.year > 2100) return '超出範圍';
@@ -94,6 +95,17 @@ class LunarHelper {
       int m = r[0], d = r[1], isLeap = r[2];
       if (d == 1) return '${isLeap == 1 ? '閏' : ''}${lunarMonths[m - 1]}月';
       return lunarDays[d - 1];
+    } catch (_) { return ''; }
+  }
+  // 底部白色卡用：完整農曆月日，例如「八月廿一」
+  static String getFullLunarText(DateTime date) {
+    try {
+      if (date.year > 2100) return '';
+      final r = solarToLunar(date);
+      int m = r[0], d = r[1], isLeap = r[2];
+      final monthStr = '${isLeap == 1 ? '閏' : ''}${lunarMonths[m - 1]}月';
+      if (d == 1) return monthStr;
+      return '$monthStr${lunarDays[d - 1]}';
     } catch (_) { return ''; }
   }
 }
@@ -1354,35 +1366,45 @@ Widget calTab() {
         )
       ),
       Container(
-        width: double.infinity, padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+        width: double.infinity,
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.32),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
         decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Color(0xFFE0E0E0)))),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Expanded(child: Text('${roster[selKey] ?? '未排班'}${isHoliday(selectedDay) ? ' [${holidayName(selectedDay)}]' : ''} ${extraType.isNotEmpty ? '[$extraType]' : ''}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-            const SizedBox(width: 8),
-            if (selDef != null) Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: selDef.color, borderRadius: BorderRadius.circular(10)), child: Text(selDef.code, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold))),
-            const SizedBox(width: 8),
-            FilledButton.tonalIcon(onPressed: () { showDetail(selectedDay); }, icon: const Icon(Icons.edit, size: 16), label: const Text('編輯', style: TextStyle(fontSize: 12)), style: FilledButton.styleFrom(minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 12))),
-          ]),
-          const SizedBox(height: 10),
-          Container(
-            width: double.infinity, padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(12)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('1. 班次：${selDef != null ? '(${selDef.code}) ${selDef.label}' : ''} ${isHoliday(selectedDay) ? '[${holidayName(selectedDay)}]' : ''}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text('2. 時間：${selDef != null ? (selDef.isAllDay ? '全天' : '${selDef.start}-${selDef.end}') : ''} | 工時：${selDef?.hours ?? 0}h', style: const TextStyle(fontSize: 12)),
-              const SizedBox(height: 4),
-              Text('3. 班次津貼：${selDef != null && selDef.hasAllowance ? '有 \$${selDef.allowance}' : '無'} | 午飯時間：${selDef != null && selDef.hasLunch ? '有 (已扣1h)' : '無'}', style: const TextStyle(fontSize: 12)),
-              const SizedBox(height: 4),
-              Text('4. 額外津貼名稱：${extraType.isNotEmpty ? extraType : '無'}  金額：\$${(rosterExtra[selKey] ?? 0).toStringAsFixed(1)}', style: const TextStyle(fontSize: 12, color: Colors.deepPurple, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 4),
-              Text('5. OT：${(rosterOt[selKey] ?? 0).toStringAsFixed(1)}h | 額外工時：${(rosterExtraHrs[selKey] ?? 0).toStringAsFixed(1)}h', style: const TextStyle(fontSize: 12)),
-              const SizedBox(height: 4),
-              Text('6. 記事：${note.isEmpty ? '無' : note}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.deepPurple), maxLines: 6, overflow: TextOverflow.ellipsis),
-            ])
-          )
-        ])
+        child: SingleChildScrollView(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Expanded(child: Text('${roster[selKey] ?? '未排班'}${isHoliday(selectedDay) ? ' [${holidayName(selectedDay)}]' : ''} ${extraType.isNotEmpty ? '[$extraType]' : ''}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+              const SizedBox(width: 8),
+              if (selDef != null) Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: selDef.color, borderRadius: BorderRadius.circular(10)), child: Text(selDef.code, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold))),
+              const SizedBox(width: 8),
+              if (showLunar) Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(10)),
+                child: Text(LunarHelper.getFullLunarText(selectedDay), style: const TextStyle(fontSize: 11, color: Colors.black87, fontWeight: FontWeight.bold)),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonalIcon(onPressed: () { showDetail(selectedDay); }, icon: const Icon(Icons.edit, size: 16), label: const Text('編輯', style: TextStyle(fontSize: 12)), style: FilledButton.styleFrom(minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 12))),
+            ]),
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity, padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(12)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('1. 班次：${selDef != null ? '(${selDef.code}) ${selDef.label}' : ''} ${isHoliday(selectedDay) ? '[${holidayName(selectedDay)}]' : ''}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                Text('2. 時間：${selDef != null ? (selDef.isAllDay ? '全天' : '${selDef.start}-${selDef.end}') : ''} | 工時：${selDef?.hours ?? 0}h', style: const TextStyle(fontSize: 12)),
+                const SizedBox(height: 4),
+                Text('3. 班次津貼：${selDef != null && selDef.hasAllowance ? '有 \$${selDef.allowance}' : '無'} | 午飯時間：${selDef != null && selDef.hasLunch ? '有 (已扣1h)' : '無'}', style: const TextStyle(fontSize: 12)),
+                const SizedBox(height: 4),
+                Text('4. 額外津貼名稱：${extraType.isNotEmpty ? extraType : '無'}  金額：\$${(rosterExtra[selKey] ?? 0).toStringAsFixed(1)}', style: const TextStyle(fontSize: 12, color: Colors.deepPurple, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                Text('5. OT：${(rosterOt[selKey] ?? 0).toStringAsFixed(1)}h | 額外工時：${(rosterExtraHrs[selKey] ?? 0).toStringAsFixed(1)}h', style: const TextStyle(fontSize: 12)),
+                const SizedBox(height: 4),
+                Text('6. 記事：${note.isEmpty ? '無' : note}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.deepPurple)),
+              ])
+            )
+          ])
+        )
       )
     ])
   );
