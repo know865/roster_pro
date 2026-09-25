@@ -611,87 +611,31 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
     int del = 0, add = 0, upd = 0;
 
     if (needFull) {
-      DateTime scanStart = _calcScanStart();
-      DateTime scanEnd = _calcScanEnd();
-
-      // 1. 先删掉 App 记忆中已知的事件
-      final trackedIds = Map<String, String>.from(_googleEventIdMap);
-      for (var e in trackedIds.entries) {
-        try {
-          await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.value);
-          del++;
-          await _writeDebugLog('✅ 刪除已知事件成功: ${e.value}');
-        } catch (err) {
-          await _writeDebugLog('❌ 刪除已知事件失敗: ${e.value}, 錯誤: $err');
-        }
+      // 【方案 B】直接調用 Android 原生 API 強制刪除該日曆下所有事件
+      // 這樣就繞過了 device_calendar 插件 eventId 返回 null 的缺陷
+      await _writeDebugLog('=== 使用原生 API 強制清理日曆 ID: $_rosterCalendarId ===');
+      try {
+        final deletedCount = await _realChannel.invokeMethod('deleteAllEventsInCalendar', {'calendarId': _rosterCalendarId});
+        del = deletedCount as int? ?? 0;
+        await _writeDebugLog('✅ 原生清理完成，共刪除 $del 條事件');
+      } catch (e) {
+        await _writeDebugLog('❌ 原生清理失敗: $e');
+        throw '原生清理失敗: $e';
       }
+
+      // 清空記憶體中的 ID 映射
       _googleEventIdMap.clear();
 
-      await Future.delayed(const Duration(seconds: 3));
+      // 等待一下，確保 Android 系統的刪除操作落盤
+      await Future.delayed(const Duration(seconds: 2));
 
-      // 2. 多轮扫描清理，每一步都记录日志
-      bool hasAnyEvent = true;
-      int round = 0;
-      while (hasAnyEvent && round < 10) {
-        hasAnyEvent = false;
-        DateTime current = scanStart;
-        int roundDeleted = 0;
-        int roundFailed = 0;
-
-        await _writeDebugLog('--- 第 ${round + 1} 輪掃描開始 ---');
-
-        while (current.isBefore(scanEnd)) {
-          DateTime next = DateTime(current.year, current.month + 1, 1);
-          if (next.isAfter(scanEnd)) next = scanEnd;
-
-          try {
-            var existingEvents = await _calendarPlugin.retrieveEvents(
-              _rosterCalendarId!,
-              RetrieveEventsParams(startDate: current, endDate: next),
-            );
-
-            final list = existingEvents.data ?? [];
-            if (list.isNotEmpty) {
-              await _writeDebugLog('  ${DateFormat('yyyy-MM').format(current)} 找到 ${list.length} 條事件');
-              hasAnyEvent = true;
-
-              for (var e in list) {
-                final id = e.eventId;
-                if (id == null) continue;
-                try {
-                  final res = await _calendarPlugin.deleteEvent(_rosterCalendarId!, id);
-                  if (res != null && res.isSuccess) {
-                    del++;
-                    roundDeleted++;
-                  } else {
-                    roundFailed++;
-                    await _writeDebugLog('  ❌ 刪除失敗(非成功回傳): id=$id, 標題=${e.title}');
-                  }
-                } catch (err) {
-                  roundFailed++;
-                  await _writeDebugLog('  ❌ 刪除異常: id=$id, 標題=${e.title}, 錯誤=$err');
-                }
-                await Future.delayed(const Duration(milliseconds: 150));
-              }
-            }
-          } catch (e) {
-            await _writeDebugLog('  掃描錯誤: $e');
-          }
-          current = next;
-        }
-
-        await _writeDebugLog('--- 第 ${round + 1} 輪結束，本輪成功刪除 $roundDeleted 條，失敗 $roundFailed 條 ---');
-
-        round++;
-        if (hasAnyEvent) await Future.delayed(const Duration(seconds: 5));
-      }
-
-      await _writeDebugLog('=== 清理完畢，共成功刪除 $del 條，開始寫入新班次 ===');
-
+      // 重新寫入新班次
+      await _writeDebugLog('=== 開始寫入新班次 ===');
       for (var entry in roster.entries) {
         final added = await _buildAndInsertEvent(entry.key, entry.value, offset);
         if (added) add++;
       }
+      await _writeDebugLog('=== 寫入完成，共新增 $add 條 ===');
 
       _needsFullSync = false;
       _dirtyDates.clear();
