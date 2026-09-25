@@ -30,7 +30,6 @@
     </LinearLayout>
 
     <GridLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:columnCount="7" android:rowCount="6" android:layout_marginTop="1dp">
-        <!-- day0 到 day41，每個都加上 maxLines="3" 和 ellipsize="none" -->
         <TextView android:id="@+id/day0" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
         <TextView android:id="@+id/day1" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
         <TextView android:id="@+id/day2" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
