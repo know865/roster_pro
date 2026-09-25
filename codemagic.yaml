@@ -28,8 +28,8 @@ workflows:
       - name: Add Custom Widget Files
         script: |
           set -e
-          
-          # ===== 1. 寫入 AndroidManifest.xml =====
+
+          # ===== 1. AndroidManifest.xml =====
           cat > android/app/src/main/AndroidManifest.xml <<'MANIFEST_EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET"/>
@@ -80,7 +80,7 @@ workflows:
           </manifest>
           MANIFEST_EOF
 
-          # ===== 2. 寫入 MainActivity.kt（包含原生刪除日曆事件的方法）=====
+          # ===== 2. MainActivity.kt（含原生刪除日曆事件 API）=====
           mkdir -p android/app/src/main/kotlin/com/example/roster_pro
           cat > android/app/src/main/kotlin/com/example/roster_pro/MainActivity.kt <<'MAIN_EOF'
           package com.example.roster_pro
@@ -111,7 +111,6 @@ workflows:
                           "getCalendars" -> handleGetCalendars(result)
                           "scanImage" -> handleScanImage(call.argument<String>("path"), result)
                           "requestManageStorage" -> handleRequestManageStorage(result)
-                          // 【新增】根據日曆 ID 強制刪除該日曆下所有事件
                           "deleteAllEventsInCalendar" -> {
                               val calendarId = call.argument<String>("calendarId")
                               if (calendarId == null) {
@@ -182,7 +181,6 @@ workflows:
                   } catch (e: Exception) { result.error("STORAGE_FAIL", e.message, null) }
               }
 
-              // 【核心】用原生 Android API 強制刪除該日曆下所有事件
               private fun handleDeleteAllEvents(calendarId: String, result: MethodChannel.Result) {
                   try {
                       if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
@@ -204,7 +202,6 @@ workflows:
                                   contentResolver.delete(eventUri, null, null)
                                   deleted++
                               } catch (e: Exception) {
-                                  // 忽略個別失敗，繼續刪下一條
                               }
                           }
                       }
@@ -216,7 +213,7 @@ workflows:
           }
           MAIN_EOF
 
-          # ===== 3. 寫入 widget_info.xml =====
+          # ===== 3. widget_info.xml =====
           mkdir -p android/app/src/main/res/xml
           cat > android/app/src/main/res/xml/widget_info.xml <<'INFO_EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -230,11 +227,12 @@ workflows:
           </appwidget-provider>
           INFO_EOF
 
-          # ===== 4. 寫入 widget_layout.xml（字體放大至 60.0，支援自動換行）=====
+          # ===== 4. widget_layout.xml（新增 widget_root ID，且所有格子支援自動換行）=====
           mkdir -p android/app/src/main/res/layout
           cat > android/app/src/main/res/layout/widget_layout.xml <<'LAYOUT_EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/widget_root"
               android:layout_width="match_parent"
               android:layout_height="match_parent"
               android:orientation="vertical"
@@ -310,7 +308,7 @@ workflows:
           </LinearLayout>
           LAYOUT_EOF
 
-          # ===== 5. 寫入 RosterWidgetProvider.kt（修復字體大小和顏色讀取）=====
+          # ===== 5. RosterWidgetProvider.kt（TAG 修復在 class 頂部）=====
           cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt <<'WIDGET_EOF'
           package com.example.roster_pro
 
@@ -387,7 +385,7 @@ workflows:
                                   if (file.length() > 200 * 1024) file.writeText("[$timestamp] (log reset)\n")
                                   return
                               }
-                          } catch (e: Exception) { Log.e(TAG, "Write to ExternalFiles failed: ${e.message}") }
+                          } catch (e: Exception) { Log.e("RosterWidget", "Write to ExternalFiles failed: ${e.message}") }
                           try {
                               val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
                               if (downloadDir != null) {
@@ -396,9 +394,9 @@ workflows:
                                   file.appendText(line)
                                   return
                               }
-                          } catch (e: Exception) { Log.e(TAG, "Write to Download failed: ${e.message}") }
-                          try { val file = File(context.filesDir, "roster_widget_debug.txt"); file.appendText(line) } catch (e: Exception) { Log.e(TAG, "Write to filesDir failed: ${e.message}") }
-                      } catch (e: Exception) { Log.e(TAG, "writeDebugLog fatal error: ${e.message}") }
+                          } catch (e: Exception) { Log.e("RosterWidget", "Write to Download failed: ${e.message}") }
+                          try { val file = File(context.filesDir, "roster_widget_debug.txt"); file.appendText(line) } catch (e: Exception) { Log.e("RosterWidget", "Write to filesDir failed: ${e.message}") }
+                      } catch (e: Exception) { Log.e("RosterWidget", "writeDebugLog fatal error: ${e.message}") }
                   }
 
                   private fun getValueAsDouble(sp: SharedPreferences, key: String, def: Double): Double {
