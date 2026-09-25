@@ -96,30 +96,50 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) { result.error("STORAGE_FAIL", e.message, null) }
     }
 
+    // 【核心】分批删除，每批 10 条，绕过 Android 系统的批量删除安全限制
     private fun handleDeleteAllEvents(calendarId: String, result: MethodChannel.Result) {
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
                 result.error("PERMISSION", "No write calendar permission", null)
                 return
             }
+
             val uri = CalendarContract.Events.CONTENT_URI
             val projection = arrayOf(CalendarContract.Events._ID)
             val selection = "${CalendarContract.Events.CALENDAR_ID} = ?"
             val selectionArgs = arrayOf(calendarId)
 
+            // 先查出所有事件 ID
             val cursor = contentResolver.query(uri, projection, selection, selectionArgs, null)
-            var deleted = 0
+            val eventIds = mutableListOf<Long>()
             cursor?.use {
                 while (it.moveToNext()) {
-                    val eventId = it.getLong(0)
-                    val eventUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId)
+                    eventIds.add(it.getLong(0))
+                }
+            }
+
+            // 分批删除，每批 10 条
+            val batchSize = 10
+            var deleted = 0
+            var index = 0
+            while (index < eventIds.size) {
+                val end = minOf(index + batchSize, eventIds.size)
+                for (i in index until end) {
+                    val eventUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventIds[i])
                     try {
                         contentResolver.delete(eventUri, null, null)
                         deleted++
                     } catch (e: Exception) {
+                        // 忽略个别失败
                     }
                 }
+                index = end
+                // 每删完一批，等 200ms，让系统喘口气，避免触发上限弹窗
+                if (index < eventIds.size) {
+                    try { Thread.sleep(200) } catch (_: InterruptedException) {}
+                }
             }
+
             result.success(deleted)
         } catch (e: Exception) {
             result.error("DELETE_FAIL", e.message, null)
