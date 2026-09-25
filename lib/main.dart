@@ -190,25 +190,49 @@ class MainPageState extends State<MainPage> {
   Timer? _autoSyncTimer;
   String appVersion = '載入中...';
 
+  Future<void> _writeDebugLog(String message) async {
+    try {
+      final dir = await getExternalStorageDirectory();
+      if (dir == null) return;
+      final f = File('${dir.path}/roster_widget_debug.txt');
+      final ts = DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now());
+      await f.writeAsString('[$ts][Dart] $message\n', mode: FileMode.append);
+      if (await f.length() > 200 * 1024) {
+        await f.writeAsString('[$ts] (log reset)\n');
+      }
+    } catch (_) {}
+  }
+
   Future<void> updateWidget() async {
     try {
       String todayKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
       String tomorrowKey = DateFormat('yyyy-MM-dd').format(DateTime.now().add(const Duration(days: 1)));
-      await HomeWidget.saveWidgetData('today_code', roster[todayKey] ?? 'O');
-      await HomeWidget.saveWidgetData('tomorrow_code', roster[tomorrowKey] ?? 'O');
-      await HomeWidget.saveWidgetData('note', rosterNote[todayKey] ?? '');
-      await HomeWidget.saveWidgetData('extraType', rosterExtraType[todayKey] ?? '');
-      await HomeWidget.saveWidgetData('today_bg', todayBgColor.value);
-      await HomeWidget.saveWidgetData('today_border', todayBorderColor.value);
-      await HomeWidget.saveWidgetData('roster_json', jsonEncode(roster));
-      await HomeWidget.saveWidgetData('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
-      await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
-      await HomeWidget.saveWidgetData<double>('widgetTextColor', widgetTextColor.toDouble());
+      await _writeDebugLog('--- updateWidget 開始 ---');
+      await _writeDebugLog('widgetFontSize=$widgetFontSize, widgetTextColor=0x${widgetTextColor.toRadixString(16)}');
+      try { await HomeWidget.saveWidgetData<String>('today_code', roster[todayKey] ?? 'O'); } catch (e) { await _writeDebugLog('today_code err: $e'); }
+      try { await HomeWidget.saveWidgetData<String>('tomorrow_code', roster[tomorrowKey] ?? 'O'); } catch (_) {}
+      try { await HomeWidget.saveWidgetData<String>('note', rosterNote[todayKey] ?? ''); } catch (_) {}
+      try { await HomeWidget.saveWidgetData<String>('extraType', rosterExtraType[todayKey] ?? ''); } catch (_) {}
+      try { await HomeWidget.saveWidgetData<double>('today_bg', todayBgColor.value.toDouble()); } catch (_) {}
+      try { await HomeWidget.saveWidgetData<double>('today_border', todayBorderColor.value.toDouble()); } catch (_) {}
+      try { await HomeWidget.saveWidgetData<String>('roster_json', jsonEncode(roster)); } catch (_) {}
+      try { await HomeWidget.saveWidgetData<String>('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson())))); } catch (_) {}
+      try {
+        await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
+        await _writeDebugLog('寫入 widgetFontSize=$widgetFontSize OK');
+      } catch (e) { await _writeDebugLog('寫入 widgetFontSize 失敗: $e'); }
+      try {
+        await HomeWidget.saveWidgetData<double>('widgetTextColor', widgetTextColor.toDouble());
+        await _writeDebugLog('寫入 widgetTextColor=$widgetTextColor OK');
+      } catch (e) { await _writeDebugLog('寫入 widgetTextColor 失敗: $e'); }
       DateTime now = DateTime.now();
-      await HomeWidget.saveWidgetData('initial_year', now.year);
-      await HomeWidget.saveWidgetData('initial_month', now.month);
+      try { await HomeWidget.saveWidgetData<int>('initial_year', now.year); } catch (_) {}
+      try { await HomeWidget.saveWidgetData<int>('initial_month', now.month); } catch (_) {}
       await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
-    } catch (e) { print("Widget update error: $e"); }
+      await _writeDebugLog('觸發 Widget 更新 OK');
+    } catch (e) {
+      await _writeDebugLog('updateWidget 整體失敗: $e');
+    }
   }
 
   bool _isSyncing = false;
@@ -336,21 +360,10 @@ class MainPageState extends State<MainPage> {
     sp.setString('roster_json', jsonEncode(roster));
     sp.setString('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
     sp.setBool('showLunar', showLunar);
-    // 【關鍵修復】home_widget 不接受 int，改為 double
-    try {
-      await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
-      await HomeWidget.saveWidgetData<double>('widgetTextColor', widgetTextColor.toDouble());
-      await HomeWidget.saveWidgetData<double>('widgetBgColor', widgetBgColor.toDouble());
-    } catch (e) {
-      print("Widget save error: $e");
-    }
     await sp.setDouble('widgetFontSize', widgetFontSize);
     await sp.setInt('widgetTextColor', widgetTextColor);
     await sp.setInt('widgetBgColor', widgetBgColor);
     await updateWidget();
-    Future.delayed(const Duration(milliseconds: 500), () async {
-      try { await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider'); } catch (_) {}
-    });
     if (autoSync && googleSyncEnabled && !_isSyncing) {
       _autoSyncTimer?.cancel();
       _autoSyncTimer = Timer(const Duration(seconds: 3), () {
@@ -497,30 +510,35 @@ void _markDirtyRange(DateTime start, DateTime end) {
   }
 }
 
+// ===== 動態掃描範圍（跟隨 roster 實際日期，並兜底至 2000 年，覆蓋所有遠古殘留）=====
 DateTime _calcScanStart() {
-  if (roster.isEmpty) return DateTime(DateTime.now().year - 3, 1, 1);
-  int minYear = 9999;
-  for (String k in roster.keys) {
-    if (k.length >= 4) {
-      int? y = int.tryParse(k.substring(0, 4));
-      if (y != null && y < minYear) minYear = y;
+  int currentYear = DateTime.now().year;
+  int minYear = currentYear - 10;
+  if (roster.isNotEmpty) {
+    for (String k in roster.keys) {
+      if (k.length >= 4) {
+        int? y = int.tryParse(k.substring(0, 4));
+        if (y != null && y - 2 < minYear) minYear = y - 2;
+      }
     }
   }
-  if (minYear == 9999) minYear = DateTime.now().year;
-  return DateTime(minYear - 2, 1, 1);
+  // 【關鍵】兜底至 2000 年，確保掃到任何遠古殘留
+  if (minYear > 2000) minYear = 2000;
+  return DateTime(minYear, 1, 1);
 }
 
 DateTime _calcScanEnd() {
-  if (roster.isEmpty) return DateTime(DateTime.now().year + 3, 12, 31);
-  int maxYear = 0;
-  for (String k in roster.keys) {
-    if (k.length >= 4) {
-      int? y = int.tryParse(k.substring(0, 4));
-      if (y != null && y > maxYear) maxYear = y;
+  int currentYear = DateTime.now().year;
+  int maxYear = currentYear + 30;
+  if (roster.isNotEmpty) {
+    for (String k in roster.keys) {
+      if (k.length >= 4) {
+        int? y = int.tryParse(k.substring(0, 4));
+        if (y != null && y + 2 > maxYear) maxYear = y + 2;
+      }
     }
   }
-  if (maxYear == 0) maxYear = DateTime.now().year;
-  return DateTime(maxYear + 2, 12, 31);
+  return DateTime(maxYear, 12, 31);
 }
 
 Future<bool> _buildAndInsertEvent(String dateKey, String code, Duration offset) async {
@@ -767,7 +785,20 @@ Future<void> restoreFromFile(String path) async {
     _needsFullSync = true;
     _dirtyDates.clear();
     await save();
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('還原成功')));
+
+    // 【關鍵】還原後立即觸發強制完整同步，徹底清除舊版殘留
+    if (googleSyncEnabled) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('還原成功，正在完整同步至 Google 日曆...'),
+          duration: Duration(seconds: 3),
+        ));
+      }
+      await Future.delayed(const Duration(milliseconds: 800));
+      await _syncToGoogle(forceFullSync: true, silent: false);
+    } else {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('還原成功')));
+    }
   } catch (e) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('還原失敗 $e')));
   }
@@ -855,6 +886,10 @@ Future<void> showBackupList() async {
   });
 }
   Future<void> showWidgetDebugLog() async {
+  await _writeDebugLog('=== 手動觸發調試日誌 ===');
+  await _writeDebugLog('widgetFontSize=$widgetFontSize');
+  await _writeDebugLog('widgetTextColor=0x${widgetTextColor.toRadixString(16)}');
+
   String content = '';
   String usedPath = '';
   try {
@@ -872,7 +907,14 @@ Future<void> showBackupList() async {
     } catch (_) {}
   }
   if (content.isEmpty) {
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('尚未產生除錯日誌。請先修改字體大小或顏色，讓小工具更新一次。'), duration: Duration(seconds: 5)));
+    if (mounted) {
+      final dir = await getExternalStorageDirectory();
+      await showDialog(context: context, builder: (ctx) => AlertDialog(
+        title: const Text('小工具調試日誌'),
+        content: Text('尚未產生除錯日誌。\n\n檢查以下路徑：\n${dir?.path ?? '未知'}/roster_widget_debug.txt\n\n或點「立即備份」後再查看。', style: const TextStyle(fontSize: 12)),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('關閉'))],
+      ));
+    }
     return;
   }
   if (!mounted) return;
@@ -2052,12 +2094,8 @@ void showDetail(DateTime day) {
                 onTap: () async {
                   Navigator.pop(ctx);
                   setState(() => widgetTextColor = c.value);
-                  try {
-                    await HomeWidget.saveWidgetData<double>('widgetTextColor', c.value.toDouble());
-                  } catch (_) {}
-                  try {
-                    await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
-                  } catch (_) {}
+                  try { await HomeWidget.saveWidgetData<double>('widgetTextColor', c.value.toDouble()); } catch (_) {}
+                  try { await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider'); } catch (_) {}
                   await save();
                 },
                 child: Container(width: 40, height: 40, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: Colors.black26)))
