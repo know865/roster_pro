@@ -196,7 +196,7 @@ class MainPageState extends State<MainPage> {
       if (dir == null) return;
       final f = File('${dir.path}/roster_widget_debug.txt');
       final ts = DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now());
-      await f.writeAsString('[$ts][Dart] $message\n', mode: FileMode.append);
+      await f.writeAsString('[$ts]$message\n', mode: FileMode.append);
       if (await f.length() > 200 * 1024) {
         await f.writeAsString('[$ts] (log reset)\n');
       }
@@ -207,9 +207,9 @@ class MainPageState extends State<MainPage> {
     try {
       String todayKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
       String tomorrowKey = DateFormat('yyyy-MM-dd').format(DateTime.now().add(const Duration(days: 1)));
-      await _writeDebugLog('--- updateWidget 開始 ---');
-      await _writeDebugLog('widgetFontSize=$widgetFontSize, widgetTextColor=0x${widgetTextColor.toRadixString(16)}');
-      try { await HomeWidget.saveWidgetData<String>('today_code', roster[todayKey] ?? 'O'); } catch (e) { await _writeDebugLog('today_code err: $e'); }
+      await _writeDebugLog('[Dart] --- updateWidget 開始 ---');
+      await _writeDebugLog('[Dart] widgetFontSize=$widgetFontSize, widgetTextColor=0x${widgetTextColor.toRadixString(16)}');
+      try { await HomeWidget.saveWidgetData<String>('today_code', roster[todayKey] ?? 'O'); } catch (e) { await _writeDebugLog('[Dart] today_code err: $e'); }
       try { await HomeWidget.saveWidgetData<String>('tomorrow_code', roster[tomorrowKey] ?? 'O'); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('note', rosterNote[todayKey] ?? ''); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('extraType', rosterExtraType[todayKey] ?? ''); } catch (_) {}
@@ -219,19 +219,21 @@ class MainPageState extends State<MainPage> {
       try { await HomeWidget.saveWidgetData<String>('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson())))); } catch (_) {}
       try {
         await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
-        await _writeDebugLog('寫入 widgetFontSize=$widgetFontSize OK');
-      } catch (e) { await _writeDebugLog('寫入 widgetFontSize 失敗: $e'); }
+        await _writeDebugLog('[Dart] 寫入 widgetFontSize=$widgetFontSize OK');
+      } catch (e) { await _writeDebugLog('[Dart] 寫入 widgetFontSize 失敗: $e'); }
       try {
         await HomeWidget.saveWidgetData<double>('widgetTextColor', widgetTextColor.toDouble());
-        await _writeDebugLog('寫入 widgetTextColor=$widgetTextColor OK');
-      } catch (e) { await _writeDebugLog('寫入 widgetTextColor 失敗: $e'); }
+        await _writeDebugLog('[Dart] 寫入 widgetTextColor=$widgetTextColor OK');
+      } catch (e) { await _writeDebugLog('[Dart] 寫入 widgetTextColor 失敗: $e'); }
       DateTime now = DateTime.now();
       try { await HomeWidget.saveWidgetData<int>('initial_year', now.year); } catch (_) {}
       try { await HomeWidget.saveWidgetData<int>('initial_month', now.month); } catch (_) {}
-      await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
-      await _writeDebugLog('觸發 Widget 更新 OK');
+      
+      // 【關鍵修改】使用完整類名，確保 Android 端能準確找到 Widget 類
+      await HomeWidget.updateWidget(androidName: 'com.example.roster_pro.RosterWidgetProvider');
+      await _writeDebugLog('[Dart] 觸發 Widget 更新 OK');
     } catch (e) {
-      await _writeDebugLog('updateWidget 整體失敗: $e');
+      await _writeDebugLog('[Dart] updateWidget 整體失敗: $e');
     }
   }
 
@@ -277,6 +279,15 @@ class MainPageState extends State<MainPage> {
       }
       try { await _realChannel.invokeMethod('requestManageStorage'); } catch (_) {}
       await updateWidget();
+      
+      // 【修改點 1】重裝後自動觸發一次全量同步，清理卸載前的殘留事件
+      if (googleSyncEnabled) {
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) {
+            _syncToGoogle(silent: true, forceFullSync: true);
+          }
+        });
+      }
     });
   }
 
@@ -640,20 +651,28 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
       _googleEventIdMap.clear();
       if (del > 0) await Future.delayed(const Duration(milliseconds: 1500));
 
-      for (int attempt = 0; attempt < 5; attempt++) {
-        var existingEvents = await _calendarPlugin.retrieveEvents(
-          _rosterCalendarId!,
-          RetrieveEventsParams(startDate: scanStart, endDate: scanEnd),
-        );
-        bool hasRemaining = false;
-        for (var e in existingEvents.data ?? []) {
-          final desc = e.description ?? '';
-          final id = e.eventId;
-          if (id == null || !desc.contains('[RosterPro]')) continue;
-          try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, id); del++; hasRemaining = true; } catch (_) {}
+      // 【修改點 2】按年分段清理，避免 CursorWindow 溢出導致刪除失敗
+      DateTime current = scanStart;
+      while (current.isBefore(scanEnd)) {
+        DateTime next = DateTime(current.year + 1, 1, 1);
+        if (next.isAfter(scanEnd)) next = scanEnd;
+
+        for (int attempt = 0; attempt < 3; attempt++) { // 每年重試3次
+          var existingEvents = await _calendarPlugin.retrieveEvents(
+            _rosterCalendarId!,
+            RetrieveEventsParams(startDate: current, endDate: next),
+          );
+          bool hasRemaining = false;
+          for (var e in existingEvents.data ?? []) {
+            final desc = e.description ?? '';
+            final id = e.eventId;
+            if (id == null || !desc.contains('[RosterPro]')) continue;
+            try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, id); del++; hasRemaining = true; } catch (_) {}
+          }
+          if (!hasRemaining) break;
+          await Future.delayed(const Duration(milliseconds: 1000));
         }
-        if (!hasRemaining) break;
-        await Future.delayed(const Duration(milliseconds: 1000));
+        current = next;
       }
       await Future.delayed(const Duration(milliseconds: 500));
 
@@ -886,9 +905,9 @@ Future<void> showBackupList() async {
   });
 }
   Future<void> showWidgetDebugLog() async {
-  await _writeDebugLog('=== 手動觸發調試日誌 ===');
-  await _writeDebugLog('widgetFontSize=$widgetFontSize');
-  await _writeDebugLog('widgetTextColor=0x${widgetTextColor.toRadixString(16)}');
+  await _writeDebugLog('[Dart] === 手動觸發調試日誌 ===');
+  await _writeDebugLog('[Dart] widgetFontSize=$widgetFontSize');
+  await _writeDebugLog('[Dart] widgetTextColor=0x${widgetTextColor.toRadixString(16)}');
 
   String content = '';
   String usedPath = '';
@@ -2075,7 +2094,7 @@ void showDetail(DateTime day) {
             onChanged: (v) async {
               setState(() => widgetFontSize = v);
               try { await HomeWidget.saveWidgetData<double>('widgetFontSize', v); } catch (_) {}
-              try { await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider'); } catch (_) {}
+              try { await HomeWidget.updateWidget(androidName: 'com.example.roster_pro.RosterWidgetProvider'); } catch (_) {}
             },
             onChangeEnd: (v) async { await save(); },
           )),
@@ -2095,7 +2114,7 @@ void showDetail(DateTime day) {
                   Navigator.pop(ctx);
                   setState(() => widgetTextColor = c.value);
                   try { await HomeWidget.saveWidgetData<double>('widgetTextColor', c.value.toDouble()); } catch (_) {}
-                  try { await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider'); } catch (_) {}
+                  try { await HomeWidget.updateWidget(androidName: 'com.example.roster_pro.RosterWidgetProvider'); } catch (_) {}
                   await save();
                 },
                 child: Container(width: 40, height: 40, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: Colors.black26)))
