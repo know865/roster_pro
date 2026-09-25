@@ -29,10 +29,10 @@ void main() {
 }
 
 class ShiftDef {
-  String code; String label; double hours; double ot; Color color; String start; String end; bool hasAllowance; double allowance; bool isAllDay;
-  ShiftDef(this.code, this.label, this.hours, this.color, {this.ot = 0, this.start = '07:00', this.end = '15:30', this.hasAllowance = false, this.allowance = 0, this.isAllDay = false});
-  Map<String, dynamic> toJson() => {'code': code, 'label': label, 'hours': hours, 'ot': ot, 'color': color.value, 'start': start, 'end': end, 'hasAllowance': hasAllowance, 'allowance': allowance, 'isAllDay': isAllDay};
-  factory ShiftDef.fromJson(Map<String, dynamic> j) => ShiftDef(j['code'], j['label'] ?? j['code'], (j['hours'] ?? 8).toDouble(), Color(j['color'] ?? 0xFFFF9800), ot: (j['ot'] ?? 0).toDouble(), start: j['start'] ?? '07:00', end: j['end'] ?? '15:30', hasAllowance: j['hasAllowance'] ?? ((j['allowance'] ?? 0) > 0), allowance: (j['allowance'] ?? 0).toDouble(), isAllDay: j['isAllDay'] ?? false);
+  String code; String label; double hours; double ot; Color color; String start; String end; bool hasAllowance; double allowance; bool isAllDay; bool hasLunch;
+  ShiftDef(this.code, this.label, this.hours, this.color, {this.ot = 0, this.start = '07:00', this.end = '15:30', this.hasAllowance = false, this.allowance = 0, this.isAllDay = false, this.hasLunch = false});
+  Map<String, dynamic> toJson() => {'code': code, 'label': label, 'hours': hours, 'ot': ot, 'color': color.value, 'start': start, 'end': end, 'hasAllowance': hasAllowance, 'allowance': allowance, 'isAllDay': isAllDay, 'hasLunch': hasLunch};
+  factory ShiftDef.fromJson(Map<String, dynamic> j) => ShiftDef(j['code'], j['label'] ?? j['code'], (j['hours'] ?? 8).toDouble(), Color(j['color'] ?? 0xFFFF9800), ot: (j['ot'] ?? 0).toDouble(), start: j['start'] ?? '07:00', end: j['end'] ?? '15:30', hasAllowance: j['hasAllowance'] ?? ((j['allowance'] ?? 0) > 0), allowance: (j['allowance'] ?? 0).toDouble(), isAllDay: j['isAllDay'] ?? false, hasLunch: j['hasLunch'] ?? false);
   String get detailTime => isAllDay ? '全天 ${hours.toStringAsFixed(1)}h' : '${start}-${end} ${hours.toStringAsFixed(1)}h';
 }
 
@@ -1014,7 +1014,7 @@ Future<void> shareScreenshotDialog() async { exportShareImage(); }
     y += 54;
     for (var v in legendDefs) {
       canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(24, y, 32, 32), const Radius.circular(8)), Paint()..color = v.color);
-      tp.text = TextSpan(text: ' ${v.code} ${v.label} ${v.isAllDay ? '全天' : '${v.start}-${v.end}'} ${v.hours.toStringAsFixed(1)}h${v.hasAllowance ? ' 津貼\$${v.allowance}' : ''}', style: const TextStyle(color: Colors.black87, fontSize: 28, fontWeight: FontWeight.w600));
+      tp.text = TextSpan(text: ' ${v.code} ${v.label} ${v.isAllDay ? '全天' : '${v.start}-${v.end}'} ${v.hours.toStringAsFixed(1)}h${v.hasAllowance ? ' 津貼\$${v.allowance}' : ''}${v.hasLunch ? ' 午飯1h' : ''}', style: const TextStyle(color: Colors.black87, fontSize: 28, fontWeight: FontWeight.w600));
       tp.layout(maxWidth: width - 80);
       tp.paint(canvas, Offset(64, y));
       y += 46;
@@ -1373,7 +1373,7 @@ Widget calTab() {
               const SizedBox(height: 4),
               Text('2. 時間：${selDef != null ? (selDef.isAllDay ? '全天' : '${selDef.start}-${selDef.end}') : ''} | 工時：${selDef?.hours ?? 0}h', style: const TextStyle(fontSize: 12)),
               const SizedBox(height: 4),
-              Text('3. 班次津貼：${selDef != null && selDef.hasAllowance ? '有 \$${selDef.allowance}' : '無'}', style: const TextStyle(fontSize: 12)),
+              Text('3. 班次津貼：${selDef != null && selDef.hasAllowance ? '有 \$${selDef.allowance}' : '無'} | 午飯時間：${selDef != null && selDef.hasLunch ? '有 (已扣1h)' : '無'}', style: const TextStyle(fontSize: 12)),
               const SizedBox(height: 4),
               Text('4. 額外津貼名稱：${extraType.isNotEmpty ? extraType : '無'}  金額：\$${(rosterExtra[selKey] ?? 0).toStringAsFixed(1)}', style: const TextStyle(fontSize: 12, color: Colors.deepPurple, fontWeight: FontWeight.w600)),
               const SizedBox(height: 4),
@@ -1474,6 +1474,7 @@ void showDetail(DateTime day) {
     var endCtrl = TextEditingController(text: oldDef?.end ?? '15:30');
     var allowCtrl = TextEditingController(text: oldDef?.allowance.toString() ?? '0');
     bool hasAllow = oldDef?.hasAllowance ?? false;
+    bool hasLunch = oldDef?.hasLunch ?? false;
     bool isAllDay = oldDef?.isAllDay ?? false;
     Color picked = oldDef?.color ?? Colors.orange;
     String oldKey = oldDef?.code ?? '';
@@ -1487,6 +1488,8 @@ void showDetail(DateTime day) {
             var e = DateFormat('HH:mm').parse(endCtrl.text);
             var diff = e.difference(s).inMinutes / 60.0;
             if (diff < 0) diff += 24;
+            if (hasLunch) diff -= 1.0;
+            if (diff < 0) diff = 0;
             setS(() => hoursCtrl.text = diff.toStringAsFixed(1));
           } catch (_) {}
         }
@@ -1522,7 +1525,13 @@ void showDetail(DateTime day) {
               Expanded(child: SizedBox(height: 78, child: TextField(controller: otCtrl, decoration: const InputDecoration(labelText: 'OT', border: OutlineInputBorder(), helperText: ' ', helperStyle: TextStyle(fontSize: 10)), keyboardType: TextInputType.number))),
             ]),
             const SizedBox(height: 12),
-            Row(children: [Checkbox(value: hasAllow, onChanged: (v) => setS(() => hasAllow = v ?? false)), const Text('有津貼核實', style: TextStyle(fontWeight: FontWeight.bold))]),
+            Row(children: [
+              Checkbox(value: hasAllow, onChanged: (v) => setS(() => hasAllow = v ?? false)),
+              const Text('有津貼核實', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(width: 8),
+              Checkbox(value: hasLunch, onChanged: (v) { setS(() => hasLunch = v ?? false); calcHours(); }),
+              const Text('午飯時間', style: TextStyle(fontWeight: FontWeight.bold)),
+            ]),
             if (hasAllow) TextField(controller: allowCtrl, decoration: const InputDecoration(labelText: '津貼金額', prefixText: '\$ ', border: OutlineInputBorder()), keyboardType: TextInputType.number),
             const SizedBox(height: 12),
             const Text('自定班次顏色', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -1548,7 +1557,7 @@ void showDetail(DateTime day) {
                     }
                   }
                 }
-                defs[newCode] = ShiftDef(newCode, labelCtrl.text.isEmpty ? newCode : labelCtrl.text, hrs, picked, ot: double.tryParse(otCtrl.text) ?? 0, start: startCtrl.text, end: endCtrl.text, hasAllowance: hasAllow, allowance: hasAllow ? allowVal : 0, isAllDay: isAllDay);
+                defs[newCode] = ShiftDef(newCode, labelCtrl.text.isEmpty ? newCode : labelCtrl.text, hrs, picked, ot: double.tryParse(otCtrl.text) ?? 0, start: startCtrl.text, end: endCtrl.text, hasAllowance: hasAllow, allowance: hasAllow ? allowVal : 0, isAllDay: isAllDay, hasLunch: hasLunch);
                 for (var entry in roster.entries) {
                   if (entry.value == newCode) affectedDates.add(entry.key);
                 }
@@ -1906,6 +1915,7 @@ void showDetail(DateTime day) {
           return ListTile(
             leading: CircleAvatar(backgroundColor: d.color, child: Text(d.code, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))),
             title: Text('${d.code} - ${d.label}', style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: (d.hasLunch || d.hasAllowance) ? Text('${d.hasAllowance ? '有津貼' : ''}${d.hasAllowance && d.hasLunch ? ' · ' : ''}${d.hasLunch ? '午飯1h' : ''}', style: const TextStyle(fontSize: 11, color: Colors.deepPurple)) : null,
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
               IconButton(icon: const Icon(Icons.edit), onPressed: () => editShiftDialog(oldDef: d)),
               IconButton(icon: const Icon(Icons.delete), onPressed: () { setState(() => defs.remove(e.key)); save(); })
