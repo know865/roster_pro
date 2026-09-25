@@ -382,7 +382,7 @@ class MainPageState extends State<MainPage> {
       });
     }
   }
-  int isoWeek(DateTime date) {
+    int isoWeek(DateTime date) {
   DateTime thursday = date.add(Duration(days: 4 - date.weekday));
   DateTime jan1 = DateTime(thursday.year, 1, 1);
   int days = thursday.difference(jan1).inDays;
@@ -651,13 +651,13 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
       _googleEventIdMap.clear();
       if (del > 0) await Future.delayed(const Duration(milliseconds: 1500));
 
-      // 【修改點 2】按年分段清理，避免 CursorWindow 溢出導致刪除失敗
+      // 【核心修復】按月分段清理，避免 CursorWindow 溢出，並用雙重條件精準打擊殘留
       DateTime current = scanStart;
       while (current.isBefore(scanEnd)) {
-        DateTime next = DateTime(current.year + 1, 1, 1);
+        DateTime next = DateTime(current.year, current.month + 1, 1); // 每次查一個月
         if (next.isAfter(scanEnd)) next = scanEnd;
 
-        for (int attempt = 0; attempt < 3; attempt++) { // 每年重試3次
+        for (int attempt = 0; attempt < 3; attempt++) { // 每月重試3次
           var existingEvents = await _calendarPlugin.retrieveEvents(
             _rosterCalendarId!,
             RetrieveEventsParams(startDate: current, endDate: next),
@@ -665,78 +665,48 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
           bool hasRemaining = false;
           for (var e in existingEvents.data ?? []) {
             final desc = e.description ?? '';
+            final title = e.title ?? '';
             final id = e.eventId;
-            if (id == null || !desc.contains('[RosterPro]')) continue;
-            try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, id); del++; hasRemaining = true; } catch (_) {}
+            if (id == null) continue;
+
+            // 判斷是否為舊版殘留：
+            // 1. 標準描述標籤：desc.contains('[RosterPro]')
+            // 2. 舊版標題特徵：帶有 " | " 分隔符，或標題本身就是班次代號
+            bool isLegacy = desc.contains('[RosterPro]') ||
+                            title.contains(' | ') ||
+                            title == 'OFF' || title == '休' || title == '早' || title == '中' || title == '宵' ||
+                            title.startsWith('早 ') || title.startsWith('中 ') || title.startsWith('宵 ');
+
+            if (isLegacy) {
+              try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, id); del++; hasRemaining = true; } catch (_) {}
+            }
           }
-          if (!hasRemaining) break;
-          await Future.delayed(const Duration(milliseconds: 1000));
+          if (!hasRemaining) break; await Future.delayed(const Duration(milliseconds: 500));
         }
         current = next;
       }
       await Future.delayed(const Duration(milliseconds: 500));
-
-      for (var entry in roster.entries) {
-        final added = await _buildAndInsertEvent(entry.key, entry.value, offset);
-        if (added) add++;
-      }
-
-      _needsFullSync = false;
-      _dirtyDates.clear();
+      for (var entry in roster.entries) { final added = await _buildAndInsertEvent(entry.key, entry.value, offset); if (added) add++; }
+      _needsFullSync = false; _dirtyDates.clear();
     } else {
       final datesToSync = List<String>.from(_dirtyDates);
       for (var dateKey in datesToSync) {
-        if (_googleEventIdMap.containsKey(dateKey)) {
-          try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, _googleEventIdMap[dateKey]!); del++; } catch (_) {}
-          _googleEventIdMap.remove(dateKey);
-        }
-
+        if (_googleEventIdMap.containsKey(dateKey)) { try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, _googleEventIdMap[dateKey]!); del++; } catch (_) {} _googleEventIdMap.remove(dateKey); }
         try {
           final date = DateTime.parse(dateKey);
-          var dayEvents = await _calendarPlugin.retrieveEvents(
-            _rosterCalendarId!,
-            RetrieveEventsParams(
-              startDate: date.subtract(const Duration(days: 1)),
-              endDate: date.add(const Duration(days: 2)),
-            ),
-          );
-          for (var e in dayEvents.data ?? []) {
-            final desc = e.description ?? '';
-            final id = e.eventId;
-            if (id == null) continue;
-            if (!desc.contains('[RosterPro]$dateKey')) continue;
-            try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, id); del++; } catch (_) {}
-          }
+          var dayEvents = await _calendarPlugin.retrieveEvents(_rosterCalendarId!, RetrieveEventsParams(startDate: date.subtract(const Duration(days: 1)), endDate: date.add(const Duration(days: 2))));
+          for (var e in dayEvents.data ?? []) { final desc = e.description ?? ''; final id = e.eventId; if (id == null) continue; if (!desc.contains('[RosterPro]$dateKey')) continue; try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, id); del++; } catch (_) {} }
         } catch (_) {}
-
-        if (roster.containsKey(dateKey)) {
-          final added = await _buildAndInsertEvent(dateKey, roster[dateKey]!, offset);
-          if (added) { add++; upd++; }
-        }
-
+        if (roster.containsKey(dateKey)) { final added = await _buildAndInsertEvent(dateKey, roster[dateKey]!, offset); if (added) { add++; upd++; } }
         _dirtyDates.remove(dateKey);
       }
     }
-
-    sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
-    await sp.setStringList('dirtyDates', _dirtyDates.toList());
-    await sp.setBool('needsFullSync', _needsFullSync);
+    sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap)); await sp.setStringList('dirtyDates', _dirtyDates.toList()); await sp.setBool('needsFullSync', _needsFullSync);
     updateWidget();
-
-    if (!silent && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(needFull ? '完整同步完成：刪$del / 建$add' : '增量同步完成：刪$del / 更新$upd'),
-        duration: const Duration(seconds: 3),
-      ));
-    }
-  } catch (e) {
-    if (!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('同步失敗 $e')));
-  } finally {
-    _isSyncing = false;
-  }
+    if (!silent && mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(needFull ? '完整同步完成：刪$del / 建$add' : '增量同步完成：刪$del / 更新$upd'), duration: const Duration(seconds: 3))); }
+  } catch (e) { if (!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('同步失敗 $e'))); } finally { _isSyncing = false; }
 }
-
-Future<void> _forceFullResync() async {
+  Future<void> _forceFullResync() async {
   bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
     title: const Text('⚠️ 全清重建確認'),
     content: const Text('這會刪除 Google 日曆上「所有」[RosterPro] 事件，並根據 App 現有排班重新建立。\n\n✅ App 排班資料不受影響\n✅ 你其他 Google 行程不會被刪除\n\n確定要執行嗎？'),
@@ -1003,8 +973,7 @@ Future<void> clearRosterByRange() async {
 }
 
 Future<void> shareScreenshotDialog() async { exportShareImage(); }
-
-Future<void> exportShareImage() async {
+  Future<void> exportShareImage() async {
   try {
     RenderRepaintBoundary? b = calKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
     ui.Image? calImg;
@@ -2115,7 +2084,7 @@ void showDetail(DateTime day) {
                   setState(() => widgetTextColor = c.value);
                   try { await HomeWidget.saveWidgetData<double>('widgetTextColor', c.value.toDouble()); } catch (_) {}
                   try { await HomeWidget.updateWidget(androidName: 'com.example.roster_pro.RosterWidgetProvider'); } catch (_) {}
-                  await save();
+                  await save(); // 強制保存，觸發更新
                 },
                 child: Container(width: 40, height: 40, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: Colors.black26)))
               )).toList())
