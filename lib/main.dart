@@ -183,12 +183,18 @@ class MainPageState extends State<MainPage> {
   Set<String> _dirtyDates = <String>{};
   bool _needsFullSync = true;
 
-  double widgetFontSize = 55;
-  int widgetTextColor = 0xFF333333;
+  // 【修改點 1】小工具字體鎖定最佳狀態，不溢出格子，顏色鎖定黑色
+  double widgetFontSize = 17.0;
+  int widgetTextColor = 0xFF000000;
   int widgetBgColor = 0xFFFFFFFF;
 
   Timer? _autoSyncTimer;
   String appVersion = '載入中...';
+  bool _isSyncing = false;
+  String _lastBackupPath = '未備份';
+  Color todayBgColor = const Color(0xFFFFF9C4);
+  Color todayBorderColor = Colors.orange;
+  Color holidayDotColor = Colors.red;
 
   Future<void> _writeDebugLog(String message) async {
     try {
@@ -196,7 +202,7 @@ class MainPageState extends State<MainPage> {
       if (dir == null) return;
       final f = File('${dir.path}/roster_widget_debug.txt');
       final ts = DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now());
-      await f.writeAsString('[$ts]$message\n', mode: FileMode.append);
+      await f.writeAsString('[$ts][Dart] $message\n', mode: FileMode.append);
       if (await f.length() > 200 * 1024) {
         await f.writeAsString('[$ts] (log reset)\n');
       }
@@ -207,9 +213,9 @@ class MainPageState extends State<MainPage> {
     try {
       String todayKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
       String tomorrowKey = DateFormat('yyyy-MM-dd').format(DateTime.now().add(const Duration(days: 1)));
-      await _writeDebugLog('[Dart] --- updateWidget 開始 ---');
-      await _writeDebugLog('[Dart] widgetFontSize=$widgetFontSize, widgetTextColor=0x${widgetTextColor.toRadixString(16)}');
-      try { await HomeWidget.saveWidgetData<String>('today_code', roster[todayKey] ?? 'O'); } catch (e) { await _writeDebugLog('[Dart] today_code err: $e'); }
+      await _writeDebugLog('--- updateWidget 開始 ---');
+      await _writeDebugLog('widgetFontSize=$widgetFontSize, widgetTextColor=0x${widgetTextColor.toRadixString(16)}');
+      try { await HomeWidget.saveWidgetData<String>('today_code', roster[todayKey] ?? 'O'); } catch (e) { await _writeDebugLog('today_code err: $e'); }
       try { await HomeWidget.saveWidgetData<String>('tomorrow_code', roster[tomorrowKey] ?? 'O'); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('note', rosterNote[todayKey] ?? ''); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('extraType', rosterExtraType[todayKey] ?? ''); } catch (_) {}
@@ -219,29 +225,24 @@ class MainPageState extends State<MainPage> {
       try { await HomeWidget.saveWidgetData<String>('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson())))); } catch (_) {}
       try {
         await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
-        await _writeDebugLog('[Dart] 寫入 widgetFontSize=$widgetFontSize OK');
-      } catch (e) { await _writeDebugLog('[Dart] 寫入 widgetFontSize 失敗: $e'); }
+        await _writeDebugLog('寫入 widgetFontSize=$widgetFontSize OK');
+      } catch (e) { await _writeDebugLog('寫入 widgetFontSize 失敗: $e'); }
       try {
         await HomeWidget.saveWidgetData<double>('widgetTextColor', widgetTextColor.toDouble());
-        await _writeDebugLog('[Dart] 寫入 widgetTextColor=$widgetTextColor OK');
-      } catch (e) { await _writeDebugLog('[Dart] 寫入 widgetTextColor 失敗: $e'); }
+        await _writeDebugLog('寫入 widgetTextColor=$widgetTextColor OK');
+      } catch (e) { await _writeDebugLog('寫入 widgetTextColor 失敗: $e'); }
       DateTime now = DateTime.now();
       try { await HomeWidget.saveWidgetData<int>('initial_year', now.year); } catch (_) {}
       try { await HomeWidget.saveWidgetData<int>('initial_month', now.month); } catch (_) {}
       
-      // 【關鍵修改】使用完整類名，確保 Android 端能準確找到 Widget 類
-      await HomeWidget.updateWidget(androidName: 'com.example.roster_pro.RosterWidgetProvider');
-      await _writeDebugLog('[Dart] 觸發 Widget 更新 OK');
+      // 【修改點 2】給予系統時間寫入硬盤，並使用短類名觸發更新
+      await Future.delayed(const Duration(milliseconds: 300)); 
+      await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
+      await _writeDebugLog('觸發 Widget 更新 OK');
     } catch (e) {
-      await _writeDebugLog('[Dart] updateWidget 整體失敗: $e');
+      await _writeDebugLog('updateWidget 整體失敗: $e');
     }
   }
-
-  bool _isSyncing = false;
-  String _lastBackupPath = '未備份';
-  Color todayBgColor = const Color(0xFFFFF9C4);
-  Color todayBorderColor = Colors.orange;
-  Color holidayDotColor = Colors.red;
 
   Map<String, String> getHolidays(int year, String region) {
     Map<String, String> m = {};
@@ -265,8 +266,7 @@ class MainPageState extends State<MainPage> {
 
   bool isHoliday(DateTime d) { var map = getHolidays(d.year, holidayRegion); return map.containsKey(DateFormat('yyyy-MM-dd').format(d)); }
   String holidayName(DateTime d) { var map = getHolidays(d.year, holidayRegion); return map[DateFormat('yyyy-MM-dd').format(d)] ?? ''; }
-
-  @override
+    @override
   void initState() {
     super.initState();
     nameCtrl.text = customName;
@@ -280,7 +280,7 @@ class MainPageState extends State<MainPage> {
       try { await _realChannel.invokeMethod('requestManageStorage'); } catch (_) {}
       await updateWidget();
       
-      // 【修改點 1】重裝後自動觸發一次全量同步，清理卸載前的殘留事件
+      // 【修改點 3】新裝 App 後自動觸發一次全量同步，清理舊版殘留
       if (googleSyncEnabled) {
         Future.delayed(const Duration(seconds: 2), () {
           if (mounted) {
@@ -332,8 +332,8 @@ class MainPageState extends State<MainPage> {
       todayBgColor = Color(sp.getInt('todayBg') ?? 0xFFFFF9C4);
       todayBorderColor = Color(sp.getInt('todayBorder') ?? 0xFFFF9800);
       showLunar = sp.getBool('showLunar') ?? true;
-      widgetFontSize = sp.getDouble('widgetFontSize') ?? 55;
-      widgetTextColor = sp.getInt('widgetTextColor') ?? 0xFF333333;
+      widgetFontSize = sp.getDouble('widgetFontSize') ?? 17.0;
+      widgetTextColor = sp.getInt('widgetTextColor') ?? 0xFF000000;
     });
     updateWidget();
   }
@@ -382,7 +382,8 @@ class MainPageState extends State<MainPage> {
       });
     }
   }
-    int isoWeek(DateTime date) {
+
+  int isoWeek(DateTime date) {
   DateTime thursday = date.add(Duration(days: 4 - date.weekday));
   DateTime jan1 = DateTime(thursday.year, 1, 1);
   int days = thursday.difference(jan1).inDays;
@@ -521,7 +522,6 @@ void _markDirtyRange(DateTime start, DateTime end) {
   }
 }
 
-// ===== 動態掃描範圍（跟隨 roster 實際日期，並兜底至 2000 年，覆蓋所有遠古殘留）=====
 DateTime _calcScanStart() {
   int currentYear = DateTime.now().year;
   int minYear = currentYear - 10;
@@ -533,7 +533,6 @@ DateTime _calcScanStart() {
       }
     }
   }
-  // 【關鍵】兜底至 2000 年，確保掃到任何遠古殘留
   if (minYear > 2000) minYear = 2000;
   return DateTime(minYear, 1, 1);
 }
@@ -651,60 +650,90 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
       _googleEventIdMap.clear();
       if (del > 0) await Future.delayed(const Duration(milliseconds: 1500));
 
-      // 【核心修復】按月分段清理，避免 CursorWindow 溢出，並用雙重條件精準打擊殘留
+      // 【核心修復】按月分段清理，徹底解決 CursorWindow 溢出，且放寬過濾條件以消滅舊版殘留
       DateTime current = scanStart;
       while (current.isBefore(scanEnd)) {
-        DateTime next = DateTime(current.year, current.month + 1, 1); // 每次查一個月
+        DateTime next = DateTime(current.year, current.month + 1, 1);
         if (next.isAfter(scanEnd)) next = scanEnd;
-
-        for (int attempt = 0; attempt < 3; attempt++) { // 每月重試3次
-          var existingEvents = await _calendarPlugin.retrieveEvents(
-            _rosterCalendarId!,
-            RetrieveEventsParams(startDate: current, endDate: next),
-          );
+        for (int attempt = 0; attempt < 3; attempt++) {
+          var existingEvents = await _calendarPlugin.retrieveEvents(_rosterCalendarId!, RetrieveEventsParams(startDate: current, endDate: next));
           bool hasRemaining = false;
           for (var e in existingEvents.data ?? []) {
             final desc = e.description ?? '';
             final title = e.title ?? '';
             final id = e.eventId;
             if (id == null) continue;
-
-            // 判斷是否為舊版殘留：
-            // 1. 標準描述標籤：desc.contains('[RosterPro]')
-            // 2. 舊版標題特徵：帶有 " | " 分隔符，或標題本身就是班次代號
-            bool isLegacy = desc.contains('[RosterPro]') ||
-                            title.contains(' | ') ||
-                            title == 'OFF' || title == '休' || title == '早' || title == '中' || title == '宵' ||
-                            title.startsWith('早 ') || title.startsWith('中 ') || title.startsWith('宵 ');
-
+            // 只要包含 RosterPro 標籤、或標題帶有 " | "、或標題是純班次代號，一律判定為舊版殘留
+            bool isLegacy = desc.contains('[RosterPro]') || title.contains(' | ') || title == 'OFF' || title == '休' || title == '早' || title == '中' || title == '宵';
             if (isLegacy) {
               try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, id); del++; hasRemaining = true; } catch (_) {}
             }
           }
-          if (!hasRemaining) break; await Future.delayed(const Duration(milliseconds: 500));
+          if (!hasRemaining) break;
+          await Future.delayed(const Duration(milliseconds: 500));
         }
         current = next;
       }
       await Future.delayed(const Duration(milliseconds: 500));
-      for (var entry in roster.entries) { final added = await _buildAndInsertEvent(entry.key, entry.value, offset); if (added) add++; }
-      _needsFullSync = false; _dirtyDates.clear();
+
+      for (var entry in roster.entries) {
+        final added = await _buildAndInsertEvent(entry.key, entry.value, offset);
+        if (added) add++;
+      }
+
+      _needsFullSync = false;
+      _dirtyDates.clear();
     } else {
       final datesToSync = List<String>.from(_dirtyDates);
       for (var dateKey in datesToSync) {
-        if (_googleEventIdMap.containsKey(dateKey)) { try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, _googleEventIdMap[dateKey]!); del++; } catch (_) {} _googleEventIdMap.remove(dateKey); }
+        if (_googleEventIdMap.containsKey(dateKey)) {
+          try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, _googleEventIdMap[dateKey]!); del++; } catch (_) {}
+          _googleEventIdMap.remove(dateKey);
+        }
+
         try {
           final date = DateTime.parse(dateKey);
-          var dayEvents = await _calendarPlugin.retrieveEvents(_rosterCalendarId!, RetrieveEventsParams(startDate: date.subtract(const Duration(days: 1)), endDate: date.add(const Duration(days: 2))));
-          for (var e in dayEvents.data ?? []) { final desc = e.description ?? ''; final id = e.eventId; if (id == null) continue; if (!desc.contains('[RosterPro]$dateKey')) continue; try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, id); del++; } catch (_) {} }
+          var dayEvents = await _calendarPlugin.retrieveEvents(
+            _rosterCalendarId!,
+            RetrieveEventsParams(
+              startDate: date.subtract(const Duration(days: 1)),
+              endDate: date.add(const Duration(days: 2)),
+            ),
+          );
+          for (var e in dayEvents.data ?? []) {
+            final desc = e.description ?? '';
+            final id = e.eventId;
+            if (id == null) continue;
+            if (!desc.contains('[RosterPro]$dateKey')) continue;
+            try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, id); del++; } catch (_) {}
+          }
         } catch (_) {}
-        if (roster.containsKey(dateKey)) { final added = await _buildAndInsertEvent(dateKey, roster[dateKey]!, offset); if (added) { add++; upd++; } }
+
+        if (roster.containsKey(dateKey)) {
+          final added = await _buildAndInsertEvent(dateKey, roster[dateKey]!, offset);
+          if (added) { add++; upd++; }
+        }
+
         _dirtyDates.remove(dateKey);
       }
     }
-    sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap)); await sp.setStringList('dirtyDates', _dirtyDates.toList()); await sp.setBool('needsFullSync', _needsFullSync);
+
+    sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
+    await sp.setStringList('dirtyDates', _dirtyDates.toList());
+    await sp.setBool('needsFullSync', _needsFullSync);
     updateWidget();
-    if (!silent && mounted) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(needFull ? '完整同步完成：刪$del / 建$add' : '增量同步完成：刪$del / 更新$upd'), duration: const Duration(seconds: 3))); }
-  } catch (e) { if (!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('同步失敗 $e'))); } finally { _isSyncing = false; }
+
+    if (!silent && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(needFull ? '完整同步完成：刪$del / 建$add' : '增量同步完成：刪$del / 更新$upd'),
+        duration: const Duration(seconds: 3),
+      ));
+    }
+  } catch (e) {
+    if (!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('同步失敗 $e')));
+  } finally {
+    _isSyncing = false;
+  }
 }
   Future<void> _forceFullResync() async {
   bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
@@ -775,7 +804,6 @@ Future<void> restoreFromFile(String path) async {
     _dirtyDates.clear();
     await save();
 
-    // 【關鍵】還原後立即觸發強制完整同步，徹底清除舊版殘留
     if (googleSyncEnabled) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -875,9 +903,9 @@ Future<void> showBackupList() async {
   });
 }
   Future<void> showWidgetDebugLog() async {
-  await _writeDebugLog('[Dart] === 手動觸發調試日誌 ===');
-  await _writeDebugLog('[Dart] widgetFontSize=$widgetFontSize');
-  await _writeDebugLog('[Dart] widgetTextColor=0x${widgetTextColor.toRadixString(16)}');
+  await _writeDebugLog('=== 手動觸發調試日誌 ===');
+  await _writeDebugLog('widgetFontSize=$widgetFontSize');
+  await _writeDebugLog('widgetTextColor=0x${widgetTextColor.toRadixString(16)}');
 
   String content = '';
   String usedPath = '';
@@ -2054,44 +2082,9 @@ void showDetail(DateTime day) {
       const SizedBox(height: 16),
       const Text('桌面小工具設定 (Widget)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(color: const Color(0xFFE8F5E9), child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
-        Row(children: [
-          const Text('文字大小', style: TextStyle(fontWeight: FontWeight.bold)),
-          Expanded(child: Slider(
-            value: widgetFontSize,
-            min: 20, max: 100, divisions: 16,
-            label: widgetFontSize.toStringAsFixed(0),
-            onChanged: (v) async {
-              setState(() => widgetFontSize = v);
-              try { await HomeWidget.saveWidgetData<double>('widgetFontSize', v); } catch (_) {}
-              try { await HomeWidget.updateWidget(androidName: 'com.example.roster_pro.RosterWidgetProvider'); } catch (_) {}
-            },
-            onChangeEnd: (v) async { await save(); },
-          )),
-          Text(widgetFontSize.toStringAsFixed(0), style: const TextStyle(fontWeight: FontWeight.bold)),
-        ]),
-        ListTile(
-          title: const Text('文字顏色', style: TextStyle(fontWeight: FontWeight.bold)),
-          leading: CircleAvatar(backgroundColor: Color(widgetTextColor)),
-          trailing: const Icon(Icons.color_lens),
-          onTap: () {
-            showDialog(context: context, builder: (ctx) => AlertDialog(
-              title: const Text('選擇桌面小工具文字顏色'),
-              content: Wrap(spacing: 8, runSpacing: 8, children: [
-                Colors.black, Colors.white, Colors.red, Colors.blue, Colors.green, Colors.orange, Colors.purple, Colors.grey, Colors.pink, Colors.teal
-              ].map((c) => GestureDetector(
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  setState(() => widgetTextColor = c.value);
-                  try { await HomeWidget.saveWidgetData<double>('widgetTextColor', c.value.toDouble()); } catch (_) {}
-                  try { await HomeWidget.updateWidget(androidName: 'com.example.roster_pro.RosterWidgetProvider'); } catch (_) {}
-                  await save(); // 強制保存，觸發更新
-                },
-                child: Container(width: 40, height: 40, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: Colors.black26)))
-              )).toList())
-            ));
-          },
-        ),
-        const Padding(padding: EdgeInsets.only(top: 8), child: Text('提示：修改後，桌面小工具可能需要幾秒鐘重新整理才會生效', style: TextStyle(fontSize: 11, color: Colors.grey))),
+        const Text('字體大小與顏色已自動優化至最佳狀態（不溢出格子）', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 13)),
+        const SizedBox(height: 8),
+        SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: () { save(); }, icon: const Icon(Icons.refresh), label: const Text('強制刷新小工具'))),
       ]))),
       const SizedBox(height: 16),
       const Text('應用資訊', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -2099,8 +2092,7 @@ void showDetail(DateTime day) {
       const SizedBox(height: 16),
     ]));
   }
-
-  @override
+    @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: [calTab(), patternTab(), reportTab(), settingsTab()][tab],
