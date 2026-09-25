@@ -29,37 +29,15 @@ void main() {
 }
 
 class ShiftDef {
-  String code;
-  String label;
-  double hours;
-  double ot;
-  Color color;
-  String start;
-  String end;
-  bool hasAllowance;
-  double allowance;
-  bool isAllDay;
+  String code; String label; double hours; double ot; Color color; String start; String end; bool hasAllowance; double allowance; bool isAllDay;
   ShiftDef(this.code, this.label, this.hours, this.color, {this.ot = 0, this.start = '07:00', this.end = '15:30', this.hasAllowance = false, this.allowance = 0, this.isAllDay = false});
   Map<String, dynamic> toJson() => {'code': code, 'label': label, 'hours': hours, 'ot': ot, 'color': color.value, 'start': start, 'end': end, 'hasAllowance': hasAllowance, 'allowance': allowance, 'isAllDay': isAllDay};
   factory ShiftDef.fromJson(Map<String, dynamic> j) => ShiftDef(j['code'], j['label'] ?? j['code'], (j['hours'] ?? 8).toDouble(), Color(j['color'] ?? 0xFFFF9800), ot: (j['ot'] ?? 0).toDouble(), start: j['start'] ?? '07:00', end: j['end'] ?? '15:30', hasAllowance: j['hasAllowance'] ?? ((j['allowance'] ?? 0) > 0), allowance: (j['allowance'] ?? 0).toDouble(), isAllDay: j['isAllDay'] ?? false);
   String get detailTime => isAllDay ? '全天 ${hours.toStringAsFixed(1)}h' : '${start}-${end} ${hours.toStringAsFixed(1)}h';
 }
 
-class ExtraAllowance {
-  String name;
-  double amount;
-  ExtraAllowance(this.name, this.amount);
-  Map<String, dynamic> toJson() => {'name': name, 'amount': amount};
-  factory ExtraAllowance.fromJson(Map<String, dynamic> j) => ExtraAllowance(j['name'], (j['amount'] as num).toDouble());
-}
-
-class SavedPattern {
-  String name;
-  List<List<String>> data;
-  SavedPattern(this.name, this.data);
-  Map<String, dynamic> toJson() => {'name': name, 'data': data};
-  factory SavedPattern.fromJson(Map<String, dynamic> j) => SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r) => (r as List).map<String>((e) => e.toString()).toList()).toList());
-}
+class ExtraAllowance { String name; double amount; ExtraAllowance(this.name, this.amount); Map<String, dynamic> toJson() => {'name': name, 'amount': amount}; factory ExtraAllowance.fromJson(Map<String, dynamic> j) => ExtraAllowance(j['name'], (j['amount'] as num).toDouble()); }
+class SavedPattern { String name; List<List<String>> data; SavedPattern(this.name, this.data); Map<String, dynamic> toJson() => {'name': name, 'data': data}; factory SavedPattern.fromJson(Map<String, dynamic> j) => SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r) => (r as List).map<String>((e) => e.toString()).toList()).toList()); }
 
 class LunarHelper {
   static final List<int> lunarInfo = [
@@ -214,7 +192,6 @@ class MainPageState extends State<MainPage> {
       String todayKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
       String tomorrowKey = DateFormat('yyyy-MM-dd').format(DateTime.now().add(const Duration(days: 1)));
       await _writeDebugLog('--- updateWidget 開始 ---');
-      await _writeDebugLog('widgetFontSize=$widgetFontSize, widgetTextColor=0x${widgetTextColor.toRadixString(16)}');
       try { await HomeWidget.saveWidgetData<String>('today_code', roster[todayKey] ?? 'O'); } catch (e) { await _writeDebugLog('today_code err: $e'); }
       try { await HomeWidget.saveWidgetData<String>('tomorrow_code', roster[tomorrowKey] ?? 'O'); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('note', rosterNote[todayKey] ?? ''); } catch (_) {}
@@ -225,18 +202,16 @@ class MainPageState extends State<MainPage> {
       try { await HomeWidget.saveWidgetData<String>('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson())))); } catch (_) {}
       try {
         await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
-        await _writeDebugLog('寫入 widgetFontSize=$widgetFontSize OK');
       } catch (e) { await _writeDebugLog('寫入 widgetFontSize 失敗: $e'); }
       try {
         await HomeWidget.saveWidgetData<double>('widgetTextColor', widgetTextColor.toDouble());
-        await _writeDebugLog('寫入 widgetTextColor=$widgetTextColor OK');
       } catch (e) { await _writeDebugLog('寫入 widgetTextColor 失敗: $e'); }
       DateTime now = DateTime.now();
       try { await HomeWidget.saveWidgetData<int>('initial_year', now.year); } catch (_) {}
       try { await HomeWidget.saveWidgetData<int>('initial_month', now.month); } catch (_) {}
-      
-      // 【修改点 2】給予系統時間寫入硬盤，並使用短類名觸發更新
-      await Future.delayed(const Duration(milliseconds: 300)); 
+
+      // 給予系統時間寫入硬盤，並使用短類名觸發更新
+      await Future.delayed(const Duration(milliseconds: 300));
       await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
       await _writeDebugLog('觸發 Widget 更新 OK');
     } catch (e) {
@@ -280,13 +255,9 @@ class MainPageState extends State<MainPage> {
       }
       try { await _realChannel.invokeMethod('requestManageStorage'); } catch (_) {}
       await updateWidget();
-      
-      // 【修改点 3】新裝 App 後自動觸發一次全量同步，清理舊版殘留
       if (googleSyncEnabled) {
         Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) {
-            _syncToGoogle(silent: true, forceFullSync: true);
-          }
+          if (mounted) { _syncToGoogle(silent: true, forceFullSync: true); }
         });
       }
     });
@@ -383,7 +354,7 @@ class MainPageState extends State<MainPage> {
       });
     }
   }
-    int isoWeek(DateTime date) {
+  int isoWeek(DateTime date) {
   DateTime thursday = date.add(Duration(days: 4 - date.weekday));
   DateTime jan1 = DateTime(thursday.year, 1, 1);
   int days = thursday.difference(jan1).inDays;
@@ -635,6 +606,8 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
     if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) await _ensureCalendar();
     if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) throw '未選真 Google 日曆';
 
+    await _writeDebugLog('=== 開始全量同步，日曆ID: $_rosterCalendarId, 名稱: $_rosterCalendarName ===');
+
     final sp = await SharedPreferences.getInstance();
     final offset = DateTime.now().timeZoneOffset;
     int del = 0, add = 0, upd = 0;
@@ -648,41 +621,55 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
         try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.value); del++; } catch (_) {}
       }
       _googleEventIdMap.clear();
-      if (del > 0) await Future.delayed(const Duration(milliseconds: 1500));
 
-      // 【核心修复】多轮循环清理，直到该日历下没有任何事件为止
+      await Future.delayed(const Duration(seconds: 3));
+
       bool hasAnyEvent = true;
       int round = 0;
-      while (hasAnyEvent && round < 5) {
+      while (hasAnyEvent && round < 10) {
         hasAnyEvent = false;
         DateTime current = scanStart;
+        int roundDeleted = 0;
+
+        await _writeDebugLog('--- 第 ${round + 1} 輪掃描開始 ---');
+
         while (current.isBefore(scanEnd)) {
           DateTime next = DateTime(current.year, current.month + 1, 1);
           if (next.isAfter(scanEnd)) next = scanEnd;
+
           try {
             var existingEvents = await _calendarPlugin.retrieveEvents(
               _rosterCalendarId!,
               RetrieveEventsParams(startDate: current, endDate: next),
             );
+
             if ((existingEvents.data ?? []).isNotEmpty) {
+              await _writeDebugLog('  ${DateFormat('yyyy-MM').format(current)} 找到 ${existingEvents.data!.length} 條事件');
               hasAnyEvent = true;
               for (var e in existingEvents.data ?? []) {
                 final id = e.eventId;
                 if (id != null) {
-                  try { 
-                    await _calendarPlugin.deleteEvent(_rosterCalendarId!, id); 
-                    del++; 
-                    await Future.delayed(const Duration(milliseconds: 100)); 
+                  try {
+                    await _calendarPlugin.deleteEvent(_rosterCalendarId!, id);
+                    del++;
+                    roundDeleted++;
+                    await Future.delayed(const Duration(milliseconds: 200));
                   } catch (_) {}
                 }
               }
             }
-          } catch (_) {}
+          } catch (e) {
+            await _writeDebugLog('  掃描錯誤: $e');
+          }
           current = next;
         }
+
+        await _writeDebugLog('--- 第 ${round + 1} 輪掃描結束，本輪刪除 $roundDeleted 條 ---');
         round++;
-        if (hasAnyEvent) await Future.delayed(const Duration(seconds: 2)); // 等待 Google 同步后再次扫描
+        if (hasAnyEvent) await Future.delayed(const Duration(seconds: 5));
       }
+
+      await _writeDebugLog('=== 清理完畢，共刪除 $del 條，開始寫入新班次 ===');
 
       for (var entry in roster.entries) {
         final added = await _buildAndInsertEvent(entry.key, entry.value, offset);
@@ -738,15 +725,16 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
       ));
     }
   } catch (e) {
-    if (!silent && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('同步失敗 $e')));
+    if (!mounted) return;
+    if (!silent) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('同步失敗 $e')));
   } finally {
     _isSyncing = false;
   }
 }
-    Future<void> _forceFullResync() async {
+  Future<void> _forceFullResync() async {
   bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
     title: const Text('⚠️ 全清重建確認'),
-    content: const Text('這會刪除 Google 日曆上「所有」[RosterPro] 事件，並根據 App 現有排班重新建立。\n\n✅ App 排班資料不受影響\n✅ 你其他 Google 行程不會被刪除\n\n確定要執行嗎？'),
+    content: const Text('這會刪除 Google 日曆上「所有」事件，並根據 App 現有排班重新建立。\n\n✅ App 排班資料不受影響\n✅ 你其他 Google 行程不會被刪除\n\n確定要執行嗎？'),
     actions: [
       TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
       FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('確定執行'))
@@ -1989,6 +1977,36 @@ void showDetail(DateTime day) {
               label: const Text('執行全清重建'),
               style: FilledButton.styleFrom(backgroundColor: Colors.red),
             )),
+            const SizedBox(height: 8),
+            SizedBox(width: double.infinity, child: OutlinedButton.icon(
+              onPressed: () async {
+                final calId = _rosterCalendarId;
+                if (calId == null || calId.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('尚未選擇日曆')));
+                  return;
+                }
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text('正在查詢日曆 ID: $calId ...'),
+                  duration: const Duration(seconds: 2),
+                ));
+                final start = DateTime.now().subtract(const Duration(days: 365));
+                final end = DateTime.now().add(const Duration(days: 365));
+                var events = await _calendarPlugin.retrieveEvents(
+                  calId,
+                  RetrieveEventsParams(startDate: start, endDate: end),
+                );
+                final count = events.data?.length ?? 0;
+                if (mounted) {
+                  showDialog(context: context, builder: (ctx) => AlertDialog(
+                    title: const Text('診斷結果'),
+                    content: Text('日曆 ID: $calId\n日曆名稱: $_rosterCalendarName\n\n查詢範圍: ${DateFormat('yyyy-MM-dd').format(start)} ~ ${DateFormat('yyyy-MM-dd').format(end)}\n\n查詢到 ${count} 條事件。\n\n${count == 0 ? "⚠️ 如果這裡是 0，但你在 Google 日曆裡看得到記錄，說明權限不足或日曆 ID 錯了。" : "✅ 查詢正常，可以執行全清重建。"}'),
+                    actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('關閉'))],
+                  ));
+                }
+              },
+              icon: const Icon(Icons.bug_report, size: 18),
+              label: const Text('診斷日曆查詢'),
+            )),
           ])
         ),
       ]))),
@@ -2097,7 +2115,7 @@ void showDetail(DateTime day) {
       const SizedBox(height: 16),
     ]));
   }
-    @override
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: [calTab(), patternTab(), reportTab(), settingsTab()][tab],
