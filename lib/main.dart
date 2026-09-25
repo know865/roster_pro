@@ -183,8 +183,8 @@ class MainPageState extends State<MainPage> {
   Set<String> _dirtyDates = <String>{};
   bool _needsFullSync = true;
 
-  // 【修改点 1】字体调大至 30.0，约占据格子 3/4
-  double widgetFontSize = 30.0;
+  // 【修改点 1】字体放大一倍，自动换行
+  double widgetFontSize = 60.0;
   int widgetTextColor = 0xFF000000;
   int widgetBgColor = 0xFFFFFFFF;
 
@@ -266,7 +266,8 @@ class MainPageState extends State<MainPage> {
 
   bool isHoliday(DateTime d) { var map = getHolidays(d.year, holidayRegion); return map.containsKey(DateFormat('yyyy-MM-dd').format(d)); }
   String holidayName(DateTime d) { var map = getHolidays(d.year, holidayRegion); return map[DateFormat('yyyy-MM-dd').format(d)] ?? ''; }
-    @override
+
+  @override
   void initState() {
     super.initState();
     nameCtrl.text = customName;
@@ -332,7 +333,7 @@ class MainPageState extends State<MainPage> {
       todayBgColor = Color(sp.getInt('todayBg') ?? 0xFFFFF9C4);
       todayBorderColor = Color(sp.getInt('todayBorder') ?? 0xFFFF9800);
       showLunar = sp.getBool('showLunar') ?? true;
-      widgetFontSize = sp.getDouble('widgetFontSize') ?? 30.0;
+      widgetFontSize = sp.getDouble('widgetFontSize') ?? 60.0;
       widgetTextColor = sp.getInt('widgetTextColor') ?? 0xFF000000;
     });
     updateWidget();
@@ -382,8 +383,7 @@ class MainPageState extends State<MainPage> {
       });
     }
   }
-
-  int isoWeek(DateTime date) {
+    int isoWeek(DateTime date) {
   DateTime thursday = date.add(Duration(days: 4 - date.weekday));
   DateTime jan1 = DateTime(thursday.year, 1, 1);
   int days = thursday.difference(jan1).inDays;
@@ -650,36 +650,39 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
       _googleEventIdMap.clear();
       if (del > 0) await Future.delayed(const Duration(milliseconds: 1500));
 
-      // 【核心修改】基于日历ID清理
-      // 根据要求：只要事件在这个日历（ID）里，全部强制删除，不看标题和描述
-      DateTime current = scanStart;
-      while (current.isBefore(scanEnd)) {
-        DateTime next = DateTime(current.year, current.month + 1, 1);
-        if (next.isAfter(scanEnd)) next = scanEnd;
-
-        for (int attempt = 0; attempt < 3; attempt++) {
-          var existingEvents = await _calendarPlugin.retrieveEvents(
-            _rosterCalendarId!,
-            RetrieveEventsParams(startDate: current, endDate: next),
-          );
-          bool hasRemaining = false;
-          for (var e in existingEvents.data ?? []) {
-            final id = e.eventId;
-            if (id == null) continue;
-
-            // 删除该日历下所有事件，彻底解决旧版残留和重复排班
-            try { 
-              await _calendarPlugin.deleteEvent(_rosterCalendarId!, id); 
-              del++; 
-              hasRemaining = true; 
-            } catch (_) {}
-          }
-          if (!hasRemaining) break;
-          await Future.delayed(const Duration(milliseconds: 500));
+      // 【核心修复】多轮循环清理，直到该日历下没有任何事件为止
+      bool hasAnyEvent = true;
+      int round = 0;
+      while (hasAnyEvent && round < 5) {
+        hasAnyEvent = false;
+        DateTime current = scanStart;
+        while (current.isBefore(scanEnd)) {
+          DateTime next = DateTime(current.year, current.month + 1, 1);
+          if (next.isAfter(scanEnd)) next = scanEnd;
+          try {
+            var existingEvents = await _calendarPlugin.retrieveEvents(
+              _rosterCalendarId!,
+              RetrieveEventsParams(startDate: current, endDate: next),
+            );
+            if ((existingEvents.data ?? []).isNotEmpty) {
+              hasAnyEvent = true;
+              for (var e in existingEvents.data ?? []) {
+                final id = e.eventId;
+                if (id != null) {
+                  try { 
+                    await _calendarPlugin.deleteEvent(_rosterCalendarId!, id); 
+                    del++; 
+                    await Future.delayed(const Duration(milliseconds: 100)); 
+                  } catch (_) {}
+                }
+              }
+            }
+          } catch (_) {}
+          current = next;
         }
-        current = next;
+        round++;
+        if (hasAnyEvent) await Future.delayed(const Duration(seconds: 2)); // 等待 Google 同步后再次扫描
       }
-      await Future.delayed(const Duration(milliseconds: 500));
 
       for (var entry in roster.entries) {
         final added = await _buildAndInsertEvent(entry.key, entry.value, offset);
@@ -740,7 +743,7 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
     _isSyncing = false;
   }
 }
-  Future<void> _forceFullResync() async {
+    Future<void> _forceFullResync() async {
   bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
     title: const Text('⚠️ 全清重建確認'),
     content: const Text('這會刪除 Google 日曆上「所有」[RosterPro] 事件，並根據 App 現有排班重新建立。\n\n✅ App 排班資料不受影響\n✅ 你其他 Google 行程不會被刪除\n\n確定要執行嗎？'),
@@ -909,9 +912,6 @@ Future<void> showBackupList() async {
 }
   Future<void> showWidgetDebugLog() async {
   await _writeDebugLog('=== 手動觸發調試日誌 ===');
-  await _writeDebugLog('widgetFontSize=$widgetFontSize');
-  await _writeDebugLog('widgetTextColor=0x${widgetTextColor.toRadixString(16)}');
-
   String content = '';
   String usedPath = '';
   try {
