@@ -62,44 +62,48 @@ class RosterWidgetProvider : AppWidgetProvider() {
     companion object {
         // ===== 寫入除錯檔案（多路徑嘗試，只要有一個成功即可）=====
         private fun writeDebugLog(context: Context, message: String) {
-            val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-            val line = "[$timestamp] $message\n"
-
-            // 路徑 1：App 專屬外部目錄（不需要權限，最穩定）
             try {
-                val dir = context.getExternalFilesDir(null)
-                if (dir != null) {
-                    if (!dir.exists()) dir.mkdirs()
-                    val file = File(dir, "roster_widget_debug.txt")
-                    file.appendText(line)
-                    if (file.length() > 200 * 1024) {
-                        file.writeText("[$timestamp] (log reset)\n")
+                val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+                val line = "[$timestamp][Kotlin] $message\n"
+
+                // 路徑 1：App 專屬外部目錄（不需要權限，最穩定）
+                try {
+                    val dir = context.getExternalFilesDir(null)
+                    if (dir != null) {
+                        if (!dir.exists()) dir.mkdirs()
+                        val file = File(dir, "roster_widget_debug.txt")
+                        file.appendText(line)
+                        if (file.length() > 200 * 1024) {
+                            file.writeText("[$timestamp] (log reset)\n")
+                        }
+                        return
                     }
-                    return
+                } catch (e: Exception) {
+                    Log.e(TAG, "Write to ExternalFiles failed: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Write to ExternalFiles failed: ${e.message}")
-            }
 
-            // 路徑 2：公共 Download 目錄（需要儲存權限，若成功可直接在「下載」找到）
-            try {
-                val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
-                if (downloadDir != null) {
-                    if (!downloadDir.exists()) downloadDir.mkdirs()
-                    val file = File(downloadDir, "roster_widget_debug.txt")
+                // 路徑 2：公共 Download 目錄
+                try {
+                    val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                    if (downloadDir != null) {
+                        if (!downloadDir.exists()) downloadDir.mkdirs()
+                        val file = File(downloadDir, "roster_widget_debug.txt")
+                        file.appendText(line)
+                        return
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Write to Download failed: ${e.message}")
+                }
+
+                // 路徑 3：App 內部儲存
+                try {
+                    val file = File(context.filesDir, "roster_widget_debug.txt")
                     file.appendText(line)
-                    return
+                } catch (e: Exception) {
+                    Log.e(TAG, "Write to filesDir failed: ${e.message}")
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Write to Download failed: ${e.message}")
-            }
-
-            // 路徑 3：App 內部儲存（最終備援）
-            try {
-                val file = File(context.filesDir, "roster_widget_debug.txt")
-                file.appendText(line)
-            } catch (e: Exception) {
-                Log.e(TAG, "Write to filesDir failed: ${e.message}")
+                Log.e(TAG, "writeDebugLog fatal error: ${e.message}")
             }
         }
 
@@ -119,7 +123,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
             } catch (e: Exception) { def }
         }
 
-        // ===== 通用解析：任何型別都能轉成 Int =====
+        // ===== 通用解析：任何型別都能轉成 Int (修復 Double 溢出問題) =====
         private fun getValueAsInt(sp: SharedPreferences, key: String, def: Int): Int {
             return try {
                 val v = sp.all[key]
@@ -127,55 +131,49 @@ class RosterWidgetProvider : AppWidgetProvider() {
                     null -> def
                     is Int -> v
                     is Long -> v.toInt()
-                    is Double -> v.toInt()
+                    is Double -> v.toLong().toInt()  // 【關鍵修復】先轉 Long 再轉 Int，防止大數值溢出
                     is Float -> v.toInt()
-                    is String -> v.toDoubleOrNull()?.toInt() ?: v.toIntOrNull() ?: def
+                    is String -> v.toDoubleOrNull()?.toLong()?.toInt() ?: v.toIntOrNull() ?: def
                     else -> def
                 }
             } catch (e: Exception) { def }
         }
 
         fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
+            writeDebugLog(context, "========== Widget Update 開始 ==========")
             val views = RemoteViews(context.packageName, R.layout.widget_layout)
             try {
                 val widgetPrefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
+                val homeWidgetPrefs = context.getSharedPreferences("HomeWidgetPreferences", Context.MODE_PRIVATE)
+                val flutterPrefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+
                 val cal = Calendar.getInstance()
                 val year = widgetPrefs.getInt("year", cal.get(Calendar.YEAR))
                 val month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH))
                 val monthNames = arrayOf("1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月")
 
-                val fp: SharedPreferences = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-
-                // 讀取字體大小（嘗試多種鍵名，通用解析）
-                var fontSize = getValueAsDouble(fp, "flutter.widgetFontSize", 0.0)
-                if (fontSize <= 0.0) fontSize = getValueAsDouble(fp, "flutter.widget_font_size", 0.0)
+                // 優先讀取 HomeWidgetPreferences，其次讀取 FlutterSharedPreferences
+                var fontSize = getValueAsDouble(homeWidgetPrefs, "widgetFontSize", 0.0)
+                if (fontSize <= 0.0) fontSize = getValueAsDouble(flutterPrefs, "flutter.widgetFontSize", 0.0)
                 if (fontSize <= 0.0) fontSize = 55.0
 
-                // 讀取文字顏色
-                var textColor = getValueAsInt(fp, "flutter.widgetTextColor", 0)
-                if (textColor == 0) textColor = getValueAsInt(fp, "flutter.widget_text_color", 0)
+                var textColor = getValueAsInt(homeWidgetPrefs, "widgetTextColor", 0)
+                if (textColor == 0) textColor = getValueAsInt(flutterPrefs, "flutter.widgetTextColor", 0)
                 if (textColor == 0) textColor = 0xFF333333.toInt()
 
-                val bgColor = getValueAsInt(fp, "flutter.widgetBgColor", 0xFFFFFFFF.toInt())
-                val todayBgColor = getValueAsInt(fp, "flutter.today_bg", 0xFFFFF9C4.toInt())
+                var bgColor = getValueAsInt(homeWidgetPrefs, "widgetBgColor", 0)
+                if (bgColor == 0) bgColor = getValueAsInt(flutterPrefs, "flutter.widgetBgColor", 0)
+                if (bgColor == 0) bgColor = 0xFFFFFFFF.toInt()
 
-                writeDebugLog(context, "========== Widget Update ==========")
-                writeDebugLog(context, "FontSize: $fontSize, TextColor: 0x${Integer.toHexString(textColor)}")
-                writeDebugLog(context, "BgColor: 0x${Integer.toHexString(bgColor)}")
-                try {
-                    val keys = fp.all.keys
-                    writeDebugLog(context, "FlutterPrefs keys (${keys.size}):")
-                    for (k in keys) {
-                        val v = fp.all[k]
-                        writeDebugLog(context, "  $k = $v (${v?.javaClass?.simpleName})")
-                    }
-                } catch (e: Exception) {
-                    writeDebugLog(context, "Dump keys failed: ${e.message}")
-                }
-                writeDebugLog(context, "===================================")
+                var todayBgColor = getValueAsInt(homeWidgetPrefs, "today_bg", 0)
+                if (todayBgColor == 0) todayBgColor = getValueAsInt(flutterPrefs, "flutter.today_bg", 0)
+                if (todayBgColor == 0) todayBgColor = 0xFFFFF9C4.toInt()
 
-                val rosterJsonStr = fp.getString("flutter.roster_json", "{}") ?: "{}"
-                val defsJsonStr = fp.getString("flutter.defs_json", "{}") ?: "{}"
+                writeDebugLog(context, "讀取成功 - FontSize: $fontSize, TextColor: 0x${Integer.toHexString(textColor)}")
+                writeDebugLog(context, "BgColor: 0x${Integer.toHexString(bgColor)}, TodayBg: 0x${Integer.toHexString(todayBgColor)}")
+
+                val rosterJsonStr = flutterPrefs.getString("flutter.roster_json", "{}") ?: "{}"
+                val defsJsonStr = flutterPrefs.getString("flutter.defs_json", "{}") ?: "{}"
                 val rosterJson = try { JSONObject(rosterJsonStr) } catch (e: Exception) { JSONObject() }
                 val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
 
