@@ -29,7 +29,6 @@ workflows:
         script: |
           set -e
 
-          # ===== 1. AndroidManifest.xml =====
           cat > android/app/src/main/AndroidManifest.xml <<'MANIFEST_EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET"/>
@@ -80,7 +79,6 @@ workflows:
           </manifest>
           MANIFEST_EOF
 
-          # ===== 2. MainActivity.kt（含原生刪除日曆事件 API）=====
           mkdir -p android/app/src/main/kotlin/com/example/roster_pro
           cat > android/app/src/main/kotlin/com/example/roster_pro/MainActivity.kt <<'MAIN_EOF'
           package com.example.roster_pro
@@ -213,7 +211,6 @@ workflows:
           }
           MAIN_EOF
 
-          # ===== 3. widget_info.xml =====
           mkdir -p android/app/src/main/res/xml
           cat > android/app/src/main/res/xml/widget_info.xml <<'INFO_EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -227,7 +224,6 @@ workflows:
           </appwidget-provider>
           INFO_EOF
 
-          # ===== 4. widget_layout.xml（新增 widget_root ID，且所有格子支援自動換行）=====
           mkdir -p android/app/src/main/res/layout
           cat > android/app/src/main/res/layout/widget_layout.xml <<'LAYOUT_EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -308,7 +304,6 @@ workflows:
           </LinearLayout>
           LAYOUT_EOF
 
-          # ===== 5. RosterWidgetProvider.kt（TAG 修復在 class 頂部）=====
           cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt <<'WIDGET_EOF'
           package com.example.roster_pro
 
