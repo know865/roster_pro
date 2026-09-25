@@ -6,7 +6,6 @@
     android:background="#FFFFFF"
     android:padding="2dp">
 
-    <!-- 頂部：月份 + 上下月 + 刷新（按鈕 40dp，避免佔用太多空間） -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -50,7 +49,6 @@
             android:contentDescription="重新整理" />
     </LinearLayout>
 
-    <!-- 星期標題列 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -66,7 +64,6 @@
         <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="日" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#D32F2F" />
     </LinearLayout>
 
-    <!-- 日期網格，撐滿剩餘空間 -->
     <GridLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -74,7 +71,7 @@
         android:columnCount="7"
         android:rowCount="6"
         android:layout_marginTop="1dp">
-        <!-- 【關鍵修改】所有 TextView 增加 maxLines="3" 和 ellipsize="none" 以支持大字體自動換行 -->
+        <!-- 【關鍵修改】所有 day 格子加上 maxLines="3" 和 ellipsize="none" -->
         <TextView android:id="@+id/day0" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
         <TextView android:id="@+id/day1" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
         <TextView android:id="@+id/day2" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
