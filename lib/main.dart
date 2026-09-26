@@ -660,16 +660,8 @@ Future<String?> _createCustomCalendarDialog() async {
   if (confirm != true || nameCtrl.text.trim().isEmpty) return null;
 
   try {
-    final newCalendar = Calendar(
-      name: nameCtrl.text.trim(),
-      color: 0xFF2196F3,
-      accountName: 'local',
-      accountType: 'LOCAL',
-      isReadOnly: false,
-      isDefault: false,
-    );
-
-    final result = await _calendarPlugin.createCalendar(newCalendar);
+    // 修改這裡：device_calendar 4.3.3 的 createCalendar 只接受 String? 名稱
+    final result = await _calendarPlugin.createCalendar(nameCtrl.text.trim());
 
     if (result.isSuccess && result.data != null) {
       _rosterCalendarId = result.data;
@@ -689,8 +681,9 @@ Future<String?> _createCustomCalendarDialog() async {
       return _rosterCalendarId;
     } else {
       if (mounted) {
+        // 修改這裡：使用 result.error 取代 result.errorMessage
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('建立失敗：${result.errorMessage ?? '未知錯誤'}')),
+          SnackBar(content: Text('建立失敗：${result.error ?? '未知錯誤'}')),
         );
       }
       return null;
