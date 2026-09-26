@@ -36,7 +36,21 @@ class ShiftDef {
   String get detailTime => isAllDay ? '全天 ${hours.toStringAsFixed(1)}h' : '${start}-${end} ${hours.toStringAsFixed(1)}h';
 }
 
-class ExtraAllowance { String name; double amount; ExtraAllowance(this.name, this.amount); Map<String, dynamic> toJson() => {'name': name, 'amount': amount}; factory ExtraAllowance.fromJson(Map<String, dynamic> j) => ExtraAllowance(j['name'], (j['amount'] as num).toDouble()); }
+// 【修改】ExtraAllowance 加入 multiplier
+class ExtraAllowance {
+  String name;
+  double amount;
+  double multiplier;
+  ExtraAllowance(this.name, this.amount, {this.multiplier = 1.0});
+  double get total => amount * multiplier;
+  Map<String, dynamic> toJson() => {'name': name, 'amount': amount, 'multiplier': multiplier};
+  factory ExtraAllowance.fromJson(Map<String, dynamic> j) => ExtraAllowance(
+    j['name'],
+    (j['amount'] as num).toDouble(),
+    multiplier: ((j['multiplier'] ?? 1.0) as num).toDouble(),
+  );
+}
+
 class SavedPattern { String name; List<List<String>> data; SavedPattern(this.name, this.data); Map<String, dynamic> toJson() => {'name': name, 'data': data}; factory SavedPattern.fromJson(Map<String, dynamic> j) => SavedPattern(j['name'], (j['data'] as List).map<List<String>>((r) => (r as List).map<String>((e) => e.toString()).toList()).toList()); }
 
 class LunarHelper {
@@ -87,7 +101,6 @@ class LunarHelper {
     int day = offset + 1;
     return [month, day, isLeap ? 1 : 0];
   }
-  // 日期格子用：只顯示「日」，初一顯示月份（避免溢出）
   static String getLunarDayText(DateTime date) {
     try {
       if (date.year > 2100) return '超出範圍';
@@ -97,7 +110,6 @@ class LunarHelper {
       return lunarDays[d - 1];
     } catch (_) { return ''; }
   }
-  // 底部白色卡用：完整農曆月日，例如「八月廿一」
   static String getFullLunarText(DateTime date) {
     try {
       if (date.year > 2100) return '';
@@ -198,7 +210,6 @@ class MainPageState extends State<MainPage> {
     } catch (_) {}
   }
 
-  // 【新增】通用破壞性操作確認對話框
   Future<bool> _confirmAction() async {
     bool? r = await showDialog<bool>(
       context: context,
@@ -231,7 +242,6 @@ class MainPageState extends State<MainPage> {
       try { await HomeWidget.saveWidgetData<double>('today_border', todayBorderColor.value.toDouble()); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('roster_json', jsonEncode(roster)); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson())))); } catch (_) {}
-      // 【新增】傳遞農曆映射（前後各 1 年）給桌面小工具
       try {
         Map<String, String> lunarMap = {};
         DateTime startLunar = DateTime(DateTime.now().year - 1, 1, 1);
@@ -611,7 +621,6 @@ Future<void> _syncNow() async {
   await _syncToGoogle(silent: true);
 }
 
-// 範圍同步：只同步使用者選定日期範圍內、且有變更的日期
 Future<void> syncDateRange() async {
   if (!googleSyncEnabled) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請先啟用日曆同步')));
@@ -625,7 +634,6 @@ Future<void> syncDateRange() async {
     saveText: '同步',
   );
   if (range == null) return;
-  // 篩選範圍內、且有變更的日期
   Set<String> inRange = <String>{};
   DateTime cur = DateTime(range.start.year, range.start.month, range.start.day);
   DateTime last = DateTime(range.end.year, range.end.month, range.end.day);
@@ -640,11 +648,9 @@ Future<void> syncDateRange() async {
     return;
   }
   if (!await _confirmAction()) return;
-  // 保存範圍外的 dirty，把 _dirtyDates 臨時設為 inRange
   Set<String> others = Set<String>.from(_dirtyDates)..removeAll(inRange);
   _dirtyDates = inRange;
   await _syncToGoogle(silent: false);
-  // 同步完成後，把範圍外的 dirty 加回去
   _dirtyDates.addAll(others);
   var sp = await SharedPreferences.getInstance();
   await sp.setStringList('dirtyDates', _dirtyDates.toList());
@@ -1451,7 +1457,6 @@ Widget calTab() {
               const SizedBox(width: 6),
               if (selDef != null) Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: selDef.color, borderRadius: BorderRadius.circular(8)), child: Text(selDef.code, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))),
               const SizedBox(width: 6),
-              // 實際年月日 + 農曆（垂直堆疊）
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
@@ -1468,7 +1473,6 @@ Widget calTab() {
                 ],
               ),
               const SizedBox(width: 8),
-              // 範圍同步按鈕
               Container(
                 decoration: BoxDecoration(
                   color: Colors.blue.shade50,
@@ -1541,7 +1545,50 @@ void showDetail(DateTime day) {
               Expanded(child: SizedBox(height: 56, child: TextField(controller: exHCtrl, decoration: const InputDecoration(labelText: '額外工時', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number))),
             ]),
             Row(children: [
-              Expanded(child: SizedBox(height: 56, child: TextField(controller: exTypeCtrl, decoration: const InputDecoration(labelText: '額外津貼名稱', isDense: true, border: OutlineInputBorder())))),
+              // 【修改】額外津貼名稱欄位加下拉選擇按鈕
+              Expanded(
+                child: SizedBox(
+                  height: 56,
+                  child: TextField(
+                    controller: exTypeCtrl,
+                    decoration: InputDecoration(
+                      labelText: '額外津貼名稱',
+                      isDense: true,
+                      border: const OutlineInputBorder(),
+                      suffixIcon: extraAllowances.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.arrow_drop_down),
+                              tooltip: '從清單選擇',
+                              onPressed: () async {
+                                final selected = await showModalBottomSheet<String>(
+                                  context: context,
+                                  builder: (ctx) => SafeArea(
+                                    child: ListView(
+                                      shrinkWrap: true,
+                                      children: [
+                                        const ListTile(title: Text('選擇額外津貼', style: TextStyle(fontWeight: FontWeight.bold))),
+                                        ...extraAllowances.map((e) => ListTile(
+                                          title: Text(e.name),
+                                          subtitle: Text('金額 \$${e.amount} × ${e.multiplier} 倍 = \$${(e.amount * e.multiplier).toStringAsFixed(1)}'),
+                                          onTap: () => Navigator.pop(ctx, e.name),
+                                        )),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                                if (selected != null) {
+                                  exTypeCtrl.text = selected;
+                                  final match = extraAllowances.firstWhere((e) => e.name == selected, orElse: () => ExtraAllowance('', 0));
+                                  exCtrl.text = (match.amount * match.multiplier).toStringAsFixed(1);
+                                  setM(() {});
+                                }
+                              },
+                            )
+                          : null,
+                    ),
+                  ),
+                ),
+              ),
               const SizedBox(width: 8),
               Expanded(child: SizedBox(height: 56, child: TextField(controller: exCtrl, decoration: const InputDecoration(labelText: '額外津貼金額', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number))),
             ]),
@@ -1950,7 +1997,8 @@ void showDetail(DateTime day) {
       hrs += (rosterExtraHrs[k] ?? 0);
     }
     double otAmount = ot * overtimeRate;
-    double totalAllow = allow + otAmount + extraAllowances.fold(0.0, (a, b) => a + b.amount);
+    // 【修改】報表計算加上倍數
+    double totalAllow = allow + otAmount + extraAllowances.fold(0.0, (a, b) => a + b.amount * b.multiplier);
     return SafeArea(child: ListView(padding: const EdgeInsets.all(12), children: [
       Row(children: [
         FilledButton.icon(onPressed: exportReport, icon: const Icon(Icons.ios_share, size: 18), label: const Text('匯出', style: TextStyle(fontSize: 14)), style: FilledButton.styleFrom(backgroundColor: Colors.deepPurple, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8))),
@@ -2016,7 +2064,12 @@ void showDetail(DateTime day) {
         ...extraByType.entries.map((e) => Row(children: [Text('類別: ${e.key}'), const Spacer(), Text('\$${e.value.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple))])),
         Row(children: [Text('OT${ot.toStringAsFixed(1)}h x ${overtimeRate.toStringAsFixed(0)}'), const Spacer(), Text('\$${otAmount.toStringAsFixed(1)}')]),
         const Divider(),
-        ...extraAllowances.map((e) => Row(children: [Text(e.name), const Spacer(), Text('\$${e.amount}'), IconButton(icon: const Icon(Icons.delete, size: 16), onPressed: () { setState(() => extraAllowances.removeAt(extraAllowances.indexOf(e))); save(); })])),
+        // 【修改】報表顯示加上倍數
+        ...extraAllowances.map((e) => Row(children: [
+          Expanded(child: Text('${e.name} (\$${e.amount} × ${e.multiplier}倍)', style: const TextStyle(fontSize: 13))),
+          Text('\$${(e.amount * e.multiplier).toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+          IconButton(icon: const Icon(Icons.delete, size: 16), onPressed: () { setState(() => extraAllowances.removeAt(extraAllowances.indexOf(e))); save(); }),
+        ])),
         const Divider(),
         Row(children: [const Text('津貼總額 (含自定+類別)'), const Spacer(), Text('\$${totalAllow.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold))]),
       ]))),
@@ -2219,21 +2272,73 @@ void showDetail(DateTime day) {
       const SizedBox(height: 16),
       const Text('額外津貼 (自定名)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: Column(children: [
+        // 【修改】每個項目加編輯按鈕
         ...allowShow.map((e) {
           int idx = extraAllowances.indexOf(e);
-          return ListTile(title: Text(e.name), subtitle: Text('\$${e.amount}'), trailing: IconButton(icon: const Icon(Icons.delete, size: 18, color: Colors.red), onPressed: () { setState(() => extraAllowances.removeAt(idx)); save(); }));
+          return ListTile(
+            title: Text(e.name),
+            subtitle: Text('\$${e.amount} × ${e.multiplier} 倍 = \$${(e.amount * e.multiplier).toStringAsFixed(1)}'),
+            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+              IconButton(icon: const Icon(Icons.edit, size: 18, color: Colors.blue), onPressed: () {
+                var nCtrl = TextEditingController(text: e.name);
+                var vCtrl = TextEditingController(text: e.amount.toString());
+                var mCtrl = TextEditingController(text: e.multiplier.toString());
+                showDialog(context: context, builder: (ctx) => AlertDialog(
+                  title: const Text('編輯額外津貼'),
+                  content: Column(mainAxisSize: MainAxisSize.min, children: [
+                    SizedBox(height: 56, child: TextField(controller: nCtrl, decoration: const InputDecoration(labelText: '名稱', isDense: true, border: OutlineInputBorder()))),
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      Expanded(child: SizedBox(height: 56, child: TextField(controller: vCtrl, decoration: const InputDecoration(labelText: '金額', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number))),
+                      const SizedBox(width: 8),
+                      SizedBox(width: 90, height: 56, child: TextField(controller: mCtrl, decoration: const InputDecoration(labelText: '倍數', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number)),
+                    ]),
+                  ]),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+                    FilledButton(onPressed: () {
+                      String name = nCtrl.text.trim();
+                      double? val = double.tryParse(vCtrl.text);
+                      double? mul = double.tryParse(mCtrl.text);
+                      if (name.isEmpty || val == null) return;
+                      if (mul == null || mul <= 0) mul = 1.0;
+                      setState(() => extraAllowances[idx] = ExtraAllowance(name, val, multiplier: mul));
+                      save();
+                      Navigator.pop(ctx);
+                    }, child: const Text('儲存')),
+                  ],
+                ));
+              }),
+              IconButton(icon: const Icon(Icons.delete, size: 18, color: Colors.red), onPressed: () { setState(() => extraAllowances.removeAt(idx)); save(); }),
+            ]),
+          );
         }),
+        // 【修改】新增額外津貼對話框加倍數輸入
         ListTile(leading: const Icon(Icons.add), title: const Text('新增額外津貼'), onTap: () {
           var nCtrl = TextEditingController();
           var vCtrl = TextEditingController(text: '0');
+          var mCtrl = TextEditingController(text: '1');
           showDialog(context: context, builder: (ctx) => AlertDialog(
             title: const Text('新增額外津貼'),
             content: Column(mainAxisSize: MainAxisSize.min, children: [
               SizedBox(height: 56, child: TextField(controller: nCtrl, decoration: const InputDecoration(labelText: '名稱', isDense: true, border: OutlineInputBorder()))),
               const SizedBox(height: 8),
-              SizedBox(height: 56, child: TextField(controller: vCtrl, decoration: const InputDecoration(labelText: '金額', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number)),
+              Row(children: [
+                Expanded(child: SizedBox(height: 56, child: TextField(controller: vCtrl, decoration: const InputDecoration(labelText: '金額', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number))),
+                const SizedBox(width: 8),
+                SizedBox(width: 90, height: 56, child: TextField(controller: mCtrl, decoration: const InputDecoration(labelText: '倍數', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number)),
+              ]),
             ]),
-            actions: [FilledButton(onPressed: () { String name = nCtrl.text.trim(); double? val = double.tryParse(vCtrl.text); if (name.isEmpty || val == null) return; setState(() => extraAllowances.add(ExtraAllowance(name, val))); save(); Navigator.pop(ctx); }, child: const Text('新增'))]
+            actions: [FilledButton(onPressed: () {
+              String name = nCtrl.text.trim();
+              double? val = double.tryParse(vCtrl.text);
+              double? mul = double.tryParse(mCtrl.text);
+              if (name.isEmpty || val == null) return;
+              if (mul == null || mul <= 0) mul = 1.0;
+              setState(() => extraAllowances.add(ExtraAllowance(name, val, multiplier: mul)));
+              save();
+              Navigator.pop(ctx);
+            }, child: const Text('新增'))]
           ));
         }),
         if (extraAllowances.length > 5) TextButton(onPressed: () => setState(() => showAllExtra = !showAllExtra), child: Text(showAllExtra ? '收起' : '顯示全部 ${extraAllowances.length}項')),
