@@ -184,7 +184,7 @@ class MainPageState extends State<MainPage> {
   DateTime focused = DateTime.now();
   DateTime selectedDay = DateTime.now();
   Map<String, String> roster = {};
-  Map<String, String> rosterNote = {};
+  Map<String> rosterNote = {};
   Map<String, String> rosterExtraType = {};
   Map<String, double> rosterOt = {};
   Map<String, double> rosterExtra = {};
@@ -358,11 +358,18 @@ class MainPageState extends State<MainPage> {
   bool isHoliday(DateTime d) { var map = getHolidays(d.year, holidayRegion); return map.containsKey(DateFormat('yyyy-MM-dd').format(d)); }
   String holidayName(DateTime d) { var map = getHolidays(d.year, holidayRegion); return map[DateFormat('yyyy-MM-dd').format(d)] ?? ''; }
 
+  Future<void> _requestStoragePermission() async {
+    if (!await Permission.manageExternalStorage.isGranted) {
+      await Permission.manageExternalStorage.request();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     nameCtrl.text = customName;
     _loadVersion();
+    _requestStoragePermission(); // 在啟動時請求權限，避免後續匯出時被詢問
     load().then((_) async {
       await Future.delayed(const Duration(milliseconds: 500));
       bool ok = await handleCalendarPermission(silent: false);
@@ -1427,8 +1434,8 @@ Future<void> exportReport() async {
         sb.writeln('$mon月, ${hrs}h');
       }
     }
-    String? dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇匯出資料夾');
-    if (dir == null) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已取消'))); return; }
+    // 修改：不再使用 FilePicker 選擇資料夾，直接存入預設備份路徑
+    String dir = await _getBackupDir();
     String fileName = 'report_${isYearReport ? 'year${focused.year}' : '${focused.year}${focused.month.toString().padLeft(2, '0')}'}.csv';
     String path = '$dir/$fileName';
     final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(sb.toString())];
@@ -1498,13 +1505,12 @@ Future<void> showNotesListDialog() async {
               StringBuffer sb = StringBuffer();
               sb.writeln('日期,記事');
               for (var n in notes) sb.writeln('${n.key},"${n.value.replaceAll('"', '""')}"');
-              String? dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇匯出資料夾');
-              if (dir != null) {
-                String path = '$dir/notes_${queryYear}${yearMode ? '' : queryMonth.toString().padLeft(2, '0')}.csv';
-                final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(sb.toString())];
-                await File(path).writeAsBytes(bytes);
-                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已匯出 $path')));
-              }
+              // 修改：直接存入預設路徑
+              String dir = await _getBackupDir();
+              String path = '$dir/notes_${queryYear}${yearMode ? '' : queryMonth.toString().padLeft(2, '0')}.csv';
+              final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(sb.toString())];
+              await File(path).writeAsBytes(bytes);
+              if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已匯出 $path')));
             } catch (_) {}
           }, child: const Text('匯出CSV')),
         ]
@@ -2032,28 +2038,30 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
             const SizedBox(height: 12),
             Column(
               children: [
-                // 【新增】AL SH GH WB 核實格子
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                // 【修改】AL SH GH WB 核實格子，改為互斥，並解決文字出界問題
+                Wrap(
+                  spacing: 4.0,
+                  runSpacing: 4.0,
                   children: [
                     Row(mainAxisSize: MainAxisSize.min, children: [
-                      Checkbox(value: hasAL, onChanged: (v) => setS(() => hasAL = v ?? false)),
+                      Checkbox(value: hasAL, onChanged: (v) => setS(() { hasAL = v ?? false; if (hasAL) { hasSH = false; hasGH = false; hasWB = false; } })),
                       const Text('AL', style: TextStyle(fontWeight: FontWeight.bold)),
                     ]),
                     Row(mainAxisSize: MainAxisSize.min, children: [
-                      Checkbox(value: hasSH, onChanged: (v) => setS(() => hasSH = v ?? false)),
+                      Checkbox(value: hasSH, onChanged: (v) => setS(() { hasSH = v ?? false; if (hasSH) { hasAL = false; hasGH = false; hasWB = false; } })),
                       const Text('SH', style: TextStyle(fontWeight: FontWeight.bold)),
                     ]),
                     Row(mainAxisSize: MainAxisSize.min, children: [
-                      Checkbox(value: hasGH, onChanged: (v) => setS(() => hasGH = v ?? false)),
+                      Checkbox(value: hasGH, onChanged: (v) => setS(() { hasGH = v ?? false; if (hasGH) { hasAL = false; hasSH = false; hasWB = false; } })),
                       const Text('GH', style: TextStyle(fontWeight: FontWeight.bold)),
                     ]),
                     Row(mainAxisSize: MainAxisSize.min, children: [
-                      Checkbox(value: hasWB, onChanged: (v) => setS(() => hasWB = v ?? false)),
+                      Checkbox(value: hasWB, onChanged: (v) => setS(() { hasWB = v ?? false; if (hasWB) { hasAL = false; hasSH = false; hasGH = false; } })),
                       const Text('WB', style: TextStyle(fontWeight: FontWeight.bold)),
                     ]),
                   ],
                 ),
+                const SizedBox(height: 8),
                 Row(
                   children: [
                     Expanded(
@@ -2152,19 +2160,46 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
       return StatefulBuilder(builder: (ctx2, setD) {
         List<MapEntry<String, String>> leaveEntries = [];
         if (yearMode) {
+          // 從 roster 提取符合條件的假期記錄
+          roster.forEach((k, v) {
+            if (k.startsWith('$queryYear')) {
+              var d = defs[v];
+              if (d != null) {
+                String? code;
+                if (d.hasAL) code = 'AL'; else if (d.hasSH) code = 'SH'; else if (d.hasGH) code = 'GH'; else if (d.hasWB) code = 'WB';
+                if (code != null) leaveEntries.add(MapEntry(k, code));
+              }
+            }
+          });
+          // 合併 rosterLeave 手動記錄
           rosterLeave.forEach((k, v) {
-            if (k.startsWith('$queryYear')) leaveEntries.add(MapEntry(k, v));
+            if (k.startsWith('$queryYear')) {
+              if (!leaveEntries.any((e) => e.key == k)) leaveEntries.add(MapEntry(k, v));
+            }
           });
         } else {
+          // 從 roster 提取指定月份的假期記錄
+          roster.forEach((k, v) {
+            if (k.startsWith('$queryYear-${queryMonth.toString().padLeft(2, '0')}')) {
+              var d = defs[v];
+              if (d != null) {
+                String? code;
+                if (d.hasAL) code = 'AL'; else if (d.hasSH) code = 'SH'; else if (d.hasGH) code = 'GH'; else if (d.hasWB) code = 'WB';
+                if (code != null) leaveEntries.add(MapEntry(k, code));
+              }
+            }
+          });
           rosterLeave.forEach((k, v) {
-            if (k.startsWith('$queryYear-${queryMonth.toString().padLeft(2, '0')}')) leaveEntries.add(MapEntry(k, v));
+            if (k.startsWith('$queryYear-${queryMonth.toString().padLeft(2, '0')}')) {
+              if (!leaveEntries.any((e) => e.key == k)) leaveEntries.add(MapEntry(k, v));
+            }
           });
         }
         leaveEntries.sort((a, b) => a.key.compareTo(b.key));
 
         Map<String, double> yearUsed = {};
         
-        // 統計邏輯修改：根據班次是否勾選對應假期來計算已用天數
+        // 統計該年度的已用天數
         roster.forEach((k, v) {
           if (k.startsWith('$queryYear')) {
             var d = defs[v];
@@ -2218,16 +2253,19 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                 children: [
                   Text('$queryYear年假期餘額結算', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                   const SizedBox(height: 4),
-                  // 簡化為只顯示 已用：X天
+                  // 顯示已用和結餘天數
                   ...leaveDefs.map((leave) {
-                    double used = yearUsed[leave.name] ?? 0;
+                    double used = yearUsed[leave.name] ?? 0.0;
+                    var rec = leaveRecords['$queryYear']?[leave.name] ?? {'total': 0.0, 'adjust': 0.0, 'carry': 0.0};
+                    double totalDays = (rec['total'] as num).toDouble() + (rec['adjust'] as num).toDouble() + (rec['carry'] as num).toDouble();
+                    double balance = totalDays - used;
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 2),
                       child: Row(
                         children: [
                           Text('${leave.name} (${leave.fullName})', style: TextStyle(fontWeight: FontWeight.bold, color: leave.color)),
                           const Spacer(),
-                          Text('已用: ${used.toStringAsFixed(1)} 天', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          Text('已用: ${used.toStringAsFixed(1)} 天 / 結餘: ${balance.toStringAsFixed(1)} 天', style: const TextStyle(fontWeight: FontWeight.bold)),
                         ],
                       ),
                     );
@@ -2241,18 +2279,25 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
             FilledButton(onPressed: () async {
               try {
                 StringBuffer sb = StringBuffer();
-                sb.writeln('日期,假期代號,假期名稱');
+                sb.writeln('年份,月份,日期,假期代號,假期名稱,已用天數,結餘天數');
+                var yrRecords = leaveRecords['$queryYear'] ?? {};
                 for (var n in leaveEntries) {
                   var leave = leaveDefs.firstWhere((e) => e.name == n.value, orElse: () => LeaveDef('', '', Colors.grey));
-                  sb.writeln('${n.key},${n.value},${leave.fullName}');
+                  double used = yearUsed[leave.name] ?? 0.0;
+                  var rec = yrRecords[leave.name] ?? {'total': 0.0, 'adjust': 0.0, 'carry': 0.0};
+                  double totalDays = (rec['total'] as num).toDouble() + (rec['adjust'] as num).toDouble() + (rec['carry'] as num).toDouble();
+                  double balance = totalDays - used;
+                  String dateStr = n.key;
+                  String yearStr = dateStr.substring(0, 4);
+                  String monthStr = dateStr.substring(5, 7);
+                  sb.writeln('$yearStr,$monthStr,$dateStr,${leave.name},${leave.fullName},$used,${balance.toStringAsFixed(1)}');
                 }
-                String? dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇匯出資料夾');
-                if (dir != null) {
-                  String path = '$dir/leaves_${queryYear}${yearMode ? '' : queryMonth.toString().padLeft(2, '0')}.csv';
-                  final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(sb.toString())];
-                  await File(path).writeAsBytes(bytes);
-                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已匯出 $path')));
-                }
+                // 修改：直接存入預設路徑
+                String dir = await _getBackupDir();
+                String path = '$dir/leaves_${queryYear}${yearMode ? '' : queryMonth.toString().padLeft(2, '0')}.csv';
+                final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(sb.toString())];
+                await File(path).writeAsBytes(bytes);
+                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已匯出 $path')));
               } catch (_) {}
             }, child: const Text('匯出CSV')),
           ]
