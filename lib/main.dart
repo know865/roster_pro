@@ -1768,17 +1768,25 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
               Expanded(child: SizedBox(height: 78, child: TextField(controller: otCtrl, decoration: const InputDecoration(labelText: 'OT', border: OutlineInputBorder(), helperText: ' ', helperStyle: TextStyle(fontSize: 10)), keyboardType: TextInputType.number))),
             ]),
             const SizedBox(height: 12),
-            // 【修改 2, 3, 4】核實格文字
-            Row(children: [
-              Checkbox(value: hasMorningAllow, onChanged: (v) => setS(() => hasMorningAllow = v ?? false)), 
-              const Text('早/夜班津貼', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(width: 8),
-              Checkbox(value: hasNightAllow, onChanged: (v) => setS(() => hasNightAllow = v ?? false)), 
-              const Text('通宵津貼', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(width: 8),
-              Checkbox(value: hasMealAllow, onChanged: (v) => setS(() => hasMealAllow = v ?? false)), 
-              const Text('膳食津貼', style: TextStyle(fontWeight: FontWeight.bold)),
-            ]),
+            // 【修改】使用 Wrap 自動換行，避免膳食津貼被擠出界外
+            Wrap(
+              spacing: 8.0,
+              runSpacing: 0.0,
+              children: [
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  Checkbox(value: hasMorningAllow, onChanged: (v) => setS(() => hasMorningAllow = v ?? false)), 
+                  const Text('早/夜班津貼', style: TextStyle(fontWeight: FontWeight.bold)),
+                ]),
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  Checkbox(value: hasNightAllow, onChanged: (v) => setS(() => hasNightAllow = v ?? false)), 
+                  const Text('通宵津貼', style: TextStyle(fontWeight: FontWeight.bold)),
+                ]),
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  Checkbox(value: hasMealAllow, onChanged: (v) => setS(() => hasMealAllow = v ?? false)), 
+                  const Text('膳食津貼', style: TextStyle(fontWeight: FontWeight.bold)),
+                ]),
+              ],
+            ),
             const SizedBox(height: 4),
             Row(children: [
               Checkbox(value: hasLunch, onChanged: (v) { setS(() => hasLunch = v ?? false); calcHours(); }),
@@ -2343,7 +2351,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                       const SizedBox(height: 16),
                       const Text('固定津貼設定', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple)),
                       const SizedBox(height: 8),
-                      // 【修改 1】早班津貼 -> 早/夜班津貼
                       Row(children: [Expanded(child: TextField(controller: mAllowCtrl, decoration: const InputDecoration(labelText: '早/夜班津貼', prefixText: '\$ ', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (_) => setD(() {}))), const SizedBox(width: 8), Expanded(child: TextField(controller: mealCtrl, decoration: const InputDecoration(labelText: '膳食津貼', prefixText: '\$ ', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (_) => setD(() {})))]),
                       const SizedBox(height: 8),
                       Row(children: [Expanded(child: TextField(controller: nightMultCtrl, decoration: const InputDecoration(labelText: '通宵倍數 (預設0.4)', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (_) => setD(() {}))), const SizedBox(width: 8), Expanded(child: TextField(controller: nAllowCtrl, readOnly: true, enabled: false, decoration: const InputDecoration(labelText: '通宵時薪津貼 (自動計算)', prefixText: '\$ ', isDense: true, border: OutlineInputBorder(), filled: true, fillColor: Color(0xFFEEEEEE))))]),
