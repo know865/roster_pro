@@ -1,11 +1,13 @@
 workflows:
   android-roster-pro-v74-widgetfix:
-    name: Roster Pro v7.4 - Android APK Debug (Widget & Calendar Fix)
+    name: Roster Pro v7.4 - Android APK (Widget & Calendar Fix)
     max_build_duration: 60
     instance_type: mac_mini_m1
     environment:
       flutter: 3.24.5
       java: 17
+      groups:
+        - keystore_credentials
     scripts:
       - name: Set up Flutter
         script: |
@@ -21,59 +23,7 @@ workflows:
           flutter create --platforms=android --org com.example --project-name roster_pro --no-pub .
           cp /tmp/main.dart.bak lib/main.dart
           cp /tmp/pubspec.yaml.bak pubspec.yaml
-          ls -la android/app/
-
-      - name: Configure Android Build (compileSdk 35)
-        script: |
-          set -e
-
-          # 刪除 Java DSL 版本，避免與 Kotlin DSL 衝突
-          rm -f android/app/build.gradle
-
-          # 重新生成 build.gradle.kts（debug 版本不需簽名設定）
-          cat > android/app/build.gradle.kts <<'GRADLE_EOF'
-          plugins {
-              id("com.android.application")
-              id("kotlin-android")
-              id("dev.flutter.flutter-gradle-plugin")
-          }
-
-          android {
-              namespace = "com.example.roster_pro"
-              compileSdk = 35
-              ndkVersion = "25.1.8937393"
-
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
-
-              kotlinOptions {
-                  jvmTarget = "17"
-              }
-
-              defaultConfig {
-                  applicationId = "com.example.roster_pro"
-                  minSdk = 21
-                  targetSdk = 34
-                  versionCode = flutter.versionCode
-                  versionName = flutter.versionName
-              }
-
-              buildTypes {
-                  release {
-                      // debug 版本不需要 release 簽名
-                  }
-                  debug {
-                      // 使用 Flutter 預設 debug 簽名
-                  }
-              }
-          }
-
-          flutter {
-              source = "../.."
-          }
-          GRADLE_EOF
+          ls -la android/build.gradle
 
       - name: Add Custom Widget Files
         script: |
@@ -89,7 +39,6 @@ workflows:
               <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-              <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
 
               <application
                   android:label="Roster Pro"
@@ -126,10 +75,6 @@ workflows:
                       <action android:name="android.intent.action.PROCESS_TEXT"/>
                       <data android:mimeType="text/plain"/>
                   </intent>
-                  <intent>
-                      <action android:name="android.intent.action.PICK"/>
-                      <data android:mimeType="image/*"/>
-                  </intent>
               </queries>
           </manifest>
           MANIFEST_EOF
@@ -139,7 +84,6 @@ workflows:
           package com.example.roster_pro
 
           import android.Manifest
-          import android.app.Activity
           import android.content.ContentUris
           import android.content.Intent
           import android.content.pm.PackageManager
@@ -148,12 +92,8 @@ workflows:
           import android.os.Build
           import android.os.Environment
           import android.provider.CalendarContract
-          import android.provider.MediaStore
           import android.provider.Settings
           import androidx.core.content.ContextCompat
-          import androidx.core.content.pm.ShortcutInfoCompat
-          import androidx.core.content.pm.ShortcutManagerCompat
-          import androidx.core.graphics.drawable.IconCompat
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
           import io.flutter.plugin.common.MethodChannel
@@ -161,8 +101,6 @@ workflows:
 
           class MainActivity : FlutterActivity() {
               private val CHANNEL = "com.roster/calendar_real"
-              private val REQUEST_PICK_ICON = 9101
-              private var pendingPickIconResult: MethodChannel.Result? = null
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
@@ -171,7 +109,6 @@ workflows:
                           "getCalendars" -> handleGetCalendars(result)
                           "scanImage" -> handleScanImage(call.argument<String>("path"), result)
                           "requestManageStorage" -> handleRequestManageStorage(result)
-                          "pickAndPinIcon" -> handlePickAndPinIcon(result)
                           "deleteAllEventsInCalendar" -> {
                               val calendarId = call.argument<String>("calendarId")
                               if (calendarId == null) {
@@ -182,61 +119,6 @@ workflows:
                           }
                           else -> result.notImplemented()
                       }
-                  }
-              }
-
-              private fun handlePickAndPinIcon(result: MethodChannel.Result) {
-                  pendingPickIconResult = result
-                  val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
-                  intent.type = "image/*"
-                  try {
-                      startActivityForResult(intent, REQUEST_PICK_ICON)
-                  } catch (e: Exception) {
-                      pendingPickIconResult = null
-                      result.error("NO_PICKER", e.message, null)
-                  }
-              }
-
-              override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-                  super.onActivityResult(requestCode, resultCode, data)
-                  if (requestCode == REQUEST_PICK_ICON) {
-                      val r = pendingPickIconResult
-                      pendingPickIconResult = null
-                      if (resultCode != Activity.RESULT_OK || data?.data == null) {
-                          r?.success(false)
-                          return
-                      }
-                      try {
-                          val uri = data.data!!
-                          val inputStream = contentResolver.openInputStream(uri)
-                          val iconFile = File(filesDir, "custom_icon.png")
-                          iconFile.outputStream().use { out -> inputStream?.copyTo(out) }
-                          inputStream?.close()
-                          createPinnedShortcut(iconFile)
-                          r?.success(true)
-                      } catch (e: Exception) {
-                          r?.error("ICON_FAIL", e.message, null)
-                      }
-                  }
-              }
-
-              private fun createPinnedShortcut(iconFile: File) {
-                  try {
-                      val bitmap = android.graphics.BitmapFactory.decodeFile(iconFile.absolutePath) ?: return
-                      val icon = IconCompat.createWithAdaptiveBitmap(bitmap)
-                      val launchIntent = Intent(this, MainActivity::class.java).apply {
-                          action = Intent.ACTION_MAIN
-                          addCategory(Intent.CATEGORY_LAUNCHER)
-                      }
-                      val shortcut = ShortcutInfoCompat.Builder(this, "roster_pro_custom_icon")
-                          .setShortLabel("Roster Pro")
-                          .setLongLabel("Roster Pro 自訂圖標")
-                          .setIcon(icon)
-                          .setIntent(launchIntent)
-                          .build()
-                      ShortcutManagerCompat.requestPinShortcut(this, shortcut, null)
-                  } catch (e: Exception) {
-                      android.util.Log.e("MainActivity", "createPinnedShortcut failed: ${e.message}")
                   }
               }
 
@@ -303,10 +185,12 @@ workflows:
                           result.error("PERMISSION", "No write calendar permission", null)
                           return
                       }
+
                       val uri = CalendarContract.Events.CONTENT_URI
                       val projection = arrayOf(CalendarContract.Events._ID)
                       val selection = "${CalendarContract.Events.CALENDAR_ID} = ?"
                       val selectionArgs = arrayOf(calendarId)
+
                       val cursor = contentResolver.query(uri, projection, selection, selectionArgs, null)
                       val eventIds = mutableListOf<Long>()
                       cursor?.use {
@@ -314,6 +198,7 @@ workflows:
                               eventIds.add(it.getLong(0))
                           }
                       }
+
                       val batchSize = 10
                       var deleted = 0
                       var index = 0
@@ -332,6 +217,7 @@ workflows:
                               try { Thread.sleep(200) } catch (_: InterruptedException) {}
                           }
                       }
+
                       result.success(deleted)
                   } catch (e: Exception) {
                       result.error("DELETE_FAIL", e.message, null)
@@ -340,6 +226,7 @@ workflows:
           }
           MAIN_EOF
 
+          # ---------- 新增 DateTimeUtils.kt ----------
           cat > android/app/src/main/kotlin/com/example/roster_pro/DateTimeUtils.kt <<'DATETIME_EOF'
           package com.example.roster_pro
 
@@ -372,16 +259,7 @@ workflows:
           </appwidget-provider>
           INFO_EOF
 
-          mkdir -p android/app/src/main/res/drawable
-          cat > android/app/src/main/res/drawable/cell_bg_today.xml <<'CELLBORDER_EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-              <solid android:color="#BBDEFB"/>
-              <stroke android:width="3dp" android:color="#000000"/>
-              <corners android:radius="8dp"/>
-          </shape>
-          CELLBORDER_EOF
-
+          # ---------- 新版 widget_layout.xml（左側有「週」欄，共 8 欄） ----------
           mkdir -p android/app/src/main/res/layout
           cat > android/app/src/main/res/layout/widget_layout.xml <<'LAYOUT_EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -391,18 +269,18 @@ workflows:
               android:layout_height="match_parent"
               android:orientation="vertical"
               android:background="#FFFFFF"
-              android:padding="4dp">
+              android:padding="2dp">
 
               <LinearLayout
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
                   android:orientation="horizontal"
                   android:gravity="center_vertical"
-                  android:layout_marginBottom="4dp">
-                  <ImageButton android:id="@+id/btn_prev" android:layout_width="48dp" android:layout_height="48dp" android:src="@android:drawable/ic_media_previous" android:background="?android:attr/selectableItemBackground" android:contentDescription="上個月" android:scaleType="centerInside" />
+                  android:layout_marginBottom="2dp">
+                  <ImageButton android:id="@+id/btn_prev" android:layout_width="40dp" android:layout_height="40dp" android:src="@android:drawable/ic_media_previous" android:background="?android:attr/selectableItemBackground" android:contentDescription="上個月" />
                   <TextView android:id="@+id/tv_month_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="2024年1月" android:textAlignment="center" android:textSize="18sp" android:textStyle="bold" android:textColor="#333333" />
-                  <ImageButton android:id="@+id/btn_next" android:layout_width="48dp" android:layout_height="48dp" android:src="@android:drawable/ic_media_next" android:background="?android:attr/selectableItemBackground" android:contentDescription="下個月" android:scaleType="centerInside" />
-                  <ImageButton android:id="@+id/btn_refresh" android:layout_width="48dp" android:layout_height="48dp" android:src="@android:drawable/ic_popup_sync" android:background="?android:attr/selectableItemBackground" android:contentDescription="重新整理" android:scaleType="centerInside" />
+                  <ImageButton android:id="@+id/btn_next" android:layout_width="40dp" android:layout_height="40dp" android:src="@android:drawable/ic_media_next" android:background="?android:attr/selectableItemBackground" android:contentDescription="下個月" />
+                  <ImageButton android:id="@+id/btn_refresh" android:layout_width="40dp" android:layout_height="40dp" android:src="@android:drawable/ic_popup_sync" android:background="?android:attr/selectableItemBackground" android:contentDescription="重新整理" />
               </LinearLayout>
 
               <LinearLayout
@@ -410,84 +288,75 @@ workflows:
                   android:layout_height="wrap_content"
                   android:orientation="horizontal"
                   android:layout_marginBottom="2dp">
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="0.6" android:text="週" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#673AB7" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="一" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="二" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="三" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="四" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="五" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="六" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#D32F2F" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="日" android:textAlignment="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#D32F2F" />
+                  <TextView android:layout_width="24dp" android:layout_height="wrap_content" android:text="週" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="一" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="二" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="三" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="四" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="五" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="六" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#D32F2F" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="日" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#D32F2F" />
               </LinearLayout>
 
-              <LinearLayout android:id="@+id/row0" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
-                  <TextView android:id="@+id/week0" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="10sp" android:textColor="#673AB7" android:textStyle="bold" android:maxLines="2" />
-                  <LinearLayout android:id="@+id/cell0" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day0" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift0" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar0" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell1" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell2" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell3" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell4" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day4" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift4" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar4" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell5" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day5" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift5" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar5" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell6" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day6" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift6" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar6" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-              </LinearLayout>
+              <GridLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:columnCount="8" android:rowCount="6" android:layout_marginTop="1dp">
+                  <TextView android:id="@+id/week0" android:layout_width="24dp" android:layout_height="0dp" android:layout_rowWeight="1" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="1" />
+                  <TextView android:id="@+id/day0" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day1" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day2" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day3" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day4" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day5" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day6" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
 
-              <LinearLayout android:id="@+id/row1" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
-                  <TextView android:id="@+id/week1" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="10sp" android:textColor="#673AB7" android:textStyle="bold" android:maxLines="2" />
-                  <LinearLayout android:id="@+id/cell7" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day7" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift7" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar7" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell8" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day8" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift8" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar8" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell9" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day9" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift9" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar9" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell10" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day10" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift10" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar10" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell11" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day11" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift11" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar11" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell12" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day12" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift12" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar12" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell13" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day13" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift13" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar13" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-              </LinearLayout>
+                  <TextView android:id="@+id/week1" android:layout_width="24dp" android:layout_height="0dp" android:layout_rowWeight="1" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="1" />
+                  <TextView android:id="@+id/day7" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day8" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day9" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day10" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day11" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day12" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day13" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
 
-              <LinearLayout android:id="@+id/row2" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
-                  <TextView android:id="@+id/week2" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="10sp" android:textColor="#673AB7" android:textStyle="bold" android:maxLines="2" />
-                  <LinearLayout android:id="@+id/cell14" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day14" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift14" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar14" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell15" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day15" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift15" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar15" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell16" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day16" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift16" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar16" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell17" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day17" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift17" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar17" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell18" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day18" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift18" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar18" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell19" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day19" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift19" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar19" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell20" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day20" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift20" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar20" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-              </LinearLayout>
+                  <TextView android:id="@+id/week2" android:layout_width="24dp" android:layout_height="0dp" android:layout_rowWeight="1" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="1" />
+                  <TextView android:id="@+id/day14" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day15" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day16" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day17" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day18" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day19" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day20" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
 
-              <LinearLayout android:id="@+id/row3" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
-                  <TextView android:id="@+id/week3" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="10sp" android:textColor="#673AB7" android:textStyle="bold" android:maxLines="2" />
-                  <LinearLayout android:id="@+id/cell21" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day21" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift21" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar21" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell22" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day22" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift22" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar22" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell23" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day23" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift23" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar23" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell24" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day24" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift24" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar24" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell25" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day25" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift25" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar25" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell26" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day26" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift26" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar26" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell27" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day27" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift27" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar27" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-              </LinearLayout>
+                  <TextView android:id="@+id/week3" android:layout_width="24dp" android:layout_height="0dp" android:layout_rowWeight="1" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="1" />
+                  <TextView android:id="@+id/day21" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day22" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day23" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day24" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day25" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day26" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day27" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
 
-              <LinearLayout android:id="@+id/row4" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
-                  <TextView android:id="@+id/week4" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="10sp" android:textColor="#673AB7" android:textStyle="bold" android:maxLines="2" />
-                  <LinearLayout android:id="@+id/cell28" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day28" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift28" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar28" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell29" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day29" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift29" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar29" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell30" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day30" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift30" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar30" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell31" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day31" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift31" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar31" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell32" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day32" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift32" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar32" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell33" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day33" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift33" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar33" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell34" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day34" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift34" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar34" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-              </LinearLayout>
+                  <TextView android:id="@+id/week4" android:layout_width="24dp" android:layout_height="0dp" android:layout_rowWeight="1" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="1" />
+                  <TextView android:id="@+id/day28" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day29" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day30" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day31" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day32" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day33" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day34" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
 
-              <LinearLayout android:id="@+id/row5" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
-                  <TextView android:id="@+id/week5" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.6" android:gravity="center" android:textSize="10sp" android:textColor="#673AB7" android:textStyle="bold" android:maxLines="2" />
-                  <LinearLayout android:id="@+id/cell35" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day35" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift35" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar35" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell36" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day36" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift36" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar36" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell37" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day37" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift37" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar37" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell38" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day38" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift38" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar38" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell39" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day39" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift39" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar39" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell40" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day40" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift40" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar40" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-                  <LinearLayout android:id="@+id/cell41" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp"><TextView android:id="@+id/day41" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" /><TextView android:id="@+id/shift41" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="2dp" android:paddingBottom="2dp" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#FFFFFF" android:background="#4CAF50" /><TextView android:id="@+id/lunar41" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" /></LinearLayout>
-              </LinearLayout>
+                  <TextView android:id="@+id/week5" android:layout_width="24dp" android:layout_height="0dp" android:layout_rowWeight="1" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="1" />
+                  <TextView android:id="@+id/day35" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day36" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day37" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day38" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day39" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day40" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+                  <TextView android:id="@+id/day41" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
+              </GridLayout>
           </LinearLayout>
           LAYOUT_EOF
 
+          # ---------- 新版 RosterWidgetProvider.kt（含週數計算，TAG 已移入 companion object 修正編譯錯誤） ----------
           cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt <<'WIDGET_EOF'
           package com.example.roster_pro
 
@@ -498,8 +367,6 @@ workflows:
           import android.content.Intent
           import android.content.SharedPreferences
           import android.graphics.Color
-          import android.os.Handler
-          import android.os.Looper
           import android.util.Log
           import android.util.TypedValue
           import android.view.View
@@ -513,13 +380,11 @@ workflows:
 
               override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
                   writeDebugLog(context, "=== onUpdate: ${appWidgetIds.size} widgets ===")
-                  Handler(Looper.getMainLooper()).postDelayed({
-                      for (appWidgetId in appWidgetIds) {
-                          try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (e: Exception) {
-                              writeDebugLog(context, "onUpdate error: ${e.message}")
-                          }
+                  for (appWidgetId in appWidgetIds) {
+                      try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (e: Exception) {
+                          writeDebugLog(context, "onUpdate error: ${e.message}")
                       }
-                  }, 500)
+                  }
               }
 
               override fun onAppWidgetOptionsChanged(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int, newOptions: android.os.Bundle) {
@@ -587,53 +452,8 @@ workflows:
                       return try { val v = sp.all[key]; when (v) { null -> def; is Double -> v; is Float -> v.toDouble(); is Long -> v.toDouble(); is Int -> v.toDouble(); is String -> v.toDoubleOrNull() ?: def; else -> def } } catch (e: Exception) { def }
                   }
 
-                  private fun getFontSizeSafe(sp: SharedPreferences, key: String, def: Double): Double {
-                      val raw = getValueAsDouble(sp, key, def)
-                      if (raw <= 0.0) return def
-                      if (raw <= 500.0) return raw
-                      try {
-                          val decoded = java.lang.Double.longBitsToDouble(raw.toLong())
-                          if (decoded > 0.0 && decoded <= 500.0) return decoded
-                      } catch (_: Exception) {}
-                      return def
-                  }
-
-                  private fun getColorSafe(sp: SharedPreferences, key: String, def: Int): Int {
-                      val raw = sp.all[key] ?: return def
-                      val candidates = mutableListOf<Long>()
-                      when (raw) {
-                          is Int -> candidates.add(raw.toLong())
-                          is Long -> {
-                              candidates.add(raw)
-                              try {
-                                  val decoded = java.lang.Double.longBitsToDouble(raw)
-                                  if (decoded > 0 && decoded <= Int.MAX_VALUE.toDouble()) candidates.add(decoded.toLong())
-                              } catch (_: Exception) {}
-                          }
-                          is Double -> {
-                              if (raw > 0 && raw <= Int.MAX_VALUE.toDouble()) candidates.add(raw.toLong())
-                              try {
-                                  val decoded = java.lang.Double.longBitsToDouble(raw.toLong())
-                                  if (decoded > 0 && decoded <= Int.MAX_VALUE.toDouble()) candidates.add(decoded.toLong())
-                              } catch (_: Exception) {}
-                          }
-                          is Float -> candidates.add(raw.toLong())
-                          is String -> raw.toLongOrNull()?.let { candidates.add(it) }
-                      }
-                      for (c in candidates) {
-                          val i = c.toInt()
-                          if ((i ushr 24) != 0) return i
-                      }
-                      return def
-                  }
-
-                  private fun isDarkColor(c: Int): Boolean {
-                      val a = (c ushr 24) and 0xFF
-                      if (a < 0x60) return true
-                      val r = (c shr 16) and 0xFF
-                      val g = (c shr 8) and 0xFF
-                      val b = c and 0xFF
-                      return (0.299 * r + 0.587 * g + 0.114 * b) < 80
+                  private fun getValueAsInt(sp: SharedPreferences, key: String, def: Int): Int {
+                      return try { val v = sp.all[key]; when (v) { null -> def; is Int -> v; is Long -> v.toInt(); is Double -> v.toLong().toInt(); is Float -> v.toInt(); is String -> v.toDoubleOrNull()?.toLong()?.toInt() ?: v.toIntOrNull() ?: def; else -> def } } catch (e: Exception) { def }
                   }
 
                   fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
@@ -649,42 +469,33 @@ workflows:
                           val month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH))
                           val monthNames = arrayOf("1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月")
 
-                          var fontSize = getFontSizeSafe(homeWidgetPrefs, "widgetFontSize", 0.0)
-                          if (fontSize <= 0.0) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widgetFontSize", 0.0)
-                          if (fontSize <= 0.0) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widget_font_size", 0.0)
-                          if (fontSize <= 0.0) fontSize = 14.0
+                          var fontSize = getValueAsDouble(homeWidgetPrefs, "widgetFontSize", 0.0)
+                          if (fontSize <= 0.0) fontSize = getValueAsDouble(flutterPrefs, "flutter.widgetFontSize", 0.0)
+                          if (fontSize <= 0.0) fontSize = 60.0
 
-                          var textColor = getColorSafe(homeWidgetPrefs, "widgetTextColor", 0)
-                          if (textColor == 0) textColor = getColorSafe(flutterPrefs, "flutter.widgetTextColor", 0)
-                          if (textColor == 0) textColor = getColorSafe(flutterPrefs, "flutter.widget_text_color", 0)
-                          if (textColor == 0) textColor = 0xFF333333.toInt()
+                          var textColor = getValueAsInt(homeWidgetPrefs, "widgetTextColor", 0)
+                          if (textColor == 0) textColor = getValueAsInt(flutterPrefs, "flutter.widgetTextColor", 0)
+                          if (textColor == 0) textColor = 0xFF000000.toInt()
 
-                          var bgColor = getColorSafe(homeWidgetPrefs, "widgetBgColor", 0)
-                          if (bgColor == 0) bgColor = getColorSafe(flutterPrefs, "flutter.widgetBgColor", 0)
+                          var bgColor = getValueAsInt(homeWidgetPrefs, "widgetBgColor", 0)
+                          if (bgColor == 0) bgColor = getValueAsInt(flutterPrefs, "flutter.widgetBgColor", 0)
                           if (bgColor == 0) bgColor = 0xFFFFFFFF.toInt()
 
-                          var todayBgColor = getColorSafe(homeWidgetPrefs, "today_bg", 0)
-                          if (todayBgColor == 0) todayBgColor = getColorSafe(flutterPrefs, "flutter.today_bg", 0)
-                          if (todayBgColor == 0 || isDarkColor(todayBgColor)) {
-                              todayBgColor = 0xFFBBDEFB.toInt()
-                          }
+                          var todayBgColor = getValueAsInt(homeWidgetPrefs, "today_bg", 0)
+                          if (todayBgColor == 0) todayBgColor = getValueAsInt(flutterPrefs, "flutter.today_bg", 0)
+                          if (todayBgColor == 0) todayBgColor = 0xFFFFF9C4.toInt()
 
                           var rosterJsonStr = homeWidgetPrefs.getString("roster_json", "") ?: ""
                           if (rosterJsonStr.isEmpty()) rosterJsonStr = flutterPrefs.getString("flutter.roster_json", "{}") ?: "{}"
                           var defsJsonStr = homeWidgetPrefs.getString("defs_json", "") ?: ""
                           if (defsJsonStr.isEmpty()) defsJsonStr = flutterPrefs.getString("flutter.defs_json", "{}") ?: "{}"
-                          var lunarJsonStr = homeWidgetPrefs.getString("lunar_json", "") ?: ""
-                          if (lunarJsonStr.isEmpty()) lunarJsonStr = flutterPrefs.getString("flutter.lunar_json", "{}") ?: "{}"
 
                           val rosterJson = try { JSONObject(rosterJsonStr) } catch (e: Exception) { JSONObject() }
                           val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
-                          val lunarJson = try { JSONObject(lunarJsonStr) } catch (e: Exception) { JSONObject() }
-
-                          writeDebugLog(context, "FontSize=$fontSize TextColor=0x${Integer.toHexString(textColor)} TodayBg=0x${Integer.toHexString(todayBgColor)}")
 
                           views.setTextViewText(R.id.tv_month_title, "${year}年${monthNames[month]}")
                           views.setTextColor(R.id.tv_month_title, textColor)
-                          views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, (fontSize * 1.5).toFloat())
+                          views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, (fontSize * 0.8).toFloat())
 
                           val calendar = Calendar.getInstance()
                           calendar.set(year, month, 1)
@@ -692,112 +503,64 @@ workflows:
                           val startOffset = if (firstDayOfWeek == Calendar.SUNDAY) 6 else firstDayOfWeek - 2
                           val maxDaysInMonth = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
                           val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+
                           val weekFormat = SimpleDateFormat("ww", Locale.UK)
-                          val paleTextColor = 0xFFB0B0B0.toInt()
-                          val todayDrawableId = context.resources.getIdentifier("cell_bg_today", "drawable", context.packageName)
 
                           for (i in 0 until 42) {
                               val dayIndex = i - startOffset + 1
-                              val dayTvId = context.resources.getIdentifier("day$i", "id", context.packageName)
-                              val shiftTvId = context.resources.getIdentifier("shift$i", "id", context.packageName)
-                              val lunarTvId = context.resources.getIdentifier("lunar$i", "id", context.packageName)
-                              val cellId = context.resources.getIdentifier("cell$i", "id", context.packageName)
-                              if (dayTvId == 0) continue
+                              val tvId = context.resources.getIdentifier("day$i", "id", context.packageName)
+                              if (tvId == 0) continue
                               try {
-                                  val cellCal = Calendar.getInstance()
-                                  cellCal.set(year, month, dayIndex)
-                                  val cellYear = cellCal.get(Calendar.YEAR)
-                                  val cellMonth = cellCal.get(Calendar.MONTH)
-                                  val cellDay = cellCal.get(Calendar.DAY_OF_MONTH)
-                                  val isCurrMonth = (cellMonth == month && cellYear == year)
+                                  if (dayIndex in 1..maxDaysInMonth) {
+                                      val dateStr = String.format("%04d-%02d-%02d", year, month + 1, dayIndex)
+                                      val shiftCode = rosterJson.optString(dateStr, "")
+                                      var displayText = dayIndex.toString()
+                                      if (shiftCode.isNotEmpty()) displayText = "$dayIndex\n$shiftCode"
+                                      views.setTextViewText(tvId, displayText)
+                                      views.setTextColor(tvId, textColor)
+                                      views.setTextViewTextSize(tvId, TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat())
+                                      views.setViewVisibility(tvId, View.VISIBLE)
 
-                                  val dateStr = String.format("%04d-%02d-%02d", cellYear, cellMonth + 1, cellDay)
-                                  val shiftCode = rosterJson.optString(dateStr, "")
-                                  val lunarText = lunarJson.optString(dateStr, "")
-
-                                  views.setTextViewText(dayTvId, cellDay.toString())
-                                  val cellColor = if (isCurrMonth) textColor else paleTextColor
-                                  views.setTextColor(dayTvId, cellColor)
-                                  views.setTextViewTextSize(dayTvId, TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat())
-
-                                  if (cellId != 0) {
-                                      if (dateStr == todayStr && isCurrMonth && todayDrawableId != 0) {
-                                          try { views.setInt(cellId, "setBackgroundResource", todayDrawableId) } catch (e: Exception) {
-                                              try { views.setInt(cellId, "setBackgroundColor", todayBgColor) } catch (e2: Exception) {}
-                                          }
-                                      } else {
-                                          val cellBg = bgColor
-                                          try { views.setInt(cellId, "setBackgroundColor", cellBg) } catch (e: Exception) {}
-                                      }
-                                  } else {
-                                      if (dateStr == todayStr && isCurrMonth) {
-                                          try { views.setInt(dayTvId, "setBackgroundColor", todayBgColor) } catch (e: Exception) {}
-                                      } else {
-                                          try { views.setInt(dayTvId, "setBackgroundColor", bgColor) } catch (e: Exception) {}
-                                      }
-                                  }
-
-                                  if (shiftTvId != 0) {
+                                      var bg = bgColor
                                       if (shiftCode.isNotEmpty()) {
-                                          views.setTextViewText(shiftTvId, shiftCode)
-                                          views.setTextColor(shiftTvId, 0xFFFFFFFF.toInt())
-                                          views.setTextViewTextSize(shiftTvId, TypedValue.COMPLEX_UNIT_SP, (fontSize * 0.7).toFloat())
-                                          var chipColor = 0xFF4CAF50.toInt()
                                           val defObj = defsJson.optJSONObject(shiftCode)
                                           if (defObj != null) {
                                               val c = defObj.optLong("color", 0).toInt()
-                                              if (c != 0) chipColor = c
+                                              if (c != 0) {
+                                                  val r = (Color.red(c) * 0.3 + 255 * 0.7).toInt()
+                                                  val g = (Color.green(c) * 0.3 + 255 * 0.7).toInt()
+                                                  val b = (Color.blue(c) * 0.3 + 255 * 0.7).toInt()
+                                                  bg = Color.rgb(r, g, b)
+                                              }
                                           }
-                                          try { views.setInt(shiftTvId, "setBackgroundColor", chipColor) } catch (e: Exception) {}
-                                          views.setViewVisibility(shiftTvId, View.VISIBLE)
-                                      } else {
-                                          views.setTextViewText(shiftTvId, "")
-                                          try { views.setInt(shiftTvId, "setBackgroundColor", Color.TRANSPARENT) } catch (e: Exception) {}
-                                          views.setViewVisibility(shiftTvId, View.INVISIBLE)
                                       }
+                                      if (dateStr == todayStr) bg = todayBgColor
+                                      try { views.setInt(tvId, "setBackgroundColor", bg) } catch (e: Exception) {}
+
+                                      val intent = Intent(context, MainActivity::class.java)
+                                      intent.putExtra("selected_date", dateStr)
+                                      views.setOnClickPendingIntent(tvId, PendingIntent.getActivity(context, appWidgetId * 1000 + i, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+                                  } else {
+                                      views.setTextViewText(tvId, "")
+                                      views.setViewVisibility(tvId, View.INVISIBLE)
                                   }
 
-                                  if (lunarTvId != 0) {
-                                      if (lunarText.isNotEmpty()) {
-                                          views.setTextViewText(lunarTvId, lunarText)
-                                          views.setTextColor(lunarTvId, 0xFF666666.toInt())
-                                          views.setTextViewTextSize(lunarTvId, TypedValue.COMPLEX_UNIT_SP, (fontSize * 0.55).toFloat())
-                                          views.setViewVisibility(lunarTvId, View.VISIBLE)
-                                      } else {
-                                          views.setTextViewText(lunarTvId, "")
-                                          views.setViewVisibility(lunarTvId, View.INVISIBLE)
+                                  if (i % 7 == 0) {
+                                      val weekTvId = context.resources.getIdentifier("week${i / 7}", "id", context.packageName)
+                                      if (weekTvId != 0) {
+                                          val rowFirstDay = DateTimeUtils.getDateOfIndex(year, month, i, startOffset)
+                                          if (rowFirstDay != null) {
+                                              val weekStr = weekFormat.format(rowFirstDay)
+                                              views.setTextViewText(weekTvId, "W$weekStr")
+                                              views.setTextColor(weekTvId, textColor)
+                                              views.setViewVisibility(weekTvId, View.VISIBLE)
+                                          } else {
+                                              views.setTextViewText(weekTvId, "")
+                                              views.setViewVisibility(weekTvId, View.INVISIBLE)
+                                          }
                                       }
                                   }
-
-                                  val intent = Intent(context, MainActivity::class.java)
-                                  intent.putExtra("selected_date", dateStr)
-                                  intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                                  views.setOnClickPendingIntent(dayTvId, PendingIntent.getActivity(context, appWidgetId * 1000 + i, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                               } catch (e: Exception) { writeDebugLog(context, "cell $i error: ${e.message}") }
-                          }
-
-                          for (row in 0 until 6) {
-                              var rowHasCurrentMonth = false
-                              for (col in 0 until 7) {
-                                  val idx = row * 7 + col
-                                  val dayIndex = idx - startOffset + 1
-                                  if (dayIndex in 1..maxDaysInMonth) { rowHasCurrentMonth = true; break }
-                              }
-                              val rowId = context.resources.getIdentifier("row$row", "id", context.packageName)
-                              if (rowId != 0) {
-                                  views.setViewVisibility(rowId, if (rowHasCurrentMonth) View.VISIBLE else View.GONE)
-                              }
-                              if (rowHasCurrentMonth) {
-                                  val weekTvId = context.resources.getIdentifier("week$row", "id", context.packageName)
-                                  if (weekTvId != 0) {
-                                      val rowFirstDay = DateTimeUtils.getDateOfIndex(year, month, row * 7, startOffset)
-                                      if (rowFirstDay != null) {
-                                          val weekStr = weekFormat.format(rowFirstDay)
-                                          views.setTextViewText(weekTvId, "W$weekStr")
-                                          views.setTextColor(weekTvId, 0xFF673AB7.toInt())
-                                      }
-                                  }
-                              }
                           }
 
                           try { views.setInt(R.id.widget_root, "setBackgroundColor", bgColor) } catch (e: Exception) {}
@@ -822,19 +585,19 @@ workflows:
           ls -la android/app/src/main/kotlin/com/example/roster_pro/
           ls -la android/app/src/main/res/layout/
           ls -la android/app/src/main/res/xml/
-          ls -la android/app/src/main/res/drawable/
 
-      - name: Build APK Debug
+      - name: Build APK Release
         script: |
           BUILD_NUM=$(date +%s | tail -c 8)
           BUILD_NAME="7.4.$(date +%m%d)"
           echo "Build name: $BUILD_NAME  Build number: $BUILD_NUM"
           flutter pub get
-          flutter build apk --debug --no-tree-shake-icons --build-name=$BUILD_NAME --build-number=$BUILD_NUM
+          flutter build apk --release --no-tree-shake-icons --build-name=$BUILD_NAME --build-number=$BUILD_NUM
           ls -lh build/app/outputs/flutter-apk/
 
     artifacts:
-      - build/app/outputs/flutter-apk/app-debug.apk
+      - build/app/outputs/flutter-apk/app-release.apk
+      - build/app/outputs/flutter-apk/app-release.apk.sha1
       - flutter_*.log
 
     publishing:
