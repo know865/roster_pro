@@ -22,7 +22,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         writeDebugLog(context, "=== onUpdate: ${appWidgetIds.size} widgets ===")
-        // 【問題1 修復】延遲500ms再渲染，避免初次載入字體過大
+        // 【問題1 修復】延遲 500ms 再渲染，避免初始添加時 PendingIntent 未就緒導致字體膨脹
         Handler(Looper.getMainLooper()).postDelayed({
             for (appWidgetId in appWidgetIds) {
                 try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (e: Exception) {
@@ -162,10 +162,12 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 // 【問題1 修復】讀取字體大小，若為空或異常則預設為 14.0
                 var fontSize = getFontSizeSafe(homeWidgetPrefs, "widgetFontSize", 0.0)
                 if (fontSize <= 0.0) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widgetFontSize", 0.0)
+                if (fontSize <= 0.0) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widget_font_size", 0.0)
                 if (fontSize <= 0.0) fontSize = 14.0
 
                 var textColor = getColorSafe(homeWidgetPrefs, "widgetTextColor", 0)
                 if (textColor == 0) textColor = getColorSafe(flutterPrefs, "flutter.widgetTextColor", 0)
+                if (textColor == 0) textColor = getColorSafe(flutterPrefs, "flutter.widget_text_color", 0)
                 if (textColor == 0) textColor = 0xFF333333.toInt()
 
                 var bgColor = getColorSafe(homeWidgetPrefs, "widgetBgColor", 0)
@@ -189,9 +191,11 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
                 val lunarJson = try { JSONObject(lunarJsonStr) } catch (e: Exception) { JSONObject() }
 
-                // 設定標題字體大小（使用 1.5 倍，避免過大）
+                writeDebugLog(context, "FontSize=$fontSize TextColor=0x${Integer.toHexString(textColor)} TodayBg=0x${Integer.toHexString(todayBgColor)}")
+
                 views.setTextViewText(R.id.tv_month_title, "${year}年${monthNames[month]}")
                 views.setTextColor(R.id.tv_month_title, textColor)
+                // 【問題1 修復】標題字體改為 fontSize * 1.5，避免過大
                 views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, (fontSize * 1.5).toFloat())
 
                 val calendar = Calendar.getInstance()
@@ -235,7 +239,8 @@ class RosterWidgetProvider : AppWidgetProvider() {
                                     try { views.setInt(cellId, "setBackgroundColor", todayBgColor) } catch (e2: Exception) {}
                                 }
                             } else {
-                                try { views.setInt(cellId, "setBackgroundColor", bgColor) } catch (e: Exception) {}
+                                val cellBg = bgColor
+                                try { views.setInt(cellId, "setBackgroundColor", cellBg) } catch (e: Exception) {}
                             }
                         } else {
                             if (dateStr == todayStr && isCurrMonth) {
