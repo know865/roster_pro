@@ -35,6 +35,9 @@ workflows:
           storeFile=$CM_KEYSTORE_PATH
           EOF
 
+          # 新增此行：刪除自動生成的 Groovy 構建檔案，強制使用 kts
+          rm -f android/app/build.gradle
+
           cat > android/app/build.gradle.kts <<'GRADLE_EOF'
           import java.util.Properties
           import java.io.FileInputStream
