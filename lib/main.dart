@@ -193,6 +193,7 @@ class MainPageState extends State<MainPage> {
   double widgetFontSize = 60.0;
   int widgetTextColor = 0xFF000000;
   int widgetBgColor = 0xFFFFFFFF;
+  int iconIndex = 0;
 
   Timer? _autoSyncTimer;
   String appVersion = '載入中...';
@@ -363,6 +364,7 @@ class MainPageState extends State<MainPage> {
       showLunar = sp.getBool('showLunar') ?? true;
       widgetFontSize = sp.getDouble('widgetFontSize') ?? 60.0;
       widgetTextColor = sp.getInt('widgetTextColor') ?? 0xFF000000;
+      iconIndex = sp.getInt('iconIndex') ?? 0;
     });
     updateWidget();
   }
@@ -406,6 +408,7 @@ class MainPageState extends State<MainPage> {
     await sp.setDouble('widgetFontSize', widgetFontSize);
     await sp.setInt('widgetTextColor', widgetTextColor);
     await sp.setInt('widgetBgColor', widgetBgColor);
+    await sp.setInt('iconIndex', iconIndex);
     await updateWidget();
     if (autoSync && googleSyncEnabled && !_isSyncing) {
       _autoSyncTimer?.cancel();
@@ -882,6 +885,7 @@ Future<void> restoreFromFile(String path) async {
       if (j['showLunar'] != null) showLunar = j['showLunar'];
       if (j['widgetFontSize'] != null) widgetFontSize = (j['widgetFontSize'] as num).toDouble();
       if (j['widgetTextColor'] != null) widgetTextColor = j['widgetTextColor'];
+      if (j['iconIndex'] != null) iconIndex = j['iconIndex'];
     });
     _needsFullSync = true;
     _dirtyDates.clear();
@@ -1050,6 +1054,7 @@ Future<void> backupAnywhere() async {
       'todayBg': todayBgColor.value, 'todayBorder': todayBorderColor.value,
       'showLunar': showLunar, 'widgetFontSize': widgetFontSize,
       'widgetTextColor': widgetTextColor,
+      'iconIndex': iconIndex,
     };
     var f = File('$dirPath/$fileName');
     await f.writeAsString(jsonEncode(backup));
@@ -2026,7 +2031,8 @@ void showDetail(DateTime day) {
       hrs += (rosterExtraHrs[k] ?? 0);
     }
     double otAmount = ot * overtimeRate;
-    double totalAllow = allow + otAmount + extraAllowances.fold(0.0, (a, b) => a + b.amount);
+    // 【修改 1】報表總計：移除 extraAllowances.fold，避免與班次內已選的額外津貼重複計算
+    double totalAllow = allow + otAmount;
     return SafeArea(child: ListView(padding: const EdgeInsets.all(12), children: [
       Row(children: [
         FilledButton.icon(onPressed: exportReport, icon: const Icon(Icons.ios_share, size: 18), label: const Text('匯出', style: TextStyle(fontSize: 14)), style: FilledButton.styleFrom(backgroundColor: Colors.deepPurple, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8))),
@@ -2091,14 +2097,9 @@ void showDetail(DateTime day) {
         if (extraByType.isNotEmpty) const Divider(),
         ...extraByType.entries.map((e) => Row(children: [Text('類別: ${e.key}'), const Spacer(), Text('\$${e.value.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple))])),
         Row(children: [Text('OT${ot.toStringAsFixed(1)}h x ${overtimeRate.toStringAsFixed(0)}'), const Spacer(), Text('\$${otAmount.toStringAsFixed(1)}')]),
+        // 【修改 1】移除「自定額外津貼」列表，避免重複計算
         const Divider(),
-        ...extraAllowances.map((e) => Row(children: [
-          Expanded(child: Text('${e.name} (× ${e.multiplier}倍)', style: const TextStyle(fontSize: 13))),
-          Text('\$${e.amount.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-          IconButton(icon: const Icon(Icons.delete, size: 16), onPressed: () { setState(() => extraAllowances.removeAt(extraAllowances.indexOf(e))); save(); }),
-        ])),
-        const Divider(),
-        Row(children: [const Text('津貼總額 (含自定+類別)'), const Spacer(), Text('\$${totalAllow.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold))]),
+        Row(children: [const Text('津貼總額'), const Spacer(), Text('\$${totalAllow.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold))]),
       ]))),
     ]));
   }
@@ -2109,6 +2110,7 @@ void showDetail(DateTime day) {
     List<MapEntry<String, ShiftDef>> shiftList = defs.entries.toList();
     List<MapEntry<String, ShiftDef>> shiftShow = showAllShift ? shiftList : shiftList.take(5).toList();
     List<ExtraAllowance> allowShow = showAllExtra ? extraAllowances : extraAllowances.take(5).toList();
+    final List<Color> iconColors = [Colors.deepPurple, Colors.red, Colors.blue, Colors.green, Colors.purple];
     return SafeArea(child: ListView(padding: const EdgeInsets.all(16), children: [
       const Text('排更日曆自定名稱', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
@@ -2385,6 +2387,42 @@ void showDetail(DateTime day) {
             content: Wrap(spacing: 8, children: [Colors.orange, Colors.red, Colors.green, Colors.blue, Colors.purple, Colors.black].map((c) => GestureDetector(onTap: () { setState(() => todayBorderColor = c); save(); Navigator.pop(ctx); }, child: Container(width: 40, height: 40, decoration: BoxDecoration(color: c, shape: BoxShape.circle)))).toList())
           ));
         }),
+      ]))),
+      const SizedBox(height: 16),
+      // 【修改 2】App 圖標選擇
+      const Text('App 圖標', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('選擇喜歡的 App 圖標（切換後桌面圖示會更新）', style: TextStyle(fontSize: 12, color: Colors.grey)),
+        const SizedBox(height: 12),
+        Wrap(spacing: 12, runSpacing: 12, children: List.generate(5, (i) {
+          final isSelected = iconIndex == i;
+          return GestureDetector(
+            onTap: () async {
+              try {
+                await _realChannel.invokeMethod('switchIcon', {'index': i});
+                setState(() => iconIndex = i);
+                save();
+                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已切換至圖標 ${i + 1}')));
+              } catch (e) {
+                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('切換失敗 $e')));
+              }
+            },
+            child: Container(
+              width: 64, height: 64,
+              decoration: BoxDecoration(
+                color: iconColors[i],
+                borderRadius: BorderRadius.circular(14),
+                border: isSelected ? Border.all(color: Colors.black, width: 3) : Border.all(color: Colors.grey.shade300, width: 1),
+                boxShadow: isSelected ? [BoxShadow(color: iconColors[i].withOpacity(0.5), blurRadius: 8)] : null,
+              ),
+              child: Center(
+                child: Text('${i + 1}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 22)),
+              ),
+            ),
+          );
+        })),
+        const SizedBox(height: 8),
+        Text('當前：圖標 ${iconIndex + 1}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
       ]))),
       const SizedBox(height: 16),
       const Text('額外津貼 (自定名)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
