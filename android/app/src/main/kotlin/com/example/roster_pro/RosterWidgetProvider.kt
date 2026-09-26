@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Color
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.util.TypedValue
 import android.view.View
@@ -20,11 +22,14 @@ class RosterWidgetProvider : AppWidgetProvider() {
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         writeDebugLog(context, "=== onUpdate: ${appWidgetIds.size} widgets ===")
-        for (appWidgetId in appWidgetIds) {
-            try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (e: Exception) {
-                writeDebugLog(context, "onUpdate error: ${e.message}")
+        // 【問題1 修復】延遲500ms再渲染，避免初次載入字體過大
+        Handler(Looper.getMainLooper()).postDelayed({
+            for (appWidgetId in appWidgetIds) {
+                try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (e: Exception) {
+                    writeDebugLog(context, "onUpdate error: ${e.message}")
+                }
             }
-        }
+        }, 500)
     }
 
     override fun onAppWidgetOptionsChanged(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int, newOptions: android.os.Bundle) {
@@ -154,14 +159,13 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 val month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH))
                 val monthNames = arrayOf("1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月")
 
+                // 【問題1 修復】讀取字體大小，若為空或異常則預設為 14.0
                 var fontSize = getFontSizeSafe(homeWidgetPrefs, "widgetFontSize", 0.0)
                 if (fontSize <= 0.0) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widgetFontSize", 0.0)
-                if (fontSize <= 0.0) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widget_font_size", 0.0)
-                if (fontSize <= 0.0) fontSize = 55.0
+                if (fontSize <= 0.0) fontSize = 14.0
 
                 var textColor = getColorSafe(homeWidgetPrefs, "widgetTextColor", 0)
                 if (textColor == 0) textColor = getColorSafe(flutterPrefs, "flutter.widgetTextColor", 0)
-                if (textColor == 0) textColor = getColorSafe(flutterPrefs, "flutter.widget_text_color", 0)
                 if (textColor == 0) textColor = 0xFF333333.toInt()
 
                 var bgColor = getColorSafe(homeWidgetPrefs, "widgetBgColor", 0)
@@ -185,12 +189,10 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
                 val lunarJson = try { JSONObject(lunarJsonStr) } catch (e: Exception) { JSONObject() }
 
-                writeDebugLog(context, "FontSize=$fontSize TextColor=0x${Integer.toHexString(textColor)} TodayBg=0x${Integer.toHexString(todayBgColor)}")
-
-                // 頂部標題
+                // 設定標題字體大小（使用 1.5 倍，避免過大）
                 views.setTextViewText(R.id.tv_month_title, "${year}年${monthNames[month]}")
                 views.setTextColor(R.id.tv_month_title, textColor)
-                views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, (fontSize * 0.6).toFloat())
+                views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, (fontSize * 1.5).toFloat())
 
                 val calendar = Calendar.getInstance()
                 calendar.set(year, month, 1)
@@ -200,8 +202,8 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
                 val weekFormat = SimpleDateFormat("ww", Locale.UK)
                 val paleTextColor = 0xFFB0B0B0.toInt()
+                val todayDrawableId = context.resources.getIdentifier("cell_bg_today", "drawable", context.packageName)
 
-                // 遍歷 42 個格子
                 for (i in 0 until 42) {
                     val dayIndex = i - startOffset + 1
                     val dayTvId = context.resources.getIdentifier("day$i", "id", context.packageName)
@@ -221,18 +223,21 @@ class RosterWidgetProvider : AppWidgetProvider() {
                         val shiftCode = rosterJson.optString(dateStr, "")
                         val lunarText = lunarJson.optString(dateStr, "")
 
-                        // ---------- 日期數字 ----------
                         views.setTextViewText(dayTvId, cellDay.toString())
                         val cellColor = if (isCurrMonth) textColor else paleTextColor
                         views.setTextColor(dayTvId, cellColor)
                         views.setTextViewTextSize(dayTvId, TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat())
 
-                        // ---------- 格子背景色（若有 cellN ID） ----------
+                        // 格子背景
                         if (cellId != 0) {
-                            val cellBg = if (dateStr == todayStr && isCurrMonth) todayBgColor else bgColor
-                            try { views.setInt(cellId, "setBackgroundColor", cellBg) } catch (e: Exception) {}
+                            if (dateStr == todayStr && isCurrMonth && todayDrawableId != 0) {
+                                try { views.setInt(cellId, "setBackgroundResource", todayDrawableId) } catch (e: Exception) {
+                                    try { views.setInt(cellId, "setBackgroundColor", todayBgColor) } catch (e2: Exception) {}
+                                }
+                            } else {
+                                try { views.setInt(cellId, "setBackgroundColor", bgColor) } catch (e: Exception) {}
+                            }
                         } else {
-                            // 無 cellN ID，退而求其次：今天日期數字加淺藍底
                             if (dateStr == todayStr && isCurrMonth) {
                                 try { views.setInt(dayTvId, "setBackgroundColor", todayBgColor) } catch (e: Exception) {}
                             } else {
@@ -240,13 +245,12 @@ class RosterWidgetProvider : AppWidgetProvider() {
                             }
                         }
 
-                        // ---------- 班次代號（彩色膠囊） ----------
+                        // 顯示班次 (非本月日期也顯示)
                         if (shiftTvId != 0) {
-                            if (isCurrMonth && shiftCode.isNotEmpty()) {
+                            if (shiftCode.isNotEmpty()) {
                                 views.setTextViewText(shiftTvId, shiftCode)
                                 views.setTextColor(shiftTvId, 0xFFFFFFFF.toInt())
                                 views.setTextViewTextSize(shiftTvId, TypedValue.COMPLEX_UNIT_SP, (fontSize * 0.7).toFloat())
-                                // 取班次顏色
                                 var chipColor = 0xFF4CAF50.toInt()
                                 val defObj = defsJson.optJSONObject(shiftCode)
                                 if (defObj != null) {
@@ -262,9 +266,9 @@ class RosterWidgetProvider : AppWidgetProvider() {
                             }
                         }
 
-                        // ---------- 農曆 ----------
+                        // 顯示農曆
                         if (lunarTvId != 0) {
-                            if (isCurrMonth && lunarText.isNotEmpty()) {
+                            if (lunarText.isNotEmpty()) {
                                 views.setTextViewText(lunarTvId, lunarText)
                                 views.setTextColor(lunarTvId, 0xFF666666.toInt())
                                 views.setTextViewTextSize(lunarTvId, TypedValue.COMPLEX_UNIT_SP, (fontSize * 0.55).toFloat())
@@ -275,14 +279,13 @@ class RosterWidgetProvider : AppWidgetProvider() {
                             }
                         }
 
-                        // ---------- 點擊開啟 App ----------
                         val intent = Intent(context, MainActivity::class.java)
                         intent.putExtra("selected_date", dateStr)
+                        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                         views.setOnClickPendingIntent(dayTvId, PendingIntent.getActivity(context, appWidgetId * 1000 + i, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                     } catch (e: Exception) { writeDebugLog(context, "cell $i error: ${e.message}") }
                 }
 
-                // ---------- 週數 & 隱藏無本月日期的行 ----------
                 for (row in 0 until 6) {
                     var rowHasCurrentMonth = false
                     for (col in 0 until 7) {
@@ -307,10 +310,8 @@ class RosterWidgetProvider : AppWidgetProvider() {
                     }
                 }
 
-                // ---------- 整體背景 ----------
                 try { views.setInt(R.id.widget_root, "setBackgroundColor", bgColor) } catch (e: Exception) {}
 
-                // ---------- 按鈕點擊 ----------
                 val prevIntent = Intent(context, RosterWidgetProvider::class.java).setAction("PREV_MONTH")
                 views.setOnClickPendingIntent(R.id.btn_prev, PendingIntent.getBroadcast(context, 0, prevIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                 val nextIntent = Intent(context, RosterWidgetProvider::class.java).setAction("NEXT_MONTH")
