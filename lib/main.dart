@@ -41,7 +41,7 @@ class ExtraAllowance {
   double amount;
   double multiplier;
   ExtraAllowance(this.name, this.amount, {this.multiplier = 1.0});
-  double get total => amount * multiplier;
+  double get total => amount;
   Map<String, dynamic> toJson() => {'name': name, 'amount': amount, 'multiplier': multiplier};
   factory ExtraAllowance.fromJson(Map<String, dynamic> j) => ExtraAllowance(
     j['name'],
@@ -161,6 +161,13 @@ class MainPageState extends State<MainPage> {
   TextEditingController nameCtrl = TextEditingController();
   double standardWeeklyHours = 42;
   double overtimeRate = 80;
+  // 【新增】標準時薪計算相關
+  double monthlySalary = 0;
+  double hourlyDivisor = 182;
+  double otMultiplier = 1.5;
+  double get standardHourlyRate => (monthlySalary > 0 && hourlyDivisor > 0) ? monthlySalary / hourlyDivisor : 0.0;
+  double get overtimeHourlyRate => standardHourlyRate * otMultiplier;
+
   List<ExtraAllowance> extraAllowances = [];
   double calendarFontSize = 14;
   bool googleSyncEnabled = false;
@@ -341,6 +348,10 @@ class MainPageState extends State<MainPage> {
       nameCtrl.text = customName;
       standardWeeklyHours = sp.getDouble('stdWeek') ?? 42;
       overtimeRate = sp.getDouble('otRate') ?? 80;
+      // 【新增】讀取標準時薪設定
+      monthlySalary = sp.getDouble('monthlySalary') ?? 0;
+      hourlyDivisor = sp.getDouble('hourlyDivisor') ?? 182;
+      otMultiplier = sp.getDouble('otMultiplier') ?? 1.5;
       calendarFontSize = sp.getDouble('calFont') ?? 14;
       googleSyncEnabled = sp.getBool('gSync') ?? false;
       autoSync = sp.getBool('gAuto') ?? false;
@@ -372,6 +383,10 @@ class MainPageState extends State<MainPage> {
     sp.setString('cName', customName);
     sp.setDouble('stdWeek', standardWeeklyHours);
     sp.setDouble('otRate', overtimeRate);
+    // 【新增】儲存標準時薪設定
+    await sp.setDouble('monthlySalary', monthlySalary);
+    await sp.setDouble('hourlyDivisor', hourlyDivisor);
+    await sp.setDouble('otMultiplier', otMultiplier);
     sp.setString('extraAllowNewV36', jsonEncode(extraAllowances.map((e) => e.toJson()).toList()));
     sp.setDouble('calFont', calendarFontSize);
     sp.setBool('gSync', googleSyncEnabled);
@@ -1027,6 +1042,7 @@ Future<void> backupAnywhere() async {
       'defs': defs.map((k, v) => MapEntry(k, v.toJson())),
       'pattern': pattern, 'carry': carry, 'cName': customName,
       'stdWeek': standardWeeklyHours, 'otRate': overtimeRate,
+      'monthlySalary': monthlySalary, 'hourlyDivisor': hourlyDivisor, 'otMultiplier': otMultiplier,
       'extraNewV36': extraAllowances.map((e) => e.toJson()).toList(),
       'calFont': calendarFontSize,
       'savedPatterns': savedPatterns.map((e) => e.toJson()).toList(),
@@ -1544,11 +1560,18 @@ void showDetail(DateTime day) {
               Expanded(child: SizedBox(height: 56, child: TextField(controller: exHCtrl, decoration: const InputDecoration(labelText: '額外工時', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number))),
             ]),
             Row(children: [
+              // 【修改1】名稱欄位：手動清空時金額一併清 0
               Expanded(
                 child: SizedBox(
                   height: 56,
                   child: TextField(
                     controller: exTypeCtrl,
+                    onChanged: (v) {
+                      if (v.trim().isEmpty) {
+                        exCtrl.text = '0.0';
+                        setM(() {});
+                      }
+                    },
                     decoration: InputDecoration(
                       labelText: '額外津貼名稱',
                       isDense: true,
@@ -1558,6 +1581,7 @@ void showDetail(DateTime day) {
                               icon: const Icon(Icons.arrow_drop_down),
                               tooltip: '從清單選擇',
                               onPressed: () async {
+                                // 【修改1】下拉加入「無」選項
                                 final selected = await showModalBottomSheet<String>(
                                   context: context,
                                   builder: (ctx) => SafeArea(
@@ -1565,9 +1589,17 @@ void showDetail(DateTime day) {
                                       shrinkWrap: true,
                                       children: [
                                         const ListTile(title: Text('選擇額外津貼', style: TextStyle(fontWeight: FontWeight.bold))),
+                                        // 「無」選項
+                                        ListTile(
+                                          leading: const Icon(Icons.block, color: Colors.grey),
+                                          title: const Text('無', style: TextStyle(fontWeight: FontWeight.bold)),
+                                          subtitle: const Text('清除額外津貼'),
+                                          onTap: () => Navigator.pop(ctx, '__NONE__'),
+                                        ),
+                                        const Divider(),
                                         ...extraAllowances.map((e) => ListTile(
                                           title: Text(e.name),
-                                          subtitle: Text('金額 \$${e.amount} × ${e.multiplier} 倍 = \$${(e.amount * e.multiplier).toStringAsFixed(1)}'),
+                                          subtitle: Text('倍數 ${e.multiplier} → \$${(e.amount).toStringAsFixed(1)}'),
                                           onTap: () => Navigator.pop(ctx, e.name),
                                         )),
                                       ],
@@ -1575,9 +1607,14 @@ void showDetail(DateTime day) {
                                   ),
                                 );
                                 if (selected != null) {
-                                  exTypeCtrl.text = selected;
-                                  final match = extraAllowances.firstWhere((e) => e.name == selected, orElse: () => ExtraAllowance('', 0));
-                                  exCtrl.text = (match.amount * match.multiplier).toStringAsFixed(1);
+                                  if (selected == '__NONE__') {
+                                    exTypeCtrl.text = '';
+                                    exCtrl.text = '0.0';
+                                  } else {
+                                    exTypeCtrl.text = selected;
+                                    final match = extraAllowances.firstWhere((e) => e.name == selected, orElse: () => ExtraAllowance('', 0));
+                                    exCtrl.text = match.amount.toStringAsFixed(1);
+                                  }
                                   setM(() {});
                                 }
                               },
@@ -1995,7 +2032,7 @@ void showDetail(DateTime day) {
       hrs += (rosterExtraHrs[k] ?? 0);
     }
     double otAmount = ot * overtimeRate;
-    double totalAllow = allow + otAmount + extraAllowances.fold(0.0, (a, b) => a + b.amount * b.multiplier);
+    double totalAllow = allow + otAmount + extraAllowances.fold(0.0, (a, b) => a + b.amount);
     return SafeArea(child: ListView(padding: const EdgeInsets.all(12), children: [
       Row(children: [
         FilledButton.icon(onPressed: exportReport, icon: const Icon(Icons.ios_share, size: 18), label: const Text('匯出', style: TextStyle(fontSize: 14)), style: FilledButton.styleFrom(backgroundColor: Colors.deepPurple, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8))),
@@ -2062,8 +2099,8 @@ void showDetail(DateTime day) {
         Row(children: [Text('OT${ot.toStringAsFixed(1)}h x ${overtimeRate.toStringAsFixed(0)}'), const Spacer(), Text('\$${otAmount.toStringAsFixed(1)}')]),
         const Divider(),
         ...extraAllowances.map((e) => Row(children: [
-          Expanded(child: Text('${e.name} (\$${e.amount} × ${e.multiplier}倍)', style: const TextStyle(fontSize: 13))),
-          Text('\$${(e.amount * e.multiplier).toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+          Expanded(child: Text('${e.name} (× ${e.multiplier}倍)', style: const TextStyle(fontSize: 13))),
+          Text('\$${e.amount.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold)),
           IconButton(icon: const Icon(Icons.delete, size: 16), onPressed: () { setState(() => extraAllowances.removeAt(extraAllowances.indexOf(e))); save(); }),
         ])),
         const Divider(),
@@ -2075,7 +2112,6 @@ void showDetail(DateTime day) {
   Widget settingsTab() {
     var stdCtrl = TextEditingController(text: standardWeeklyHours.toString());
     var carryCtrl = TextEditingController(text: carry.toString());
-    var otRateCtrl = TextEditingController(text: overtimeRate.toString());
     List<MapEntry<String, ShiftDef>> shiftList = defs.entries.toList();
     List<MapEntry<String, ShiftDef>> shiftShow = showAllShift ? shiftList : shiftList.take(5).toList();
     List<ExtraAllowance> allowShow = showAllExtra ? extraAllowances : extraAllowances.take(5).toList();
@@ -2221,7 +2257,7 @@ void showDetail(DateTime day) {
         SizedBox(width: double.infinity, child: FilledButton.icon(icon: const Icon(Icons.delete_sweep), style: FilledButton.styleFrom(backgroundColor: Colors.red), label: const Text('按日期範圍清除'), onPressed: clearRosterByRange))
       ]))),
       const SizedBox(height: 16),
-      const Text('標準工時 & 承上 & 超時金額', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      const Text('標準工時 & 承上 & 標準時薪', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
         Row(children: [
           Expanded(child: TextField(controller: stdCtrl, decoration: const InputDecoration(labelText: '標準工時', suffixText: 'h/週', border: OutlineInputBorder()))),
@@ -2229,15 +2265,107 @@ void showDetail(DateTime day) {
           Expanded(child: TextField(controller: carryCtrl, decoration: const InputDecoration(labelText: '承上餘額', border: OutlineInputBorder())))
         ]),
         const SizedBox(height: 10),
-        TextField(controller: otRateCtrl, decoration: const InputDecoration(labelText: '超時金額 /h', prefixText: '\$ ', border: OutlineInputBorder())),
+        // 【修改2】標準時薪按鈕
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: () {
+              var salaryCtrl = TextEditingController(text: monthlySalary.toStringAsFixed(0));
+              var divisorCtrl = TextEditingController(text: hourlyDivisor.toStringAsFixed(0));
+              var multCtrl = TextEditingController(text: otMultiplier.toStringAsFixed(1));
+              showDialog(context: context, builder: (ctx) {
+                return StatefulBuilder(builder: (ctx2, setD) {
+                  double calcHourly() {
+                    final s = double.tryParse(salaryCtrl.text) ?? 0;
+                    double d = double.tryParse(divisorCtrl.text) ?? 182;
+                    if (d <= 0) d = 182;
+                    return s / d;
+                  }
+                  double calcOT() {
+                    final m = double.tryParse(multCtrl.text) ?? 1.5;
+                    return calcHourly() * m;
+                  }
+                  return AlertDialog(
+                    title: const Text('標準時薪設定'),
+                    content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      TextField(
+                        controller: salaryCtrl,
+                        decoration: const InputDecoration(labelText: '每月月薪', prefixText: '\$ ', border: OutlineInputBorder()),
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) => setD(() {}),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: divisorCtrl,
+                        decoration: const InputDecoration(labelText: '每月工作時數 (預設 182)', border: OutlineInputBorder()),
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) => setD(() {}),
+                      ),
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
+                        child: Row(children: [
+                          const Text('計算時薪：', style: TextStyle(fontWeight: FontWeight.bold)),
+                          const Spacer(),
+                          Text('\$${calcHourly().toStringAsFixed(0)}/h', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue)),
+                        ]),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: multCtrl,
+                        decoration: const InputDecoration(labelText: '超時倍數 (預設 1.5)', border: OutlineInputBorder()),
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) => setD(() {}),
+                      ),
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(8)),
+                        child: Row(children: [
+                          const Text('超時時薪：', style: TextStyle(fontWeight: FontWeight.bold)),
+                          const Spacer(),
+                          Text('\$${calcOT().toStringAsFixed(0)}/h', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.orange)),
+                        ]),
+                      ),
+                    ])),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx2), child: const Text('取消')),
+                      FilledButton(onPressed: () {
+                        final s = double.tryParse(salaryCtrl.text) ?? 0;
+                        final d = double.tryParse(divisorCtrl.text) ?? 182;
+                        final m = double.tryParse(multCtrl.text) ?? 1.5;
+                        setState(() {
+                          monthlySalary = s;
+                          hourlyDivisor = d > 0 ? d : 182;
+                          otMultiplier = m > 0 ? m : 1.5;
+                          overtimeRate = (monthlySalary / hourlyDivisor) * otMultiplier;
+                        });
+                        save();
+                        Navigator.pop(ctx2);
+                      }, child: const Text('儲存')),
+                    ],
+                  );
+                });
+              });
+            },
+            icon: const Icon(Icons.calculate),
+            label: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('標準時薪', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                const SizedBox(height: 2),
+                Text('時薪 \$${standardHourlyRate.toStringAsFixed(0)}/h  ·  超時 \$${overtimeHourlyRate.toStringAsFixed(0)}/h', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+              ]),
+            ),
+          ),
+        ),
         const SizedBox(height: 10),
         SizedBox(width: double.infinity, child: FilledButton(onPressed: () {
-          double? v1 = double.tryParse(stdCtrl.text);
-          double? v2 = double.tryParse(carryCtrl.text);
-          double? v3 = double.tryParse(otRateCtrl.text);
+          final v1 = double.tryParse(stdCtrl.text);
+          final v2 = double.tryParse(carryCtrl.text);
           if (v1 != null) standardWeeklyHours = v1;
           if (v2 != null) carry = v2;
-          if (v3 != null) overtimeRate = v3;
           setState(() {});
           save();
         }, child: const Text('保存設定')))
@@ -2272,68 +2400,84 @@ void showDetail(DateTime day) {
           int idx = extraAllowances.indexOf(e);
           return ListTile(
             title: Text(e.name),
-            subtitle: Text('\$${e.amount} × ${e.multiplier} 倍 = \$${(e.amount * e.multiplier).toStringAsFixed(1)}'),
+            subtitle: Text('時薪 × ${e.multiplier} 倍 = \$${e.amount.toStringAsFixed(1)}'),
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
               IconButton(icon: const Icon(Icons.edit, size: 18, color: Colors.blue), onPressed: () {
                 var nCtrl = TextEditingController(text: e.name);
-                var vCtrl = TextEditingController(text: e.amount.toString());
                 var mCtrl = TextEditingController(text: e.multiplier.toString());
-                showDialog(context: context, builder: (ctx) => AlertDialog(
-                  title: const Text('編輯額外津貼'),
-                  content: Column(mainAxisSize: MainAxisSize.min, children: [
-                    SizedBox(height: 56, child: TextField(controller: nCtrl, decoration: const InputDecoration(labelText: '名稱', isDense: true, border: OutlineInputBorder()))),
-                    const SizedBox(height: 8),
-                    Row(children: [
-                      Expanded(child: SizedBox(height: 56, child: TextField(controller: vCtrl, decoration: const InputDecoration(labelText: '金額', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number))),
-                      const SizedBox(width: 8),
-                      SizedBox(width: 90, height: 56, child: TextField(controller: mCtrl, decoration: const InputDecoration(labelText: '倍數', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number)),
-                    ]),
-                  ]),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-                    FilledButton(onPressed: () {
-                      final String name = nCtrl.text.trim();
-                      final double? val = double.tryParse(vCtrl.text);
-                      final double? mulParsed = double.tryParse(mCtrl.text);
-                      if (name.isEmpty || val == null) return;
-                      final double mulVal = (mulParsed == null || mulParsed <= 0) ? 1.0 : mulParsed;
-                      setState(() => extraAllowances[idx] = ExtraAllowance(name, val, multiplier: mulVal));
-                      save();
-                      Navigator.pop(ctx);
-                    }, child: const Text('儲存')),
-                  ],
-                ));
+                showDialog(context: context, builder: (ctx) {
+                  return StatefulBuilder(builder: (ctx2, setD) {
+                    double calcAmt() {
+                      final m = double.tryParse(mCtrl.text) ?? 1;
+                      return standardHourlyRate * (m <= 0 ? 1 : m);
+                    }
+                    return AlertDialog(
+                      title: const Text('編輯額外津貼'),
+                      content: Column(mainAxisSize: MainAxisSize.min, children: [
+                        SizedBox(height: 56, child: TextField(controller: nCtrl, decoration: const InputDecoration(labelText: '名稱', isDense: true, border: OutlineInputBorder()))),
+                        const SizedBox(height: 8),
+                        SizedBox(height: 56, child: TextField(controller: mCtrl, decoration: const InputDecoration(labelText: '倍數 (預設 1)', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (_) => setD(() {}))),
+                        const SizedBox(height: 8),
+                        Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
+                          child: Row(children: [const Text('計算金額：'), const Spacer(), Text('\$${calcAmt().toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.green))]),
+                        ),
+                      ]),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(ctx2), child: const Text('取消')),
+                        FilledButton(onPressed: () {
+                          final name = nCtrl.text.trim();
+                          final mulParsed = double.tryParse(mCtrl.text);
+                          if (name.isEmpty) return;
+                          final mulVal = (mulParsed == null || mulParsed <= 0) ? 1.0 : mulParsed;
+                          final amt = standardHourlyRate * mulVal;
+                          setState(() => extraAllowances[idx] = ExtraAllowance(name, amt, multiplier: mulVal));
+                          save();
+                          Navigator.pop(ctx2);
+                        }, child: const Text('儲存')),
+                      ],
+                    );
+                  });
+                });
               }),
               IconButton(icon: const Icon(Icons.delete, size: 18, color: Colors.red), onPressed: () { setState(() => extraAllowances.removeAt(idx)); save(); }),
-            ]),
+            ],
           );
         }),
         ListTile(leading: const Icon(Icons.add), title: const Text('新增額外津貼'), onTap: () {
           var nCtrl = TextEditingController();
-          var vCtrl = TextEditingController(text: '0');
           var mCtrl = TextEditingController(text: '1');
-          showDialog(context: context, builder: (ctx) => AlertDialog(
-            title: const Text('新增額外津貼'),
-            content: Column(mainAxisSize: MainAxisSize.min, children: [
-              SizedBox(height: 56, child: TextField(controller: nCtrl, decoration: const InputDecoration(labelText: '名稱', isDense: true, border: OutlineInputBorder()))),
-              const SizedBox(height: 8),
-              Row(children: [
-                Expanded(child: SizedBox(height: 56, child: TextField(controller: vCtrl, decoration: const InputDecoration(labelText: '金額', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number))),
-                const SizedBox(width: 8),
-                SizedBox(width: 90, height: 56, child: TextField(controller: mCtrl, decoration: const InputDecoration(labelText: '倍數', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number)),
-              ]),
-            ]),
-            actions: [FilledButton(onPressed: () {
-              final String name = nCtrl.text.trim();
-              final double? val = double.tryParse(vCtrl.text);
-              final double? mulParsed = double.tryParse(mCtrl.text);
-              if (name.isEmpty || val == null) return;
-              final double mulVal = (mulParsed == null || mulParsed <= 0) ? 1.0 : mulParsed;
-              setState(() => extraAllowances.add(ExtraAllowance(name, val, multiplier: mulVal)));
-              save();
-              Navigator.pop(ctx);
-            }, child: const Text('新增'))]
-          ));
+          showDialog(context: context, builder: (ctx) {
+            return StatefulBuilder(builder: (ctx2, setD) {
+              double calcAmt() {
+                final m = double.tryParse(mCtrl.text) ?? 1;
+                return standardHourlyRate * (m <= 0 ? 1 : m);
+              }
+              return AlertDialog(
+                title: const Text('新增額外津貼'),
+                content: Column(mainAxisSize: MainAxisSize.min, children: [
+                  SizedBox(height: 56, child: TextField(controller: nCtrl, decoration: const InputDecoration(labelText: '名稱', isDense: true, border: OutlineInputBorder()))),
+                  const SizedBox(height: 8),
+                  SizedBox(height: 56, child: TextField(controller: mCtrl, decoration: const InputDecoration(labelText: '倍數 (預設 1)', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (_) => setD(() {}))),
+                  const SizedBox(height: 8),
+                  Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
+                    child: Row(children: [const Text('計算金額：'), const Spacer(), Text('\$${calcAmt().toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.green))]),
+                  ),
+                  const SizedBox(height: 4),
+                  Text('（時薪 \$${standardHourlyRate.toStringAsFixed(0)}/h × 倍數）', style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                ]),
+                actions: [FilledButton(onPressed: () {
+                  final name = nCtrl.text.trim();
+                  final mulParsed = double.tryParse(mCtrl.text);
+                  if (name.isEmpty) return;
+                  final mulVal = (mulParsed == null || mulParsed <= 0) ? 1.0 : mulParsed;
+                  final amt = standardHourlyRate * mulVal;
+                  setState(() => extraAllowances.add(ExtraAllowance(name, amt, multiplier: mulVal)));
+                  save();
+                  Navigator.pop(ctx2);
+                }, child: const Text('新增'))],
+              );
+            });
+          });
         }),
         if (extraAllowances.length > 5) TextButton(onPressed: () => setState(() => showAllExtra = !showAllExtra), child: Text(showAllExtra ? '收起' : '顯示全部 ${extraAllowances.length}項')),
       ])),
