@@ -6,8 +6,6 @@ workflows:
     environment:
       flutter: 3.24.5
       java: 17
-      groups:
-        - keystore_credentials
     scripts:
       - name: Set up Flutter
         script: |
@@ -28,30 +26,14 @@ workflows:
       - name: Configure Android Signing
         script: |
           set -e
-          cat > android/key.properties <<EOF
-          storePassword=$CM_KEYSTORE_PASSWORD
-          keyPassword=$CM_KEY_PASSWORD
-          keyAlias=$CM_KEY_ALIAS
-          storeFile=$CM_KEYSTORE_PATH
-          EOF
-
-          # 新增此行：刪除自動生成的 Groovy 構建檔案，強制使用 kts
+          # 刪除自動生成的 Groovy 構建檔案，強制使用 kts
           rm -f android/app/build.gradle
 
           cat > android/app/build.gradle.kts <<'GRADLE_EOF'
-          import java.util.Properties
-          import java.io.FileInputStream
-
           plugins {
               id("com.android.application")
               id("kotlin-android")
               id("dev.flutter.flutter-gradle-plugin")
-          }
-
-          val keystoreProperties = Properties()
-          val keystorePropertiesFile = rootProject.file("key.properties")
-          if (keystorePropertiesFile.exists()) {
-              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
           }
 
           android {
@@ -76,23 +58,10 @@ workflows:
                   versionName = flutter.versionName
               }
 
-              signingConfigs {
-                  create("release") {
-                      if (keystorePropertiesFile.exists()) {
-                          keyAlias = keystoreProperties["keyAlias"] as String
-                          keyPassword = keystoreProperties["keyPassword"] as String
-                          storeFile = file(keystoreProperties["storeFile"] as String)
-                          storePassword = keystoreProperties["storePassword"] as String
-                      }
-                  }
-              }
-
               buildTypes {
                   release {
-                      signingConfig = signingConfigs.getByName("release")
-                  }
-                  debug {
-                      signingConfig = signingConfigs.getByName("release")
+                      // 直接使用 Debug 簽名，無需密鑰庫
+                      signingConfig = signingConfigs.getByName("debug")
                   }
               }
           }
