@@ -55,25 +55,30 @@ class LeaveDef {
 class ShiftDef {
   String code; String label; double hours; double ot; Color color; String start; String end; 
   bool hasMorningAllow; bool hasNightAllow; bool hasMealAllow; bool isAllDay; bool hasLunch;
+  // 新增4個假期標示
+  bool hasAL; bool hasSH; bool hasGH; bool hasWB; 
   
   ShiftDef(this.code, this.label, this.hours, this.color, {
     this.ot = 0, this.start = '07:00', this.end = '15:30', 
     this.hasMorningAllow = false, this.hasNightAllow = false, this.hasMealAllow = false, 
-    this.isAllDay = false, this.hasLunch = false
+    this.isAllDay = false, this.hasLunch = false,
+    this.hasAL = false, this.hasSH = false, this.hasGH = false, this.hasWB = false
   });
   
   Map<String, dynamic> toJson() => {
     'code': code, 'label': label, 'hours': hours, 'ot': ot, 'color': color.value, 
     'start': start, 'end': end, 
     'hasMorningAllow': hasMorningAllow, 'hasNightAllow': hasNightAllow, 'hasMealAllow': hasMealAllow, 
-    'isAllDay': isAllDay, 'hasLunch': hasLunch
+    'isAllDay': isAllDay, 'hasLunch': hasLunch,
+    'hasAL': hasAL, 'hasSH': hasSH, 'hasGH': hasGH, 'hasWB': hasWB
   };
   
   factory ShiftDef.fromJson(Map<String, dynamic> j) => ShiftDef(
     j['code'], j['label'] ?? j['code'], (j['hours'] ?? 8).toDouble(), Color(j['color'] ?? 0xFFFF9800), 
     ot: (j['ot'] ?? 0).toDouble(), start: j['start'] ?? '07:00', end: j['end'] ?? '15:30', 
     hasMorningAllow: j['hasMorningAllow'] ?? false, hasNightAllow: j['hasNightAllow'] ?? false, 
-    hasMealAllow: j['hasMealAllow'] ?? false, isAllDay: j['isAllDay'] ?? false, hasLunch: j['hasLunch'] ?? false
+    hasMealAllow: j['hasMealAllow'] ?? false, isAllDay: j['isAllDay'] ?? false, hasLunch: j['hasLunch'] ?? false,
+    hasAL: j['hasAL'] ?? false, hasSH: j['hasSH'] ?? false, hasGH: j['hasGH'] ?? false, hasWB: j['hasWB'] ?? false
   );
   
   String get detailTime => isAllDay ? '全天 ${hours.toStringAsFixed(1)}h' : '${start}-${end} ${hours.toStringAsFixed(1)}h';
@@ -1609,7 +1614,17 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
     List<DateTime> days = List.generate(weeks * 7, (i) => start.add(Duration(days: i)));
     String selKey = DateFormat('yyyy-MM-dd').format(selectedDay);
     var selDef = roster[selKey] != null ? defs[roster[selKey]] : null;
-    var selLeave = rosterLeave[selKey] != null ? leaveDefs.firstWhere((e) => e.name == rosterLeave[selKey], orElse: () => LeaveDef('', '', Colors.grey)) : null;
+    
+    // 根據班次定義取得假期
+    String? selLeaveCode;
+    if (selDef != null) {
+      if (selDef.hasAL) selLeaveCode = 'AL';
+      else if (selDef.hasSH) selLeaveCode = 'SH';
+      else if (selDef.hasGH) selLeaveCode = 'GH';
+      else if (selDef.hasWB) selLeaveCode = 'WB';
+    }
+    var selLeave = selLeaveCode != null ? leaveDefs.firstWhere((e) => e.name == selLeaveCode, orElse: () => LeaveDef('', '', Colors.grey)) : null;
+    
     String note = rosterNote[selKey] ?? '無';
     String extraType = rosterExtraType[selKey] ?? '';
     DateTime today = DateTime.now();
@@ -1671,8 +1686,17 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                               String k = DateFormat('yyyy-MM-dd').format(day);
                               String? code = roster[k];
                               var def = code != null ? defs[code] : null;
-                              String? leaveCode = rosterLeave[k];
+                              
+                              // 根據班次定義取得假期
+                              String? leaveCode;
+                              if (def != null) {
+                                if (def.hasAL) leaveCode = 'AL';
+                                else if (def.hasSH) leaveCode = 'SH';
+                                else if (def.hasGH) leaveCode = 'GH';
+                                else if (def.hasWB) leaveCode = 'WB';
+                              }
                               var leaveDef = leaveCode != null ? leaveDefs.firstWhere((e) => e.name == leaveCode, orElse: () => LeaveDef('', '', Colors.grey)) : null;
+                              
                               bool sel = k == selKey;
                               bool isToday = day.year == today.year && day.month == today.month && day.day == today.day;
                               bool hasNote = rosterNote.containsKey(k) && rosterNote[k]!.isNotEmpty;
@@ -1805,7 +1829,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
   void showDetail(DateTime day) {
     String k = DateFormat('yyyy-MM-dd').format(day);
     String cur = roster[k] ?? '';
-    String curLeave = rosterLeave[k] ?? '';
     var nc = TextEditingController(text: rosterNote[k] ?? '');
     var otc = TextEditingController(text: (rosterOt[k] ?? 0).toString());
     var exCtrl = TextEditingController(text: (rosterExtra[k] ?? 0).toString());
@@ -1822,17 +1845,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
               const SizedBox(height: 8),
               Wrap(spacing: 8, children: defs.keys.map((c) => ChoiceChip(label: Text(c), selected: cur == c, onSelected: (_) => setM(() => cur = c))).toList()),
               const SizedBox(height: 8),
-              Wrap(spacing: 8, children: [
-                ChoiceChip(label: const Text('無'), selected: curLeave == '', onSelected: (_) => setM(() => curLeave = '')),
-                ...leaveDefs.map((leave) => ChoiceChip(
-                  label: Text('${leave.name} (${leave.fullName})'),
-                  selected: curLeave == leave.name,
-                  onSelected: (_) => setM(() => curLeave = leave.name),
-                  selectedColor: leave.color.withOpacity(0.3),
-                  labelStyle: TextStyle(color: curLeave == leave.name ? leave.color : null, fontWeight: curLeave == leave.name ? FontWeight.bold : null),
-                )).toList(),
-              ]),
-              const SizedBox(height: 8),
+              // 【已刪除 無,GH,SH,AL,WB 的選擇區塊】
               Padding(padding: const EdgeInsets.only(top: 6), child: TextField(controller: nc, minLines: 2, maxLines: 6, keyboardType: TextInputType.multiline, textInputAction: TextInputAction.newline, decoration: const InputDecoration(labelText: '記事 (可換行多行)', alignLabelWithHint: true, isDense: true, border: OutlineInputBorder()))),
               Row(children: [
                 Expanded(child: SizedBox(height: 56, child: TextField(controller: otc, decoration: const InputDecoration(labelText: 'OT時數', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number))),
@@ -1927,11 +1940,9 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                   final noteText = nc.text;
                   final exTypeText = exTypeCtrl.text.trim();
                   final curCode = cur;
-                  final curLeaveCode = curLeave;
                   Navigator.pop(ctx2);
                   setState(() {
                     if (curCode.isNotEmpty) roster[k] = curCode; else roster.remove(k);
-                    if (curLeaveCode.isNotEmpty) rosterLeave[k] = curLeaveCode; else rosterLeave.remove(k);
                     if (noteText.isNotEmpty) rosterNote[k] = noteText; else rosterNote.remove(k);
                     if (exTypeText.isNotEmpty) rosterExtraType[k] = exTypeText; else rosterExtraType.remove(k);
                     if (otVal != null) rosterOt[k] = otVal;
@@ -1970,6 +1981,13 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
     
     bool hasLunch = oldDef?.hasLunch ?? false;
     bool isAllDay = oldDef?.isAllDay ?? false;
+    
+    // 新增4個假期核實變數
+    bool hasAL = oldDef?.hasAL ?? false;
+    bool hasSH = oldDef?.hasSH ?? false;
+    bool hasGH = oldDef?.hasGH ?? false;
+    bool hasWB = oldDef?.hasWB ?? false;
+    
     Color picked = oldDef?.color ?? Colors.orange;
     String oldKey = oldDef?.code ?? '';
     List<Color> palette = [Colors.orange, Colors.blue, Colors.purple, Colors.green, Colors.red, Colors.teal, Colors.brown, Colors.pink, Colors.indigo, Colors.amber, Colors.cyan, Colors.lime, Colors.deepOrange, Colors.lightBlue, Colors.deepPurple, Colors.blueGrey];
@@ -2021,6 +2039,28 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
             const SizedBox(height: 12),
             Column(
               children: [
+                // 【新增】AL SH GH WB 核實格子
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      Checkbox(value: hasAL, onChanged: (v) => setS(() => hasAL = v ?? false)),
+                      const Text('AL', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ]),
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      Checkbox(value: hasSH, onChanged: (v) => setS(() => hasSH = v ?? false)),
+                      const Text('SH', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ]),
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      Checkbox(value: hasGH, onChanged: (v) => setS(() => hasGH = v ?? false)),
+                      const Text('GH', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ]),
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      Checkbox(value: hasWB, onChanged: (v) => setS(() => hasWB = v ?? false)),
+                      const Text('WB', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ]),
+                  ],
+                ),
                 Row(
                   children: [
                     Expanded(
@@ -2090,7 +2130,12 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                     }
                   }
                 }
-                defs[newCode] = ShiftDef(newCode, labelCtrl.text.isEmpty ? newCode : labelCtrl.text, hrs, picked, ot: double.tryParse(otCtrl.text) ?? 0, start: startCtrl.text, end: endCtrl.text, hasMorningAllow: hasMorningAllow, hasNightAllow: hasNightAllow, hasMealAllow: hasMealAllow, isAllDay: isAllDay, hasLunch: hasLunch);
+                defs[newCode] = ShiftDef(newCode, labelCtrl.text.isEmpty ? newCode : labelCtrl.text, hrs, picked, 
+                  ot: double.tryParse(otCtrl.text) ?? 0, start: startCtrl.text, end: endCtrl.text, 
+                  hasMorningAllow: hasMorningAllow, hasNightAllow: hasNightAllow, hasMealAllow: hasMealAllow, 
+                  isAllDay: isAllDay, hasLunch: hasLunch,
+                  hasAL: hasAL, hasSH: hasSH, hasGH: hasGH, hasWB: hasWB // 儲存4個假期設定
+                );
                 for (var entry in roster.entries) {
                   if (entry.value == newCode) affectedDates.add(entry.key);
                 }
@@ -2108,6 +2153,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
   // 假期清單對話框
   Future<void> showLeaveListDialog() async {
     int queryYear = focused.year;
+    int queryMonth = focused.month; // 初始化月份
     bool yearMode = false;
     await showDialog(context: context, builder: (ctx) {
       return StatefulBuilder(builder: (ctx2, setD) {
@@ -2118,33 +2164,28 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
           });
         } else {
           rosterLeave.forEach((k, v) {
-            if (k.startsWith('$queryYear-${focused.month.toString().padLeft(2, '0')}')) leaveEntries.add(MapEntry(k, v));
+            if (k.startsWith('$queryYear-${queryMonth.toString().padLeft(2, '0')}')) leaveEntries.add(MapEntry(k, v));
           });
         }
         leaveEntries.sort((a, b) => a.key.compareTo(b.key));
 
-        Map<String, double> yearTotals = {};
         Map<String, double> yearUsed = {};
-        Map<String, double> yearCarry = {};
-        Map<String, double> yearAdjust = {};
-
-        if (leaveRecords.containsKey('$queryYear')) {
-          var records = leaveRecords['$queryYear']!;
-          records.forEach((key, value) {
-            yearTotals[key] = (value['total'] ?? 0).toDouble();
-            yearCarry[key] = (value['carry'] ?? 0).toDouble();
-            yearAdjust[key] = (value['adjust'] ?? 0).toDouble();
-          });
-        }
         
-        rosterLeave.forEach((k, v) {
+        // 統計邏輯修改：根據班次是否勾選對應假期來計算已用天數
+        roster.forEach((k, v) {
           if (k.startsWith('$queryYear')) {
-            yearUsed[v] = (yearUsed[v] ?? 0) + 1;
+            var d = defs[v];
+            if (d != null) {
+              if (d.hasAL) yearUsed['AL'] = (yearUsed['AL'] ?? 0) + 1;
+              if (d.hasSH) yearUsed['SH'] = (yearUsed['SH'] ?? 0) + 1;
+              if (d.hasGH) yearUsed['GH'] = (yearUsed['GH'] ?? 0) + 1;
+              if (d.hasWB) yearUsed['WB'] = (yearUsed['WB'] ?? 0) + 1;
+            }
           }
         });
 
         return AlertDialog(
-          title: Text(yearMode ? '$queryYear年 全年假期清單' : '$queryYear年${focused.month}月 假期清單'),
+          title: Text(yearMode ? '$queryYear年 全年假期清單' : '$queryYear年$queryMonth月 假期清單'),
           content: SizedBox(width: 500, height: 500, child: Column(children: [
             Row(children: [
               Expanded(child: SegmentedButton<bool>(
@@ -2155,20 +2196,25 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
             ]),
             const SizedBox(height: 8),
             Row(children: [
-              IconButton(icon: const Icon(Icons.chevron_left), onPressed: () { setD(() { queryYear--; }); }),
-              Expanded(child: Text('$queryYear年', textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
-              IconButton(icon: const Icon(Icons.chevron_right), onPressed: () { setD(() { queryYear++; }); }),
+              // 修復左右按鍵邏輯：指定月時切換月份，全年時切換年份
+              IconButton(icon: const Icon(Icons.chevron_left), onPressed: () { setD(() { if (yearMode) { queryYear--; } else { queryMonth--; if (queryMonth < 1) { queryMonth = 12; queryYear--; } } }); }),
+              Expanded(child: Text(yearMode ? '$queryYear年' : '$queryYear年$queryMonth月', textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+              IconButton(icon: const Icon(Icons.chevron_right), onPressed: () { setD(() { if (yearMode) { queryYear++; } else { queryMonth++; if (queryMonth > 12) { queryMonth = 1; queryYear++; } } }); }),
             ]),
             const Divider(),
-            Expanded(child: leaveEntries.isEmpty ? const Center(child: Text('沒有假期記錄')) : ListView.builder(itemCount: leaveEntries.length, itemBuilder: (c, i) {
-              var leave = leaveDefs.firstWhere((e) => e.name == leaveEntries[i].value, orElse: () => LeaveDef('', '', Colors.grey));
-              return ListTile(
-                dense: true,
-                leading: CircleAvatar(backgroundColor: leave.color, child: Text(leave.name, style: const TextStyle(color: Colors.white, fontSize: 10))),
-                title: Text(leaveEntries[i].key, style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text(leave.fullName),
-                onTap: () { Navigator.pop(ctx2); setState(() { selectedDay = DateTime.parse(leaveEntries[i].key); focused = DateTime(selectedDay.year, selectedDay.month, 1); }); showDetail(selectedDay); },
-              );
+            // 列表支援上下拉動
+            Expanded(child: leaveEntries.isEmpty ? const Center(child: Text('沒有假期記錄')) : ListView.builder(
+              physics: const AlwaysScrollableScrollPhysics(),
+              itemCount: leaveEntries.length, 
+              itemBuilder: (c, i) {
+                var leave = leaveDefs.firstWhere((e) => e.name == leaveEntries[i].value, orElse: () => LeaveDef('', '', Colors.grey));
+                return ListTile(
+                  dense: true,
+                  leading: CircleAvatar(backgroundColor: leave.color, child: Text(leave.name, style: const TextStyle(color: Colors.white, fontSize: 10))),
+                  title: Text(leaveEntries[i].key, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text(leave.fullName),
+                  onTap: () { Navigator.pop(ctx2); setState(() { selectedDay = DateTime.parse(leaveEntries[i].key); focused = DateTime(selectedDay.year, selectedDay.month, 1); }); showDetail(selectedDay); },
+                );
             })),
             const Divider(),
             Container(
@@ -2179,36 +2225,19 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                 children: [
                   Text('$queryYear年假期餘額結算', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                   const SizedBox(height: 4),
+                  // 簡化為只顯示 已用：X天
                   ...leaveDefs.map((leave) {
-                    double total = yearTotals[leave.name] ?? 0;
-                    double carry = yearCarry[leave.name] ?? 0;
-                    double adjust = yearAdjust[leave.name] ?? 0;
                     double used = yearUsed[leave.name] ?? 0;
-                    double balance = carry + total + adjust - used;
-                    if (total > 0 || used > 0) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          children: [
-                            Text('${leave.name} (${leave.fullName})', style: TextStyle(fontWeight: FontWeight.bold, color: leave.color)),
-                            const Spacer(),
-                            Text('承上: ${carry.toStringAsFixed(1)} + 總額: ${total.toStringAsFixed(1)} + 微調: ${adjust.toStringAsFixed(1)} - 已用: ${used.toStringAsFixed(1)} = ', style: const TextStyle(fontSize: 11)),
-                            Text('餘額: ${balance.toStringAsFixed(1)}', style: TextStyle(fontWeight: FontWeight.bold, color: balance >= 0 ? Colors.green : Colors.red)),
-                          ],
-                        ),
-                      );
-                    } else {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          children: [
-                            Text('${leave.name} (${leave.fullName})', style: TextStyle(fontWeight: FontWeight.bold, color: leave.color)),
-                            const Spacer(),
-                            Text('已用: ${used.toStringAsFixed(1)} 天', style: const TextStyle(fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                      );
-                    }
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Row(
+                        children: [
+                          Text('${leave.name} (${leave.fullName})', style: TextStyle(fontWeight: FontWeight.bold, color: leave.color)),
+                          const Spacer(),
+                          Text('已用: ${used.toStringAsFixed(1)} 天', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    );
                   }),
                 ],
               ),
@@ -2226,7 +2255,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                 }
                 String? dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇匯出資料夾');
                 if (dir != null) {
-                  String path = '$dir/leaves_${queryYear}${yearMode ? '' : focused.month.toString().padLeft(2, '0')}.csv';
+                  String path = '$dir/leaves_${queryYear}${yearMode ? '' : queryMonth.toString().padLeft(2, '0')}.csv';
                   final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(sb.toString())];
                   await File(path).writeAsBytes(bytes);
                   if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已匯出 $path')));
@@ -2700,7 +2729,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
           return ListTile(
             leading: CircleAvatar(backgroundColor: d.color, child: Text(d.code, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))),
             title: Text('${d.code} - ${d.label}', style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: (d.hasLunch || d.hasMorningAllow || d.hasNightAllow || d.hasMealAllow) ? Text('${d.hasMorningAllow ? '早/夜班 ' : ''}${d.hasNightAllow ? '通宵 ' : ''}${d.hasMealAllow ? '膳食' : ''}${d.hasLunch ? ' 午飯1h' : ''}', style: const TextStyle(fontSize: 11, color: Colors.deepPurple)) : null,
+            subtitle: (d.hasLunch || d.hasMorningAllow || d.hasNightAllow || d.hasMealAllow || d.hasAL || d.hasSH || d.hasGH || d.hasWB) ? Text('${d.hasMorningAllow ? '早/夜班 ' : ''}${d.hasNightAllow ? '通宵 ' : ''}${d.hasMealAllow ? '膳食 ' : ''}${d.hasLunch ? '午飯1h ' : ''}${d.hasAL ? 'AL ' : ''}${d.hasSH ? 'SH ' : ''}${d.hasGH ? 'GH ' : ''}${d.hasWB ? 'WB' : ''}', style: const TextStyle(fontSize: 11, color: Colors.deepPurple)) : null,
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
               IconButton(icon: const Icon(Icons.edit), onPressed: () => editShiftDialog(oldDef: d)),
               IconButton(icon: const Icon(Icons.delete), onPressed: () { setState(() => defs.remove(e.key)); save(); })
@@ -2810,7 +2839,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                 if (mounted) {
                   showDialog(context: context, builder: (ctx) => AlertDialog(
                     title: const Text('診斷結果'),
-                    content: Text('日曆 ID: $calId\n日曆名稱: $_rosterCalendarName\n\n查詢範圍: ${DateFormat('yyyy-MM-dd').format(start)} ~ ${DateFormat('yyyy-MM-dd').format(end)}\n\n查詢到 ${count} 條事件。\n\n${count == 0 ? "⚠️ 如果這裡是 0，但你在 Google 日曆裡看得到記錄，說明權限不足或日曆 ID 錯了。" : "✅ 查詢正常，可以執行全清重建。"}'),
+                    content: Text('日曆 ID: $calId\n日曆名稱: $_rosterCalendarName\n\n查詢範圍: ${DateFormat('yyyy-MM-dd').format(start)} ~ ${DateFormat('yyyy-MM-dd').format(end)}\n\n查詢到 $count 條事件。\n\n${count == 0 ? "⚠️ 如果這裡是 0，但你在 Google 日曆裡看得到記錄，說明權限不足或日曆 ID 錯了。" : "✅ 查詢正常，可以執行全清重建。"}'),
                     actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('關閉'))],
                   ));
                 }
@@ -3305,7 +3334,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
 
                 Text('4. 設定與同步', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
-                Text('• 「假期數據管理」：可設定每年的假期天數、微調、承上，並新增自訂假期。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：刪除 Google 日曆上所有 [RosterPro] 事件並重新建立。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
+                Text('• 「假期數據管理」：可設定每年的假期天數、微調、承上，並新增自訂假期。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：刪除 Google 日曆上所有 [RosterPro] 事件並重新建立。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
                 SizedBox(height: 16),
 
                 Text('5. 常見問題', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
