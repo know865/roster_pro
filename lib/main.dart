@@ -1768,30 +1768,55 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
               Expanded(child: SizedBox(height: 78, child: TextField(controller: otCtrl, decoration: const InputDecoration(labelText: 'OT', border: OutlineInputBorder(), helperText: ' ', helperStyle: TextStyle(fontSize: 10)), keyboardType: TextInputType.number))),
             ]),
             const SizedBox(height: 12),
-            // 【修改】使用 Wrap 自動換行，避免膳食津貼被擠出界外
-            Wrap(
-              spacing: 8.0,
-              runSpacing: 0.0,
+            // 【修改】使用兩行兩列的佈局，確保午飯時間位於膳食津貼右邊，通宵津貼下面
+            Column(
               children: [
-                Row(mainAxisSize: MainAxisSize.min, children: [
-                  Checkbox(value: hasMorningAllow, onChanged: (v) => setS(() => hasMorningAllow = v ?? false)), 
-                  const Text('早/夜班津貼', style: TextStyle(fontWeight: FontWeight.bold)),
-                ]),
-                Row(mainAxisSize: MainAxisSize.min, children: [
-                  Checkbox(value: hasNightAllow, onChanged: (v) => setS(() => hasNightAllow = v ?? false)), 
-                  const Text('通宵津貼', style: TextStyle(fontWeight: FontWeight.bold)),
-                ]),
-                Row(mainAxisSize: MainAxisSize.min, children: [
-                  Checkbox(value: hasMealAllow, onChanged: (v) => setS(() => hasMealAllow = v ?? false)), 
-                  const Text('膳食津貼', style: TextStyle(fontWeight: FontWeight.bold)),
-                ]),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Checkbox(value: hasMorningAllow, onChanged: (v) => setS(() => hasMorningAllow = v ?? false)),
+                          const Flexible(child: Text('早/夜班津貼', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Checkbox(value: hasNightAllow, onChanged: (v) => setS(() => hasNightAllow = v ?? false)),
+                          const Flexible(child: Text('通宵津貼', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Checkbox(value: hasMealAllow, onChanged: (v) => setS(() => hasMealAllow = v ?? false)),
+                          const Flexible(child: Text('膳食津貼', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Checkbox(value: hasLunch, onChanged: (v) { setS(() => hasLunch = v ?? false); calcHours(); }),
+                          const Flexible(child: Text('午飯時間', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
-            const SizedBox(height: 4),
-            Row(children: [
-              Checkbox(value: hasLunch, onChanged: (v) { setS(() => hasLunch = v ?? false); calcHours(); }),
-              const Text('午飯時間', style: TextStyle(fontWeight: FontWeight.bold)),
-            ]),
             const SizedBox(height: 12),
             const Text('自定班次顏色', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
