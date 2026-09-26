@@ -195,6 +195,8 @@ class MainPageState extends State<MainPage> {
   double morningAllowance = 0; 
   double nightAllowance = 0; 
   double mealAllowance = 0; 
+  // 【新增】通宵津貼倍數
+  double nightAllowMultiplier = 0.4;
 
   List<ExtraAllowance> extraAllowances = [];
   double calendarFontSize = 14;
@@ -385,6 +387,7 @@ class MainPageState extends State<MainPage> {
       morningAllowance = sp.getDouble('morningAllow') ?? 0; // 讀取
       nightAllowance = sp.getDouble('nightAllow') ?? 0;     // 讀取
       mealAllowance = sp.getDouble('mealAllow') ?? 0;       // 讀取
+      nightAllowMultiplier = sp.getDouble('nightAllowMultiplier') ?? 0.4; // 讀取通宵倍數
       calendarFontSize = sp.getDouble('calFont') ?? 14;
       googleSyncEnabled = sp.getBool('gSync') ?? false;
       autoSync = sp.getBool('gAuto') ?? false;
@@ -425,6 +428,7 @@ class MainPageState extends State<MainPage> {
     await sp.setDouble('morningAllow', morningAllowance); // 儲存
     await sp.setDouble('nightAllow', nightAllowance);     // 儲存
     await sp.setDouble('mealAllow', mealAllowance);       // 儲存
+    await sp.setDouble('nightAllowMultiplier', nightAllowMultiplier); // 儲存通宵倍數
     sp.setString('extraAllowNewV36', jsonEncode(extraAllowances.map((e) => e.toJson()).toList()));
     sp.setDouble('calFont', calendarFontSize);
     sp.setBool('gSync', googleSyncEnabled);
@@ -930,6 +934,7 @@ class MainPageState extends State<MainPage> {
         if (j['morningAllow'] != null) morningAllowance = (j['morningAllow'] as num).toDouble(); // 還原
         if (j['nightAllow'] != null) nightAllowance = (j['nightAllow'] as num).toDouble();     // 還原
         if (j['mealAllow'] != null) mealAllowance = (j['mealAllow'] as num).toDouble();       // 還原
+        if (j['nightAllowMultiplier'] != null) nightAllowMultiplier = (j['nightAllowMultiplier'] as num).toDouble(); // 還原通宵倍數
       });
       _needsFullSync = true;
       _dirtyDates.clear();
@@ -1090,6 +1095,7 @@ class MainPageState extends State<MainPage> {
         'stdWeek': standardWeeklyHours, 'otRate': overtimeRate,
         'monthlySalary': monthlySalary, 'hourlyDivisor': hourlyDivisor, 'otMultiplier': otMultiplier,
         'morningAllow': morningAllowance, 'nightAllow': nightAllowance, 'mealAllow': mealAllowance, // 加入備份
+        'nightAllowMultiplier': nightAllowMultiplier, // 加入備份
         'extraNewV36': extraAllowances.map((e) => e.toJson()).toList(),
         'calFont': calendarFontSize,
         'savedPatterns': savedPatterns.map((e) => e.toJson()).toList(),
@@ -2339,10 +2345,11 @@ class MainPageState extends State<MainPage> {
               var divisorCtrl = TextEditingController(text: hourlyDivisor.toStringAsFixed(0));
               var multCtrl = TextEditingController(text: otMultiplier.toStringAsFixed(1));
               
-              // 【新增】三個固定津貼金額的 Controller
+              // 【新增】三個固定津貼金額與通宵倍數的 Controller
               var mAllowCtrl = TextEditingController(text: morningAllowance.toStringAsFixed(0));
               var nAllowCtrl = TextEditingController(text: nightAllowance.toStringAsFixed(0));
               var mealCtrl = TextEditingController(text: mealAllowance.toStringAsFixed(0));
+              var nightMultCtrl = TextEditingController(text: nightAllowMultiplier.toString());
               
               showDialog(context: context, builder: (ctx) {
                 return StatefulBuilder(builder: (ctx2, setD) {
@@ -2356,6 +2363,15 @@ class MainPageState extends State<MainPage> {
                     final m = double.tryParse(multCtrl.text) ?? 1.5;
                     return calcHourly() * m;
                   }
+                  // 【新增】計算通宵津貼金額
+                  double calcNightAllow() {
+                    final mult = double.tryParse(nightMultCtrl.text) ?? 0.4;
+                    return calcHourly() * (mult <= 0 ? 0 : mult);
+                  }
+                  
+                  // 每次重建時，將計算出的通宵金額填入唯讀的 nAllowCtrl
+                  nAllowCtrl.text = calcNightAllow().toStringAsFixed(0);
+                  
                   return AlertDialog(
                     title: const Text('標準時薪設定'),
                     content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -2400,15 +2416,31 @@ class MainPageState extends State<MainPage> {
                         ]),
                       ),
                       const SizedBox(height: 16),
-                      // 【新增】三個固定津貼輸入欄
+                      // 【新增】固定津貼設定區域
                       const Text('固定津貼設定', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple)),
                       const SizedBox(height: 8),
                       Row(children: [
                         Expanded(child: TextField(controller: mAllowCtrl, decoration: const InputDecoration(labelText: '早班津貼', prefixText: '\$ ', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (_) => setD(() {}))),
                         const SizedBox(width: 8),
-                        Expanded(child: TextField(controller: nAllowCtrl, decoration: const InputDecoration(labelText: '通宵津貼', prefixText: '\$ ', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (_) => setD(() {}))),
-                        const SizedBox(width: 8),
                         Expanded(child: TextField(controller: mealCtrl, decoration: const InputDecoration(labelText: '飯鐘津貼', prefixText: '\$ ', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (_) => setD(() {}))),
+                      ]),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Expanded(child: TextField(controller: nightMultCtrl, decoration: const InputDecoration(labelText: '通宵倍數 (預設0.4)', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (_) => setD(() {}))),
+                        const SizedBox(width: 8),
+                        Expanded(child: TextField(
+                          controller: nAllowCtrl,
+                          readOnly: true,
+                          enabled: false,
+                          decoration: const InputDecoration(
+                            labelText: '通宵津貼 (自動計算)', 
+                            prefixText: '\$ ', 
+                            isDense: true, 
+                            border: OutlineInputBorder(),
+                            filled: true,
+                            fillColor: Color(0xFFEEEEEE),
+                          ),
+                        )),
                       ]),
                     ])),
                     actions: [
@@ -2418,18 +2450,22 @@ class MainPageState extends State<MainPage> {
                         final d = double.tryParse(divisorCtrl.text) ?? 182;
                         final m = double.tryParse(multCtrl.text) ?? 1.5;
                         final mA = double.tryParse(mAllowCtrl.text) ?? 0;
-                        final nA = double.tryParse(nAllowCtrl.text) ?? 0;
                         final mealA = double.tryParse(mealCtrl.text) ?? 0;
+                        
+                        // 【新增】計算最終的通宵津貼金額
+                        final nMult = double.tryParse(nightMultCtrl.text) ?? 0.4;
+                        final nA = (s / (d > 0 ? d : 182)) * (nMult <= 0 ? 0 : nMult);
+                        
                         setState(() {
                           monthlySalary = s;
                           hourlyDivisor = d > 0 ? d : 182;
                           otMultiplier = m > 0 ? m : 1.5;
                           overtimeRate = (monthlySalary / hourlyDivisor) * otMultiplier;
                           
-                          // 【新增】儲存三個固定津貼
                           morningAllowance = mA;
-                          nightAllowance = nA;
+                          nightAllowance = nA; // 更新通宵津貼
                           mealAllowance = mealA;
+                          nightAllowMultiplier = nMult; // 儲存倍數
                           
                           // 【問題1】標準時薪改變後，立即重新計算所有額外津貼的金額
                           for (var i = 0; i < extraAllowances.length; i++) {
