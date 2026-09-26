@@ -681,9 +681,9 @@ Future<String?> _createCustomCalendarDialog() async {
       return _rosterCalendarId;
     } else {
       if (mounted) {
-        // 修改這裡：使用 result.error 取代 result.errorMessage
+        // device_calendar 4.3.3 的 Result<String> 沒有 error 欄位，改用通用訊息
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('建立失敗：${result.error ?? '未知錯誤'}')),
+          const SnackBar(content: Text('建立日曆失敗，請確認日曆權限或稍後再試')),
         );
       }
       return null;
