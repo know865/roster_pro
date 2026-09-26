@@ -190,7 +190,8 @@ class MainPageState extends State<MainPage> {
   Set<String> _dirtyDates = <String>{};
   bool _needsFullSync = true;
 
-  double widgetFontSize = 60.0;
+  // 【問題1 修復】預設字體大小改為 14.0
+  double widgetFontSize = 14.0; 
   int widgetTextColor = 0xFF000000;
   int widgetBgColor = 0xFFFFFFFF;
   int iconIndex = 0;
@@ -258,6 +259,7 @@ class MainPageState extends State<MainPage> {
         await HomeWidget.saveWidgetData<String>('lunar_json', jsonEncode(lunarMap));
       } catch (e) { await _writeDebugLog('寫入 lunar_json 失敗: $e'); }
       try {
+        // 【問題1 修復】確保寫入的是較小的字體值
         await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
       } catch (e) { await _writeDebugLog('寫入 widgetFontSize 失敗: $e'); }
       try {
@@ -362,7 +364,9 @@ class MainPageState extends State<MainPage> {
       todayBgColor = Color(sp.getInt('todayBg') ?? 0xFFFFF9C4);
       todayBorderColor = Color(sp.getInt('todayBorder') ?? 0xFFFF9800);
       showLunar = sp.getBool('showLunar') ?? true;
-      widgetFontSize = sp.getDouble('widgetFontSize') ?? 60.0;
+      
+      // 【問題1 修復】讀取時如果為空，給定小字體預設值
+      widgetFontSize = sp.getDouble('widgetFontSize') ?? 14.0; 
       widgetTextColor = sp.getInt('widgetTextColor') ?? 0xFF000000;
       iconIndex = sp.getInt('iconIndex') ?? 0;
     });
@@ -2107,7 +2111,8 @@ void showDetail(DateTime day) {
     var stdCtrl = TextEditingController(text: standardWeeklyHours.toString());
     var carryCtrl = TextEditingController(text: carry.toString());
     List<MapEntry<String, ShiftDef>> shiftList = defs.entries.toList();
-    List<MapEntry<String, ShiftDef>> shiftShow = showAllShift ? shiftList : shiftList.take(5).toList();
+    // 【問題2 修改】只顯示前2項
+    List<MapEntry<String, ShiftDef>> shiftShow = showAllShift ? shiftList : shiftList.take(2).toList();
     List<ExtraAllowance> allowShow = showAllExtra ? extraAllowances : extraAllowances.take(5).toList();
     return SafeArea(child: ListView(padding: const EdgeInsets.all(16), children: [
       const Text('排更日曆自定名稱', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -2131,7 +2136,8 @@ void showDetail(DateTime day) {
             ])
           );
         }),
-        if (shiftList.length > 5) TextButton(onPressed: () { setState(() => showAllShift = !showAllShift); }, child: Text(showAllShift ? '收起' : '顯示全部 ${shiftList.length}項')),
+        // 【問題2 修改】大於2項時才顯示展開按鈕
+        if (shiftList.length > 2) TextButton(onPressed: () { setState(() => showAllShift = !showAllShift); }, child: Text(showAllShift ? '收起' : '顯示全部 ${shiftList.length}項')),
         ListTile(leading: const Icon(Icons.add), title: const Text('新增班次'), onTap: () => editShiftDialog()),
       ])),
       const SizedBox(height: 16),
@@ -2685,10 +2691,74 @@ void showDetail(DateTime day) {
       ]))),
       const SizedBox(height: 16),
       const Text('應用資訊', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-      Card(child: ListTile(leading: const Icon(Icons.info_outline), title: const Text('版本號'), subtitle: Text(appVersion))),
+      // 【問題3 修改】加入操作說明書按鈕
+      Card(child: ListTile(
+        leading: const Icon(Icons.info_outline), 
+        title: const Text('版本號'), 
+        subtitle: Text(appVersion),
+        trailing: TextButton.icon(
+          onPressed: showUserManual,
+          icon: const Icon(Icons.help_outline, size: 18),
+          label: const Text('操作說明', style: TextStyle(fontSize: 12)),
+        ),
+      )),
       const SizedBox(height: 16),
     ]));
   }
+
+  // 【問題3 新增】操作說明書彈窗
+  void showUserManual() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.menu_book, color: Colors.deepPurple),
+            SizedBox(width: 8),
+            Text('App 操作說明書'),
+          ],
+        ),
+        content: SizedBox(
+          width: 500,
+          height: 600,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text('1. 月曆主頁', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
+                SizedBox(height: 4),
+                Text('• 點擊日期可查看詳情，長按可直接編輯。\n• 左右滑動可切換月份。\n• 點擊上方「今天」按鈕可快速回到當天。\n• 點擊「相機」圖標可截圖整月排班並分享。\n• 點擊「記事」圖標可查詢所有帶有備註的日期。', style: TextStyle(fontSize: 13)),
+                SizedBox(height: 16),
+
+                Text('2. 模式設定', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
+                SizedBox(height: 4),
+                Text('• 點擊下方色塊選擇班次，再點擊上方格子填入。\n• 「自定行數」可增加排班週期行數。\n• 「自動排班」可選擇已存模式套用到指定日期範圍。\n• 「智能排班」可選擇模式並自動排 4 個週期的班。\n• 可將常用模式「另存為新模式」方便下次使用。', style: TextStyle(fontSize: 13)),
+                SizedBox(height: 16),
+
+                Text('3. 報表與統計', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
+                SizedBox(height: 4),
+                Text('• 顯示本月或全年的工時統計、班次次數。\n• 自動計算 OT 時數與津貼總額。\n• 顯示每週工時與標準工時的差額。\n• 點擊「匯出」可將報表存為 CSV 檔案。', style: TextStyle(fontSize: 13)),
+                SizedBox(height: 16),
+
+                Text('4. 設定與同步', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
+                SizedBox(height: 4),
+                Text('• 「自定班次」：可修改班次名稱、顏色、時間、津貼。\n• 「日曆同步」：開啟後可將排班寫入 Google 日曆。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：刪除 Google 日曆上所有 [RosterPro] 事件並重新建立。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
+                SizedBox(height: 16),
+
+                Text('5. 常見問題', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
+                SizedBox(height: 4),
+                Text('• Q: 小工具剛加入時字體很大？\n  A: 已優化，若仍出現請重新整理小工具。\n\n• Q: 同步失敗？\n  A: 請確認已選擇正確的 Google 日曆，並檢查權限。\n\n• Q: 換手機如何轉移資料？\n  A: 使用「備份」功能將 JSON 檔案匯出，再到新手機「從檔案還原」。', style: TextStyle(fontSize: 13)),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('關閉')),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
