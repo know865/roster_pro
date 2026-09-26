@@ -25,6 +25,84 @@ workflows:
           cp /tmp/pubspec.yaml.bak pubspec.yaml
           ls -la android/build.gradle
 
+      # 【問題4 修復】配置 Android 簽名，確保每次建置簽名一致，達成免卸載覆蓋安裝
+      - name: Configure Android Signing
+        script: |
+          set -e
+          # 從 Codemagic 環境變數寫入 key.properties
+          cat > android/key.properties <<EOF
+          storePassword=$CM_KEYSTORE_PASSWORD
+          keyPassword=$CM_KEY_PASSWORD
+          keyAlias=$CM_KEY_ALIAS
+          storeFile=$CM_KEYSTORE_PATH
+          EOF
+
+          # 重新生成 build.gradle.kts 並載入簽名設定
+          cat > android/app/build.gradle.kts <<'GRADLE_EOF'
+          import java.util.Properties
+          import java.io.FileInputStream
+
+          plugins {
+              id("com.android.application")
+              id("kotlin-android")
+              id("dev.flutter.flutter-gradle-plugin")
+          }
+
+          val keystoreProperties = Properties()
+          val keystorePropertiesFile = rootProject.file("key.properties")
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+          }
+
+          android {
+              namespace = "com.example.roster_pro"
+              compileSdk = 34
+              ndkVersion = "25.1.8937393"
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+
+              defaultConfig {
+                  applicationId = "com.example.roster_pro"
+                  minSdk = 21
+                  targetSdk = 34
+                  versionCode = flutter.versionCode
+                  versionName = flutter.versionName
+              }
+
+              signingConfigs {
+                  create("release") {
+                      if (keystorePropertiesFile.exists()) {
+                          keyAlias = keystoreProperties["keyAlias"] as String
+                          keyPassword = keystoreProperties["keyPassword"] as String
+                          storeFile = file(keystoreProperties["storeFile"] as String)
+                          storePassword = keystoreProperties["storePassword"] as String
+                      }
+                  }
+              }
+
+              buildTypes {
+                  release {
+                      signingConfig = signingConfigs.getByName("release")
+                  }
+                  debug {
+                      // 讓 debug 也用 release 的簽名，這樣就能互相覆蓋
+                      signingConfig = signingConfigs.getByName("release")
+                  }
+              }
+          }
+
+          flutter {
+              source = "../.."
+          }
+          GRADLE_EOF
+
       - name: Add Custom Widget Files
         script: |
           set -e
@@ -350,7 +428,7 @@ workflows:
                   android:gravity="center_vertical"
                   android:layout_marginBottom="4dp">
                   <ImageButton android:id="@+id/btn_prev" android:layout_width="48dp" android:layout_height="48dp" android:src="@android:drawable/ic_media_previous" android:background="?android:attr/selectableItemBackground" android:contentDescription="上個月" android:scaleType="centerInside" />
-                  <TextView android:id="@+id/tv_month_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="2024年1月" android:textAlignment="center" android:textSize="26sp" android:textStyle="bold" android:textColor="#333333" />
+                  <TextView android:id="@+id/tv_month_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="2024年1月" android:textAlignment="center" android:textSize="18sp" android:textStyle="bold" android:textColor="#333333" />
                   <ImageButton android:id="@+id/btn_next" android:layout_width="48dp" android:layout_height="48dp" android:src="@android:drawable/ic_media_next" android:background="?android:attr/selectableItemBackground" android:contentDescription="下個月" android:scaleType="centerInside" />
                   <ImageButton android:id="@+id/btn_refresh" android:layout_width="48dp" android:layout_height="48dp" android:src="@android:drawable/ic_popup_sync" android:background="?android:attr/selectableItemBackground" android:contentDescription="重新整理" android:scaleType="centerInside" />
               </LinearLayout>
@@ -463,7 +541,7 @@ workflows:
 
               override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
                   writeDebugLog(context, "=== onUpdate: ${appWidgetIds.size} widgets ===")
-                  // 延遲 500ms 再渲染，避免初始添加時 PendingIntent 未就緒
+                  // 【問題1 修復】延遲 500ms 再渲染，避免初始添加時 PendingIntent 未就緒
                   Handler(Looper.getMainLooper()).postDelayed({
                       for (appWidgetId in appWidgetIds) {
                           try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (e: Exception) {
@@ -600,10 +678,11 @@ workflows:
                           val month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH))
                           val monthNames = arrayOf("1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月")
 
+                          // 【問題1 修復】讀取字體大小，若為空或異常則預設為 14.0，避免初次加載顯示超大字體
                           var fontSize = getFontSizeSafe(homeWidgetPrefs, "widgetFontSize", 0.0)
                           if (fontSize <= 0.0) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widgetFontSize", 0.0)
                           if (fontSize <= 0.0) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widget_font_size", 0.0)
-                          if (fontSize <= 0.0) fontSize = 55.0
+                          if (fontSize <= 0.0) fontSize = 14.0
 
                           var textColor = getColorSafe(homeWidgetPrefs, "widgetTextColor", 0)
                           if (textColor == 0) textColor = getColorSafe(flutterPrefs, "flutter.widgetTextColor", 0)
@@ -635,7 +714,8 @@ workflows:
 
                           views.setTextViewText(R.id.tv_month_title, "${year}年${monthNames[month]}")
                           views.setTextColor(R.id.tv_month_title, textColor)
-                          views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, (fontSize * 2.0).toFloat())
+                          // 【問題1 修復】標題字體改為 fontSize * 1.5，避免過大
+                          views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, (fontSize * 1.5).toFloat())
 
                           val calendar = Calendar.getInstance()
                           calendar.set(year, month, 1)
