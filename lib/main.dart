@@ -621,18 +621,129 @@ Future<String?> _pickGoogleCalendarDialog() async {
   return null;
 }
 
+// 【新增】建立自訂日曆對話框
+Future<String?> _createCustomCalendarDialog() async {
+  if (!await handleCalendarPermission(silent: false)) return null;
+
+  var nameCtrl = TextEditingController(text: '我的排更專屬日曆');
+  
+  bool? confirm = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('建立自訂日曆'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('請輸入日曆名稱（例如：nnnn）\n建立後將以此獨立日曆作同步之用'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: nameCtrl,
+            decoration: const InputDecoration(
+              labelText: '日曆名稱',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('建立')),
+      ],
+    ),
+  );
+
+  if (confirm != true || nameCtrl.text.trim().isEmpty) return null;
+
+  try {
+    final newCalendar = Calendar(
+      name: nameCtrl.text.trim(),
+      color: 0xFF2196F3,
+      accountName: 'local',
+      accountType: 'LOCAL',
+      isReadOnly: false,
+      isDefault: false,
+    );
+
+    final result = await _calendarPlugin.createCalendar(newCalendar);
+
+    if (result.isSuccess && result.data != null) {
+      _rosterCalendarId = result.data;
+      _rosterCalendarName = nameCtrl.text.trim();
+      
+      var sp = await SharedPreferences.getInstance();
+      await sp.setString('rosterCalId', _rosterCalendarId!);
+      await sp.setString('rosterCalName', _rosterCalendarName);
+      await sp.setString('rosterAccName', 'local');
+      
+      setState(() {});
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已成功建立日曆：$_rosterCalendarName (ID: ${_rosterCalendarId})')),
+        );
+      }
+      return _rosterCalendarId;
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('建立失敗：${result.errorMessage ?? '未知錯誤'}')),
+        );
+      }
+      return null;
+    }
+  } catch (e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('建立日曆時發生錯誤：$e')),
+      );
+    }
+    return null;
+  }
+}
+
+// 【修改】開啟日曆同步時的選擇邏輯
 Future<void> _requestGooglePerm() async {
-  String? id = await _pickGoogleCalendarDialog();
+  int? choice = await showDialog<int>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('選擇日曆來源'),
+      content: const Text('您想要如何設定同步用的日曆？'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, 1),
+          child: const Text('選擇已有日曆'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx, 2),
+          child: const Text('建立自訂日曆'),
+        ),
+      ],
+    ),
+  );
+
+  if (choice == null) return;
+
+  String? id;
+  if (choice == 1) {
+    id = await _pickGoogleCalendarDialog();
+  } else {
+    id = await _createCustomCalendarDialog();
+  }
+
   if (id == null) return;
+  
   bool? ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
-    title: const Text('已選擇真 Google 日曆'),
+    title: const Text('已選擇日曆'),
     content: Text('將寫入：$_rosterCalendarName\nID: $id'),
     actions: [
       TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('稍後')),
       FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('立即同步'))
     ]
   ));
-  if (ok == true) { setState(() => googleSyncEnabled = true); await _syncToGoogle(); save(); }
+  if (ok == true) { 
+    setState(() => googleSyncEnabled = true); 
+    await _syncToGoogle(); 
+    save(); 
+  }
 }
 
 Future<void> _ensureCalendar() async {
@@ -3194,12 +3305,12 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
 
                 Text('4. 設定與同步', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
-                Text('• 「假期數據管理」：可設定每年的假期天數、微調、承上，並新增自訂假期。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼。\n• 「日曆同步」：開啟後可將排班寫入 Google 日曆。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：刪除 Google 日曆上所有 [RosterPro] 事件並重新建立。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
+                Text('• 「假期數據管理」：可設定每年的假期天數、微調、承上，並新增自訂假期。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：刪除 Google 日曆上所有 [RosterPro] 事件並重新建立。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
                 SizedBox(height: 16),
 
                 Text('5. 常見問題', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
-                Text('• Q: 小工具剛加入時字體很大？\n  A: 已優化，若仍出現請重新整理小工具。\n\n• Q: 同步失敗？\n  A: 請確認已選擇正確的 Google 日曆，並檢查權限。\n\n• Q: 換手機如何轉移資料？\n  A: 使用「備份」功能將 JSON 檔案匯出，再到新手機「從檔案還原」。', style: TextStyle(fontSize: 13)),
+                Text('• Q: 小工具剛加入時字體很大？\n  A: 已優化，若仍出現請重新整理小工具。\n\n• Q: 同步失敗？\n  A: 請確認已選擇正確的日曆，並檢查權限。\n\n• Q: 換手機如何轉移資料？\n  A: 使用「備份」功能將 JSON 檔案匯出，再到新手機「從檔案還原」。', style: TextStyle(fontSize: 13)),
               ],
             ),
           ),
