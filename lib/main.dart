@@ -1220,10 +1220,14 @@ Future<void> exportReport() async {
       sb.writeln('津貼, ${allow + ot * overtimeRate}');
       sb.writeln('');
       sb.writeln('每週工時統計:');
-      sb.writeln('週次, 工時, 標準, 差額');
-      for (var e in weeklyHours.entries) {
-        double diff = e.value - standardWeeklyHours;
-        sb.writeln('W${e.key}, ${e.value.toStringAsFixed(1)}h, ${standardWeeklyHours}h, ${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}h');
+      sb.writeln('週次, 工時, 標準, 承上, 差額');
+      List<int> sortedWeeks = weeklyHours.keys.toList()..sort();
+      double lastCarryExport = carry;
+      for (var week in sortedWeeks) {
+        double weekHours = weeklyHours[week]!;
+        double diff = lastCarryExport + weekHours - standardWeeklyHours;
+        sb.writeln('W$week, ${weekHours.toStringAsFixed(1)}h, ${standardWeeklyHours}h, ${lastCarryExport.toStringAsFixed(1)}h, ${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}h');
+        lastCarryExport = diff;
       }
     } else {
       sb.writeln('${focused.year}年 全年統計');
@@ -2107,6 +2111,16 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
     }
     double otAmount = ot * overtimeRate;
     double totalAllow = allow + otAmount;
+    List<Map<String, dynamic>> weeklyStats = [];
+    List<int> sortedWeeks = weeklyHours.keys.toList()..sort();
+    double lastCarry = carry;
+    for (var week in sortedWeeks) {
+      double weekHours = weeklyHours[week]!;
+      double diff = lastCarry + weekHours - standardWeeklyHours;
+      weeklyStats.add({'week': week, 'hours': weekHours, 'carry': lastCarry, 'diff': diff});
+      lastCarry = diff;
+    }
+    double totalDiff = carry + hrs - standardWeeklyHours * weeklyStats.length;
     return SafeArea(child: ListView(padding: const EdgeInsets.all(12), children: [
       Row(children: [
         FilledButton.icon(onPressed: exportReport, icon: const Icon(Icons.ios_share, size: 18), label: const Text('匯出', style: TextStyle(fontSize: 14)), style: FilledButton.styleFrom(backgroundColor: Colors.deepPurple, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8))),
@@ -2144,26 +2158,33 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
           ]));
         }),
         const Divider(),
-        Text('總工時 ${hrs.toStringAsFixed(1)}h / 承上 ${carry}h / 合計 ${(hrs + carry).toStringAsFixed(1)}h'),
+        Text('總工時 ${hrs.toStringAsFixed(1)}h'), // 修改點 1：刪除「承上... / 合計...」
       ]))),
       Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('承上 $carry h + 本月 $hrs h = ${carry + hrs}h', style: const TextStyle(fontWeight: FontWeight.bold)),
-        const Divider(),
+        // 修改點 2 & 3：刪除「承上... + 本月...」並將「每週工時統計」移到頂部
         Text(isYearReport ? '每週工時統計 全年' : '每週工時統計 (標準 & 承上) 週數', style: const TextStyle(fontWeight: FontWeight.bold)),
-        ...weeklyHours.entries.map((e) {
-          double avgCarry = weeklyHours.isEmpty ? 0 : carry / weeklyHours.length;
-          double adjusted = e.value + avgCarry;
-          double diff = adjusted - standardWeeklyHours;
+        const Divider(),
+        ...weeklyStats.map((stat) {
+          int week = stat['week'];
+          double weekHours = stat['hours'];
+          double displayCarry = stat['carry'];
+          double diff = stat['diff'];
           return Padding(padding: const EdgeInsets.symmetric(vertical: 3), child: Row(children: [
-            Text('W${e.key}', style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text('W$week', style: const TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(width: 8),
-            Text('${e.value.toStringAsFixed(1)}h +承上${avgCarry.toStringAsFixed(1)} = ${adjusted.toStringAsFixed(1)}h'),
+            Text('${weekHours.toStringAsFixed(1)}h + 承上${displayCarry.toStringAsFixed(1)} = ${diff.toStringAsFixed(1)}h'),
             const Spacer(),
             Text('${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}h', style: TextStyle(color: diff > 0 ? Colors.green : Colors.red, fontWeight: FontWeight.bold)),
           ]));
         }),
         const Divider(),
-        Text('標準 ${standardWeeklyHours}h/週 | 總差額 ${(carry + hrs - standardWeeklyHours * weeklyHours.length).toStringAsFixed(1)}h'),
+        // 修改點 4：總差額文字顏色正數綠色，負數紅色
+        Row(
+          children: [
+            Text('標準 ${standardWeeklyHours}h/週 | 總差額 ', style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text('${totalDiff >= 0 ? '+' : ''}${totalDiff.toStringAsFixed(1)}h', style: TextStyle(fontWeight: FontWeight.bold, color: totalDiff > 0 ? Colors.green : (totalDiff < 0 ? Colors.red : Colors.black))),
+          ],
+        ),
       ]))),
       Card(color: const Color(0xFFE8F5E9), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Text('津貼類別 (含自定義類別)', style: TextStyle(fontWeight: FontWeight.bold)),
