@@ -28,6 +28,30 @@ void main() {
   runApp(const RosterApp());
 }
 
+// ------------------- 新增：假期定義類別 -------------------
+class LeaveDef {
+  String name;
+  String fullName;
+  Color color;
+  bool isCustom;
+
+  LeaveDef(this.name, this.fullName, this.color, {this.isCustom = false});
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'fullName': fullName,
+    'color': color.value,
+    'isCustom': isCustom,
+  };
+
+  factory LeaveDef.fromJson(Map<String, dynamic> j) => LeaveDef(
+    j['name'],
+    j['fullName'] ?? j['name'],
+    Color(j['color'] ?? 0xFF9C27B0),
+    isCustom: j['isCustom'] ?? false,
+  );
+}
+
 class ShiftDef {
   String code; String label; double hours; double ot; Color color; String start; String end; 
   bool hasMorningAllow; bool hasNightAllow; bool hasMealAllow; bool isAllDay; bool hasLunch;
@@ -160,6 +184,18 @@ class MainPageState extends State<MainPage> {
   Map<String, double> rosterOt = {};
   Map<String, double> rosterExtra = {};
   Map<String, double> rosterExtraHrs = {};
+
+  // ------------------- 新增：假期相關數據 -------------------
+  List<LeaveDef> leaveDefs = [
+    LeaveDef('AL', 'Annual Leave', Colors.teal),
+    LeaveDef('GH', 'General Holiday', Colors.indigo),
+    LeaveDef('SH', 'Statutory Holiday', Colors.deepOrange),
+    LeaveDef('WB', 'Well-being Leave', Colors.lightBlue),
+  ];
+  Map<String, Map<String, dynamic>> leaveRecords = {}; // 格式: { "2026": { "AL": {"total": 10, "adjust": 2, "carry": 5} } }
+  Map<String, String> rosterLeave = {}; // 格式: { "2026-01-01": "AL" }
+  // ------------------------------------------------------
+
   Map<String, ShiftDef> defs = {
     '早': ShiftDef('早', '早更', 8, Colors.orange, start: '07:00', end: '15:30', hasMorningAllow: true),
     '中': ShiftDef('中', '中更', 8, Colors.blue, start: '14:00', end: '22:00'),
@@ -359,6 +395,30 @@ class MainPageState extends State<MainPage> {
     var spSaved = sp.getString('savedPatternsV40'); if (spSaved != null) { try { savedPatterns = (jsonDecode(spSaved) as List).map((e) => SavedPattern.fromJson(Map<String, dynamic>.from(e))).toList(); } catch (_) {} }
     var evMap = sp.getString('googleEventIdMap'); if (evMap != null) { try { _googleEventIdMap = Map<String, String>.from(jsonDecode(evMap)); } catch (_) {} }
     var mh = sp.getString('manualHolidays'); if (mh != null) { try { manualHolidays = Map<String, String>.from(jsonDecode(mh)); } catch (_) {} }
+
+    // ------------------- 新增：加載假期數據 -------------------
+    var ld = sp.getString('leaveDefs'); 
+    if (ld != null) { 
+      try { 
+        leaveDefs = (jsonDecode(ld) as List).map((e) => LeaveDef.fromJson(Map<String, dynamic>.from(e))).toList(); 
+      } catch (_) {} 
+    }
+    var lr = sp.getString('leaveRecords'); 
+    if (lr != null) { 
+      try { 
+        leaveRecords = Map<String, Map<String, dynamic>>.from(
+          (jsonDecode(lr) as Map).map((k, v) => MapEntry(k as String, Map<String, dynamic>.from(v as Map)))
+        ); 
+      } catch (_) {} 
+    }
+    var rl = sp.getString('rosterLeave'); 
+    if (rl != null) { 
+      try { 
+        rosterLeave = Map<String, String>.from(jsonDecode(rl)); 
+      } catch (_) {} 
+    }
+    // ------------------------------------------------------
+
     var ddList = sp.getStringList('dirtyDates');
     if (ddList != null) _dirtyDates = ddList.toSet();
     _needsFullSync = sp.getBool('needsFullSync') ?? true;
@@ -422,6 +482,13 @@ class MainPageState extends State<MainPage> {
     sp.setString('holidayRegion', holidayRegion);
     sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
     sp.setString('manualHolidays', jsonEncode(manualHolidays));
+
+    // ------------------- 新增：儲存假期數據 -------------------
+    await sp.setString('leaveDefs', jsonEncode(leaveDefs.map((e) => e.toJson()).toList()));
+    await sp.setString('leaveRecords', jsonEncode(leaveRecords));
+    await sp.setString('rosterLeave', jsonEncode(rosterLeave));
+    // ------------------------------------------------------
+
     await sp.setStringList('dirtyDates', _dirtyDates.toList());
     await sp.setBool('needsFullSync', _needsFullSync);
     if (_rosterCalendarId != null) sp.setString('rosterCalId', _rosterCalendarId!);
@@ -910,6 +977,10 @@ Future<void> restoreFromFile(String path) async {
       if (j['nightAllow'] != null) nightAllowance = (j['nightAllow'] as num).toDouble();
       if (j['mealAllow'] != null) mealAllowance = (j['mealAllow'] as num).toDouble();
       if (j['nightAllowMultiplier'] != null) nightAllowMultiplier = (j['nightAllowMultiplier'] as num).toDouble();
+      // 還原假期數據
+      if (j['leaveDefs'] != null) leaveDefs = (j['leaveDefs'] as List).map((e) => LeaveDef.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+      if (j['leaveRecords'] != null) leaveRecords = Map<String, Map<String, dynamic>>.from((j['leaveRecords'] as Map).map((k, v) => MapEntry(k as String, Map<String, dynamic>.from(v as Map))));
+      if (j['rosterLeave'] != null) rosterLeave = Map<String, String>.from(j['rosterLeave']);
     });
     _needsFullSync = true;
     _dirtyDates.clear();
@@ -1082,6 +1153,10 @@ Future<void> backupAnywhere() async {
       'showLunar': showLunar, 'widgetFontSize': widgetFontSize,
       'widgetTextColor': widgetTextColor,
       'iconIndex': iconIndex,
+      // 加入假期數據
+      'leaveDefs': leaveDefs.map((e) => e.toJson()).toList(),
+      'leaveRecords': leaveRecords,
+      'rosterLeave': rosterLeave,
     };
     var f = File('$dirPath/$fileName');
     await f.writeAsString(jsonEncode(backup));
@@ -1389,6 +1464,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
     List<DateTime> days = List.generate(weeks * 7, (i) => start.add(Duration(days: i)));
     String selKey = DateFormat('yyyy-MM-dd').format(selectedDay);
     var selDef = roster[selKey] != null ? defs[roster[selKey]] : null;
+    var selLeave = rosterLeave[selKey] != null ? leaveDefs.firstWhere((e) => e.name == rosterLeave[selKey], orElse: () => LeaveDef('', '', Colors.grey)) : null;
     String note = rosterNote[selKey] ?? '無';
     String extraType = rosterExtraType[selKey] ?? '';
     DateTime today = DateTime.now();
@@ -1403,6 +1479,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
             ]))),
             const Spacer(),
             IconButton(icon: const Icon(Icons.list_alt), tooltip: '記事查詢', onPressed: showNotesListDialog, visualDensity: VisualDensity.compact),
+            IconButton(icon: const Icon(Icons.beach_access), tooltip: '假期清單', onPressed: showLeaveListDialog, visualDensity: VisualDensity.compact), // 【新增】假期清單按鈕
             IconButton(icon: const Icon(Icons.camera_alt_outlined), tooltip: '整月截圖分享', onPressed: shareScreenshotDialog, visualDensity: VisualDensity.compact),
             IconButton(icon: const Icon(Icons.chevron_left), onPressed: _goToPrevMonth, visualDensity: VisualDensity.compact),
             IconButton(icon: const Icon(Icons.chevron_right), onPressed: _goToNextMonth, visualDensity: VisualDensity.compact),
@@ -1449,6 +1526,8 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                               String k = DateFormat('yyyy-MM-dd').format(day);
                               String? code = roster[k];
                               var def = code != null ? defs[code] : null;
+                              String? leaveCode = rosterLeave[k];
+                              var leaveDef = leaveCode != null ? leaveDefs.firstWhere((e) => e.name == leaveCode, orElse: () => LeaveDef('', '', Colors.grey)) : null;
                               bool sel = k == selKey;
                               bool isToday = day.year == today.year && day.month == today.month && day.day == today.day;
                               bool hasNote = rosterNote.containsKey(k) && rosterNote[k]!.isNotEmpty;
@@ -1473,6 +1552,8 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                                     FittedBox(fit: BoxFit.scaleDown, child: Text('${day.day}', style: TextStyle(fontWeight: isToday ? FontWeight.w900 : FontWeight.bold, fontSize: calendarFontSize, color: inM ? Colors.black : Colors.grey))),
                                     if (code != null)
                                       FittedBox(fit: BoxFit.scaleDown, child: Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: def?.color ?? Colors.orange, borderRadius: BorderRadius.circular(4)), child: Text(code, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold))))
+                                    else if (leaveDef != null)
+                                      FittedBox(fit: BoxFit.scaleDown, child: Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: leaveDef.color, borderRadius: BorderRadius.circular(4)), child: Text(leaveDef.name, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold))))
                                     else const SizedBox(height: 14),
                                     if (showLunar && lunarText.isNotEmpty && inM)
                                       FittedBox(fit: BoxFit.scaleDown, child: Text(lunarText, style: TextStyle(fontSize: 9, color: Colors.grey[700])))
@@ -1506,6 +1587,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                 Expanded(child: Text('${roster[selKey] ?? '未排班'}${isHoliday(selectedDay) ? ' [${holidayName(selectedDay)}]' : ''} ${extraType.isNotEmpty ? '[$extraType]' : ''}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                 const SizedBox(width: 6),
                 if (selDef != null) Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: selDef.color, borderRadius: BorderRadius.circular(8)), child: Text(selDef.code, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))),
+                if (selLeave != null) Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: selLeave.color, borderRadius: BorderRadius.circular(8)), child: Text(selLeave.name, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))),
                 const SizedBox(width: 6),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
@@ -1562,6 +1644,10 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                   Text('5. OT：${(rosterOt[selKey] ?? 0).toStringAsFixed(1)}h | 額外工時：${(rosterExtraHrs[selKey] ?? 0).toStringAsFixed(1)}h', style: const TextStyle(fontSize: 12)),
                   const SizedBox(height: 4),
                   Text('6. 記事：${note.isEmpty ? '無' : note}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.deepPurple)),
+                  if (selLeave != null) ...[
+                    const SizedBox(height: 4),
+                    Text('7. 假期：${selLeave.fullName} (${selLeave.name})', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: selLeave.color)),
+                  ]
                 ])
               )
             ])
@@ -1574,6 +1660,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
   void showDetail(DateTime day) {
     String k = DateFormat('yyyy-MM-dd').format(day);
     String cur = roster[k] ?? '';
+    String curLeave = rosterLeave[k] ?? '';
     var nc = TextEditingController(text: rosterNote[k] ?? '');
     var otc = TextEditingController(text: (rosterOt[k] ?? 0).toString());
     var exCtrl = TextEditingController(text: (rosterExtra[k] ?? 0).toString());
@@ -1587,7 +1674,22 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
             padding: const EdgeInsets.all(16),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               Text('${DateFormat('yyyy-MM-dd EEE').format(day)} ${isHoliday(day) ? ' [${holidayName(day)}]' : ''}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              // 選擇班次
               Wrap(spacing: 8, children: defs.keys.map((c) => ChoiceChip(label: Text(c), selected: cur == c, onSelected: (_) => setM(() => cur = c))).toList()),
+              const SizedBox(height: 8),
+              // 選擇假期
+              Wrap(spacing: 8, children: [
+                ChoiceChip(label: const Text('無'), selected: curLeave == '', onSelected: (_) => setM(() => curLeave = '')),
+                ...leaveDefs.map((leave) => ChoiceChip(
+                  label: Text('${leave.name} (${leave.fullName})'),
+                  selected: curLeave == leave.name,
+                  onSelected: (_) => setM(() => curLeave = leave.name),
+                  selectedColor: leave.color.withOpacity(0.3),
+                  labelStyle: TextStyle(color: curLeave == leave.name ? leave.color : null, fontWeight: curLeave == leave.name ? FontWeight.bold : null),
+                )).toList(),
+              ]),
+              const SizedBox(height: 8),
               Padding(padding: const EdgeInsets.only(top: 6), child: TextField(controller: nc, minLines: 2, maxLines: 6, keyboardType: TextInputType.multiline, textInputAction: TextInputAction.newline, decoration: const InputDecoration(labelText: '記事 (可換行多行)', alignLabelWithHint: true, isDense: true, border: OutlineInputBorder()))),
               Row(children: [
                 Expanded(child: SizedBox(height: 56, child: TextField(controller: otc, decoration: const InputDecoration(labelText: 'OT時數', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number))),
@@ -1665,7 +1767,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                   final eventId = _googleEventIdMap[k];
                   final calId = _rosterCalendarId;
                   Navigator.pop(ctx2);
-                  setState(() { roster.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); rosterExtraType.remove(k); });
+                  setState(() { roster.remove(k); rosterLeave.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); rosterExtraType.remove(k); });
                   if (eventId != null && calId != null) {
                     try { await _calendarPlugin.deleteEvent(calId, eventId); } catch (_) {}
                     _googleEventIdMap.remove(k);
@@ -1682,9 +1784,11 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                   final noteText = nc.text;
                   final exTypeText = exTypeCtrl.text.trim();
                   final curCode = cur;
+                  final curLeaveCode = curLeave;
                   Navigator.pop(ctx2);
                   setState(() {
-                    if (curCode.isNotEmpty) roster[k] = curCode;
+                    if (curCode.isNotEmpty) roster[k] = curCode; else roster.remove(k);
+                    if (curLeaveCode.isNotEmpty) rosterLeave[k] = curLeaveCode; else rosterLeave.remove(k);
                     if (noteText.isNotEmpty) rosterNote[k] = noteText; else rosterNote.remove(k);
                     if (exTypeText.isNotEmpty) rosterExtraType[k] = exTypeText; else rosterExtraType.remove(k);
                     if (otVal != null) rosterOt[k] = otVal;
@@ -1772,7 +1876,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
               Expanded(child: SizedBox(height: 78, child: TextField(controller: otCtrl, decoration: const InputDecoration(labelText: 'OT', border: OutlineInputBorder(), helperText: ' ', helperStyle: TextStyle(fontSize: 10)), keyboardType: TextInputType.number))),
             ]),
             const SizedBox(height: 12),
-            // 【修改】使用兩行兩列的佈局，確保午飯時間位於膳食津貼右邊，通宵津貼下面
             Column(
               children: [
                 Row(
@@ -1859,39 +1962,275 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
     });
   }
 
-  Future<void> pickRangeAndApply() async {
-    List<List<String>> chosenPattern = pattern;
-    if (savedPatterns.isNotEmpty) {
-      int? selected = await showDialog<int>(context: context, builder: (ctx) {
+  // 【新增】假期清單對話框
+  Future<void> showLeaveListDialog() async {
+    int queryYear = focused.year;
+    bool yearMode = false;
+    await showDialog(context: context, builder: (ctx) {
+      return StatefulBuilder(builder: (ctx2, setD) {
+        List<MapEntry<String, String>> leaveEntries = [];
+        if (yearMode) {
+          rosterLeave.forEach((k, v) {
+            if (k.startsWith('$queryYear')) leaveEntries.add(MapEntry(k, v));
+          });
+        } else {
+          rosterLeave.forEach((k, v) {
+            if (k.startsWith('$queryYear-${focused.month.toString().padLeft(2, '0')}')) leaveEntries.add(MapEntry(k, v));
+          });
+        }
+        leaveEntries.sort((a, b) => a.key.compareTo(b.key));
+
+        // 計算該年假期餘額
+        Map<String, double> yearTotals = {};
+        Map<String, double> yearUsed = {};
+        Map<String, double> yearCarry = {};
+        Map<String, double> yearAdjust = {};
+
+        if (leaveRecords.containsKey('$queryYear')) {
+          var records = leaveRecords['$queryYear']!;
+          records.forEach((key, value) {
+            yearTotals[key] = (value['total'] ?? 0).toDouble();
+            yearCarry[key] = (value['carry'] ?? 0).toDouble();
+            yearAdjust[key] = (value['adjust'] ?? 0).toDouble();
+          });
+        }
+        
+        // 計算已使用天數
+        rosterLeave.forEach((k, v) {
+          if (k.startsWith('$queryYear')) {
+            yearUsed[v] = (yearUsed[v] ?? 0) + 1;
+          }
+        });
+
         return AlertDialog(
-          title: const Text('選擇排更模式'),
-          content: SizedBox(width: 300, child: ListView(shrinkWrap: true, children: [
-            ListTile(title: const Text('當前版面'), subtitle: Text('${pattern.length}行'), leading: const Icon(Icons.edit), onTap: () => Navigator.pop(ctx, -1)),
+          title: Text(yearMode ? '$queryYear年 全年假期清單' : '$queryYear年${focused.month}月 假期清單'),
+          content: SizedBox(width: 500, height: 500, child: Column(children: [
+            Row(children: [
+              Expanded(child: SegmentedButton<bool>(
+                segments: const [ButtonSegment(value: false, label: Text('指定月')), ButtonSegment(value: true, label: Text('全年'))],
+                selected: {yearMode},
+                onSelectionChanged: (s) => setD(() => yearMode = s.first),
+              )),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
+              IconButton(icon: const Icon(Icons.chevron_left), onPressed: () { setD(() { queryYear--; }); }),
+              Expanded(child: Text('$queryYear年', textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+              IconButton(icon: const Icon(Icons.chevron_right), onPressed: () { setD(() { queryYear++; }); }),
+            ]),
             const Divider(),
-            ...savedPatterns.asMap().entries.map((en) => ListTile(title: Text(en.value.name), subtitle: Text('${en.value.data.length}行'), leading: const Icon(Icons.folder), onTap: () => Navigator.pop(ctx, en.key))),
+            Expanded(child: leaveEntries.isEmpty ? const Center(child: Text('沒有假期記錄')) : ListView.builder(itemCount: leaveEntries.length, itemBuilder: (c, i) {
+              var leave = leaveDefs.firstWhere((e) => e.name == leaveEntries[i].value, orElse: () => LeaveDef('', '', Colors.grey));
+              return ListTile(
+                dense: true,
+                leading: CircleAvatar(backgroundColor: leave.color, child: Text(leave.name, style: const TextStyle(color: Colors.white, fontSize: 10))),
+                title: Text(leaveEntries[i].key, style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text(leave.fullName),
+                onTap: () { Navigator.pop(ctx2); setState(() { selectedDay = DateTime.parse(leaveEntries[i].key); focused = DateTime(selectedDay.year, selectedDay.month, 1); }); showDetail(selectedDay); },
+              );
+            })),
+            const Divider(),
+            // 顯示餘額結算
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('$queryYear年假期餘額結算', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  const SizedBox(height: 4),
+                  ...leaveDefs.map((leave) {
+                    double total = yearTotals[leave.name] ?? 0;
+                    double carry = yearCarry[leave.name] ?? 0;
+                    double adjust = yearAdjust[leave.name] ?? 0;
+                    double used = yearUsed[leave.name] ?? 0;
+                    double balance = carry + total + adjust - used;
+                    if (total > 0 || used > 0) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          children: [
+                            Text('${leave.name} (${leave.fullName})', style: TextStyle(fontWeight: FontWeight.bold, color: leave.color)),
+                            const Spacer(),
+                            Text('承上: ${carry.toStringAsFixed(1)} + 總額: ${total.toStringAsFixed(1)} + 微調: ${adjust.toStringAsFixed(1)} - 已用: ${used.toStringAsFixed(1)} = ', style: const TextStyle(fontSize: 11)),
+                            Text('餘額: ${balance.toStringAsFixed(1)}', style: TextStyle(fontWeight: FontWeight.bold, color: balance >= 0 ? Colors.green : Colors.red)),
+                          ],
+                        ),
+                      );
+                    } else {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          children: [
+                            Text('${leave.name} (${leave.fullName})', style: TextStyle(fontWeight: FontWeight.bold, color: leave.color)),
+                            const Spacer(),
+                            Text('已用: ${used.toStringAsFixed(1)} 天', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      );
+                    }
+                  }),
+                ],
+              ),
+            ),
           ])),
-          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消'))]
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx2), child: const Text('關閉')),
+            FilledButton(onPressed: () async {
+              try {
+                StringBuffer sb = StringBuffer();
+                sb.writeln('日期,假期代號,假期名稱');
+                for (var n in leaveEntries) {
+                  var leave = leaveDefs.firstWhere((e) => e.name == n.value, orElse: () => LeaveDef('', '', Colors.grey));
+                  sb.writeln('${n.key},${n.value},${leave.fullName}');
+                }
+                String? dir = await FilePicker.platform.getDirectoryPath(dialogTitle: '選擇匯出資料夾');
+                if (dir != null) {
+                  String path = '$dir/leaves_${queryYear}${yearMode ? '' : focused.month.toString().padLeft(2, '0')}.csv';
+                  final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(sb.toString())];
+                  await File(path).writeAsBytes(bytes);
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已匯出 $path')));
+                }
+              } catch (_) {}
+            }, child: const Text('匯出CSV')),
+          ]
         );
       });
-      if (selected == null) return;
-      if (selected == -1) chosenPattern = pattern; else chosenPattern = savedPatterns[selected].data.map((r) => List<String>.from(r)).toList();
-    }
-    DateTimeRange? p = await showDateRangePicker(context: context, firstDate: DateTime(2023), lastDate: DateTime(DateTime.now().year + 30, 12, 31));
-    if (p == null) return;
-    if (!await _confirmAction()) return;
-    var flat = chosenPattern.expand((e) => e).toList();
-    setState(() {
-      int i = 0;
-      for (DateTime d = p.start; !d.isAfter(p.end); d = d.add(const Duration(days: 1))) {
-        String dateKey = DateFormat('yyyy-MM-dd').format(d);
-        roster[dateKey] = flat[i % flat.length];
-        _markDirty(dateKey);
-        i++;
-      }
     });
-    await save();
-    setState(() => tab = 0);
-    await _syncNow();
+  }
+
+  // 【新增】假期數據管理對話框
+  void showLeaveManagementDialog() {
+    int selectedYear = DateTime.now().year;
+    showDialog(context: context, builder: (ctx) {
+      return StatefulBuilder(builder: (ctx2, setD) {
+        // 確保該年有數據
+        if (!leaveRecords.containsKey('$selectedYear')) {
+          leaveRecords['$selectedYear'] = {};
+        }
+        var yearRecords = leaveRecords['$selectedYear']!;
+        // 確保每個假期都有默認記錄
+        for (var def in leaveDefs) {
+          if (!yearRecords.containsKey(def.name)) {
+            yearRecords[def.name] = {'total': 0.0, 'adjust': 0.0, 'carry': 0.0};
+          }
+        }
+
+        return AlertDialog(
+          title: Text('假期數據管理 - $selectedYear年'),
+          content: SizedBox(
+            width: 600,
+            height: 500,
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    IconButton(icon: const Icon(Icons.chevron_left), onPressed: () => setD(() => selectedYear--)),
+                    Expanded(child: Text('$selectedYear年', textAlign: TextAlign.center, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+                    IconButton(icon: const Icon(Icons.chevron_right), onPressed: () => setD(() => selectedYear++)),
+                  ],
+                ),
+                const Divider(),
+                Expanded(
+                  child: ListView(
+                    children: [
+                      // 標準假期
+                      ...leaveDefs.where((e) => !e.isCustom).map((leave) {
+                        var record = yearRecords[leave.name]!;
+                        var totalCtrl = TextEditingController(text: (record['total'] ?? 0.0).toString());
+                        var adjustCtrl = TextEditingController(text: (record['adjust'] ?? 0.0).toString());
+                        var carryCtrl = TextEditingController(text: (record['carry'] ?? 0.0).toString());
+
+                        return Card(
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          child: Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('${leave.name} (${leave.fullName})', style: TextStyle(fontWeight: FontWeight.bold, color: leave.color)),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Expanded(child: TextField(controller: totalCtrl, decoration: const InputDecoration(labelText: '天數', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (v) => record['total'] = double.tryParse(v) ?? 0.0)),
+                                    const SizedBox(width: 8),
+                                    Expanded(child: TextField(controller: adjustCtrl, decoration: const InputDecoration(labelText: '微調 +/-', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (v) => record['adjust'] = double.tryParse(v) ?? 0.0)),
+                                    const SizedBox(width: 8),
+                                    Expanded(child: TextField(controller: carryCtrl, decoration: const InputDecoration(labelText: '承上', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (v) => record['carry'] = double.tryParse(v) ?? 0.0)),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
+                      // 自訂假期
+                      const SizedBox(height: 16),
+                      const Text('自訂假期', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      ...leaveDefs.where((e) => e.isCustom).map((leave) {
+                        var record = yearRecords[leave.name]!;
+                        var totalCtrl = TextEditingController(text: (record['total'] ?? 0.0).toString());
+                        var adjustCtrl = TextEditingController(text: (record['adjust'] ?? 0.0).toString());
+                        var nameCtrl = TextEditingController(text: leave.name);
+                        var fullNameCtrl = TextEditingController(text: leave.fullName);
+
+                        return Card(
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          child: Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(child: TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: '代號', isDense: true, border: OutlineInputBorder()), onChanged: (v) { leave.name = v; })),
+                                    const SizedBox(width: 8),
+                                    Expanded(child: TextField(controller: fullNameCtrl, decoration: const InputDecoration(labelText: '全名', isDense: true, border: OutlineInputBorder()), onChanged: (v) { leave.fullName = v; })),
+                                    IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () { setD(() { leaveDefs.remove(leave); }); }),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Expanded(child: TextField(controller: totalCtrl, decoration: const InputDecoration(labelText: '天數', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (v) => record['total'] = double.tryParse(v) ?? 0.0)),
+                                    const SizedBox(width: 8),
+                                    Expanded(child: TextField(controller: adjustCtrl, decoration: const InputDecoration(labelText: '微調 +/-', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (v) => record['adjust'] = double.tryParse(v) ?? 0.0)),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
+                      // 新增自訂假期按鈕
+                      TextButton.icon(
+                        icon: const Icon(Icons.add),
+                        label: const Text('新增自訂假期'),
+                        onPressed: () {
+                          setD(() {
+                            var newDef = LeaveDef('Custom', '自訂假期', Colors.purple, isCustom: true);
+                            leaveDefs.add(newDef);
+                            yearRecords[newDef.name] = {'total': 0.0, 'adjust': 0.0, 'carry': 0.0};
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx2), child: const Text('關閉')),
+            FilledButton(onPressed: () async {
+              await save();
+              if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('假期數據已儲存')));
+              Navigator.pop(ctx2);
+            }, child: const Text('儲存')),
+          ],
+        );
+      });
+    });
   }
 
   Widget patternTab() {
@@ -2158,10 +2497,9 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
           ]));
         }),
         const Divider(),
-        Text('總工時 ${hrs.toStringAsFixed(1)}h'), // 修改點 1：刪除「承上... / 合計...」
+        Text('總工時 ${hrs.toStringAsFixed(1)}h'),
       ]))),
       Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // 修改點 2 & 3：刪除「承上... + 本月...」並將「每週工時統計」移到頂部
         Text(isYearReport ? '每週工時統計 全年' : '每週工時統計 (標準 & 承上) 週數', style: const TextStyle(fontWeight: FontWeight.bold)),
         const Divider(),
         ...weeklyStats.map((stat) {
@@ -2178,7 +2516,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
           ]));
         }),
         const Divider(),
-        // 修改點 4：總差額文字顏色正數綠色，負數紅色
         Row(
           children: [
             Text('標準 ${standardWeeklyHours}h/週 | 總差額 ', style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -2210,6 +2547,15 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
         TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: '日曆名稱', border: OutlineInputBorder())),
         const SizedBox(height: 8),
         SizedBox(width: double.infinity, child: FilledButton(onPressed: () { setState(() => customName = nameCtrl.text.trim().isEmpty ? '我的排更' : nameCtrl.text.trim()); save(); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('日曆名已改為 $customName'))); }, child: const Text('保存日曆名稱')))
+      ]))),
+      const SizedBox(height: 16),
+      const Text('假期數據管理', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
+        SizedBox(width: double.infinity, child: FilledButton.icon(
+          icon: const Icon(Icons.beach_access),
+          label: const Text('開啟假期數據管理'),
+          onPressed: showLeaveManagementDialog,
+        )),
       ]))),
       const SizedBox(height: 16),
       const Text('自定班次', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -2809,7 +3155,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
               children: const [
                 Text('1. 月曆主頁', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
-                Text('• 點擊日期可查看詳情，長按可直接編輯。\n• 左右滑動可切換月份。\n• 點擊上方「今天」按鈕可快速回到當天。\n• 點擊「相機」圖標可截圖整月排班並分享。\n• 點擊「記事」圖標可查詢所有帶有備註的日期。', style: TextStyle(fontSize: 13)),
+                Text('• 點擊日期可查看詳情，長按可直接編輯。\n• 左右滑動可切換月份。\n• 點擊上方「今天」按鈕可快速回到當天。\n• 點擊「相機」圖標可截圖整月排班並分享。\n• 點擊「記事」圖標可查詢所有帶有備註的日期。\n• 點擊「海灘」圖標可查詢假期清單與餘額結算。', style: TextStyle(fontSize: 13)),
                 SizedBox(height: 16),
 
                 Text('2. 模式設定', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
@@ -2824,7 +3170,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
 
                 Text('4. 設定與同步', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
-                Text('• 「自定班次」：可修改班次名稱、顏色、時間、津貼。\n• 「日曆同步」：開啟後可將排班寫入 Google 日曆。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：刪除 Google 日曆上所有 [RosterPro] 事件並重新建立。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
+                Text('• 「假期數據管理」：可設定每年的假期天數、微調、承上，並新增自訂假期。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼。\n• 「日曆同步」：開啟後可將排班寫入 Google 日曆。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：刪除 Google 日曆上所有 [RosterPro] 事件並重新建立。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
                 SizedBox(height: 16),
 
                 Text('5. 常見問題', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
