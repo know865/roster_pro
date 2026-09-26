@@ -1,13 +1,11 @@
 workflows:
   android-roster-pro-v74-widgetfix:
-    name: Roster Pro v7.4 - Android APK (Widget & Calendar Fix)
+    name: Roster Pro v7.4 - Android APK Debug (Widget & Calendar Fix)
     max_build_duration: 60
     instance_type: mac_mini_m1
     environment:
       flutter: 3.24.5
       java: 17
-      groups:
-        - keystore_credentials
     scripts:
       - name: Set up Flutter
         script: |
@@ -25,35 +23,19 @@ workflows:
           cp /tmp/pubspec.yaml.bak pubspec.yaml
           ls -la android/app/
 
-      - name: Configure Android Signing
+      - name: Configure Android Build (compileSdk 35)
         script: |
           set -e
-          # 從 Codemagic 環境變數寫入 key.properties
-          cat > android/key.properties <<EOF
-          storePassword=$CM_KEYSTORE_PASSWORD
-          keyPassword=$CM_KEY_PASSWORD
-          keyAlias=$CM_KEY_ALIAS
-          storeFile=$CM_KEYSTORE_PATH
-          EOF
 
-          # 刪除 Java DSL 版本，避免與 Kotlin DSL 衝突（否則 build.gradle.kts 會被忽略）
+          # 刪除 Java DSL 版本，避免與 Kotlin DSL 衝突
           rm -f android/app/build.gradle
 
-          # 重新生成 build.gradle.kts 並載入簽名設定
+          # 重新生成 build.gradle.kts（debug 版本不需簽名設定）
           cat > android/app/build.gradle.kts <<'GRADLE_EOF'
-          import java.util.Properties
-          import java.io.FileInputStream
-
           plugins {
               id("com.android.application")
               id("kotlin-android")
               id("dev.flutter.flutter-gradle-plugin")
-          }
-
-          val keystoreProperties = Properties()
-          val keystorePropertiesFile = rootProject.file("key.properties")
-          if (keystorePropertiesFile.exists()) {
-              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
           }
 
           android {
@@ -78,24 +60,12 @@ workflows:
                   versionName = flutter.versionName
               }
 
-              signingConfigs {
-                  create("release") {
-                      if (keystorePropertiesFile.exists()) {
-                          keyAlias = keystoreProperties["keyAlias"] as String
-                          keyPassword = keystoreProperties["keyPassword"] as String
-                          storeFile = file(keystoreProperties["storeFile"] as String)
-                          storePassword = keystoreProperties["storePassword"] as String
-                      }
-                  }
-              }
-
               buildTypes {
                   release {
-                      signingConfig = signingConfigs.getByName("release")
+                      // debug 版本不需要 release 簽名
                   }
                   debug {
-                      // 讓 debug 也用 release 的簽名，這樣就能互相覆蓋
-                      signingConfig = signingConfigs.getByName("release")
+                      // 使用 Flutter 預設 debug 簽名
                   }
               }
           }
@@ -854,18 +824,17 @@ workflows:
           ls -la android/app/src/main/res/xml/
           ls -la android/app/src/main/res/drawable/
 
-      - name: Build APK Release
+      - name: Build APK Debug
         script: |
           BUILD_NUM=$(date +%s | tail -c 8)
           BUILD_NAME="7.4.$(date +%m%d)"
           echo "Build name: $BUILD_NAME  Build number: $BUILD_NUM"
           flutter pub get
-          flutter build apk --release --no-tree-shake-icons --build-name=$BUILD_NAME --build-number=$BUILD_NUM
+          flutter build apk --debug --no-tree-shake-icons --build-name=$BUILD_NAME --build-number=$BUILD_NUM
           ls -lh build/app/outputs/flutter-apk/
 
     artifacts:
-      - build/app/outputs/flutter-apk/app-release.apk
-      - build/app/outputs/flutter-apk/app-release.apk.sha1
+      - build/app/outputs/flutter-apk/app-debug.apk
       - flutter_*.log
 
     publishing:
