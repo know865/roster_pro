@@ -184,7 +184,7 @@ class MainPageState extends State<MainPage> {
   DateTime focused = DateTime.now();
   DateTime selectedDay = DateTime.now();
   Map<String, String> roster = {};
-  Map<String> rosterNote = {};
+  Map<String, String> rosterNote = {}; // 修正此處：加入 String 型別
   Map<String, String> rosterExtraType = {};
   Map<String, double> rosterOt = {};
   Map<String, double> rosterExtra = {};
