@@ -36,7 +36,6 @@ class ShiftDef {
   String get detailTime => isAllDay ? '全天 ${hours.toStringAsFixed(1)}h' : '${start}-${end} ${hours.toStringAsFixed(1)}h';
 }
 
-// 【修改】ExtraAllowance 加入 multiplier
 class ExtraAllowance {
   String name;
   double amount;
@@ -1545,7 +1544,6 @@ void showDetail(DateTime day) {
               Expanded(child: SizedBox(height: 56, child: TextField(controller: exHCtrl, decoration: const InputDecoration(labelText: '額外工時', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number))),
             ]),
             Row(children: [
-              // 【修改】額外津貼名稱欄位加下拉選擇按鈕
               Expanded(
                 child: SizedBox(
                   height: 56,
@@ -1997,7 +1995,6 @@ void showDetail(DateTime day) {
       hrs += (rosterExtraHrs[k] ?? 0);
     }
     double otAmount = ot * overtimeRate;
-    // 【修改】報表計算加上倍數
     double totalAllow = allow + otAmount + extraAllowances.fold(0.0, (a, b) => a + b.amount * b.multiplier);
     return SafeArea(child: ListView(padding: const EdgeInsets.all(12), children: [
       Row(children: [
@@ -2064,7 +2061,6 @@ void showDetail(DateTime day) {
         ...extraByType.entries.map((e) => Row(children: [Text('類別: ${e.key}'), const Spacer(), Text('\$${e.value.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple))])),
         Row(children: [Text('OT${ot.toStringAsFixed(1)}h x ${overtimeRate.toStringAsFixed(0)}'), const Spacer(), Text('\$${otAmount.toStringAsFixed(1)}')]),
         const Divider(),
-        // 【修改】報表顯示加上倍數
         ...extraAllowances.map((e) => Row(children: [
           Expanded(child: Text('${e.name} (\$${e.amount} × ${e.multiplier}倍)', style: const TextStyle(fontSize: 13))),
           Text('\$${(e.amount * e.multiplier).toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -2272,7 +2268,6 @@ void showDetail(DateTime day) {
       const SizedBox(height: 16),
       const Text('額外津貼 (自定名)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(child: Column(children: [
-        // 【修改】每個項目加編輯按鈕
         ...allowShow.map((e) {
           int idx = extraAllowances.indexOf(e);
           return ListTile(
@@ -2297,12 +2292,12 @@ void showDetail(DateTime day) {
                   actions: [
                     TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
                     FilledButton(onPressed: () {
-                      String name = nCtrl.text.trim();
-                      double? val = double.tryParse(vCtrl.text);
-                      double? mul = double.tryParse(mCtrl.text);
+                      final String name = nCtrl.text.trim();
+                      final double? val = double.tryParse(vCtrl.text);
+                      final double? mulParsed = double.tryParse(mCtrl.text);
                       if (name.isEmpty || val == null) return;
-                      if (mul == null || mul <= 0) mul = 1.0;
-                      setState(() => extraAllowances[idx] = ExtraAllowance(name, val, multiplier: mul));
+                      final double mulVal = (mulParsed == null || mulParsed <= 0) ? 1.0 : mulParsed;
+                      setState(() => extraAllowances[idx] = ExtraAllowance(name, val, multiplier: mulVal));
                       save();
                       Navigator.pop(ctx);
                     }, child: const Text('儲存')),
@@ -2313,7 +2308,6 @@ void showDetail(DateTime day) {
             ]),
           );
         }),
-        // 【修改】新增額外津貼對話框加倍數輸入
         ListTile(leading: const Icon(Icons.add), title: const Text('新增額外津貼'), onTap: () {
           var nCtrl = TextEditingController();
           var vCtrl = TextEditingController(text: '0');
@@ -2330,12 +2324,12 @@ void showDetail(DateTime day) {
               ]),
             ]),
             actions: [FilledButton(onPressed: () {
-              String name = nCtrl.text.trim();
-              double? val = double.tryParse(vCtrl.text);
-              double? mul = double.tryParse(mCtrl.text);
+              final String name = nCtrl.text.trim();
+              final double? val = double.tryParse(vCtrl.text);
+              final double? mulParsed = double.tryParse(mCtrl.text);
               if (name.isEmpty || val == null) return;
-              if (mul == null || mul <= 0) mul = 1.0;
-              setState(() => extraAllowances.add(ExtraAllowance(name, val, multiplier: mul)));
+              final double mulVal = (mulParsed == null || mulParsed <= 0) ? 1.0 : mulParsed;
+              setState(() => extraAllowances.add(ExtraAllowance(name, val, multiplier: mulVal)));
               save();
               Navigator.pop(ctx);
             }, child: const Text('新增'))]
