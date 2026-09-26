@@ -29,7 +29,6 @@ workflows:
         script: |
           set -e
 
-          # ============ AndroidManifest.xml（含多個 activity-alias 用於切換圖標）============
           cat > android/app/src/main/AndroidManifest.xml <<'MANIFEST_EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET"/>
@@ -40,14 +39,13 @@ workflows:
               <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-              <uses-permission android:name="android.permission.SET_WALLPAPER" />
+              <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
 
               <application
                   android:label="Roster Pro"
                   android:name="${applicationName}"
                   android:icon="@mipmap/ic_launcher"
                   android:requestLegacyExternalStorage="true">
-
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
@@ -57,74 +55,11 @@ workflows:
                       android:hardwareAccelerated="true"
                       android:windowSoftInputMode="adjustResize">
                       <meta-data android:name="io.flutter.embedding.android.NormalTheme" android:resource="@style/NormalTheme" />
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
                   </activity>
-
-                  <!-- App 圖標切換用的 alias（只保留一個 enabled） -->
-                  <activity-alias
-                      android:name=".IconDefault"
-                      android:enabled="true"
-                      android:exported="true"
-                      android:icon="@mipmap/ic_launcher"
-                      android:label="Roster Pro"
-                      android:targetActivity=".MainActivity">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                  </activity-alias>
-
-                  <activity-alias
-                      android:name=".IconAlt1"
-                      android:enabled="false"
-                      android:exported="true"
-                      android:icon="@drawable/ic_launcher_alt1"
-                      android:label="Roster Pro"
-                      android:targetActivity=".MainActivity">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                  </activity-alias>
-
-                  <activity-alias
-                      android:name=".IconAlt2"
-                      android:enabled="false"
-                      android:exported="true"
-                      android:icon="@drawable/ic_launcher_alt2"
-                      android:label="Roster Pro"
-                      android:targetActivity=".MainActivity">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                  </activity-alias>
-
-                  <activity-alias
-                      android:name=".IconAlt3"
-                      android:enabled="false"
-                      android:exported="true"
-                      android:icon="@drawable/ic_launcher_alt3"
-                      android:label="Roster Pro"
-                      android:targetActivity=".MainActivity">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                  </activity-alias>
-
-                  <activity-alias
-                      android:name=".IconAlt4"
-                      android:enabled="false"
-                      android:exported="true"
-                      android:icon="@drawable/ic_launcher_alt4"
-                      android:label="Roster Pro"
-                      android:targetActivity=".MainActivity">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                  </activity-alias>
-
                   <meta-data android:name="flutterEmbedding" android:value="2" />
                   <receiver android:name=".RosterWidgetProvider" android:exported="true" android:label="Roster Pro 月曆">
                       <intent-filter>
@@ -141,17 +76,20 @@ workflows:
                       <action android:name="android.intent.action.PROCESS_TEXT"/>
                       <data android:mimeType="text/plain"/>
                   </intent>
+                  <intent>
+                      <action android:name="android.intent.action.PICK"/>
+                      <data android:mimeType="image/*"/>
+                  </intent>
               </queries>
           </manifest>
           MANIFEST_EOF
 
-          # ============ MainActivity.kt（含切換圖標方法）============
           mkdir -p android/app/src/main/kotlin/com/example/roster_pro
           cat > android/app/src/main/kotlin/com/example/roster_pro/MainActivity.kt <<'MAIN_EOF'
           package com.example.roster_pro
 
           import android.Manifest
-          import android.content.ComponentName
+          import android.app.Activity
           import android.content.ContentUris
           import android.content.Intent
           import android.content.pm.PackageManager
@@ -160,8 +98,12 @@ workflows:
           import android.os.Build
           import android.os.Environment
           import android.provider.CalendarContract
+          import android.provider.MediaStore
           import android.provider.Settings
           import androidx.core.content.ContextCompat
+          import androidx.core.content.pm.ShortcutInfoCompat
+          import androidx.core.content.pm.ShortcutManagerCompat
+          import androidx.core.graphics.drawable.IconCompat
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
           import io.flutter.plugin.common.MethodChannel
@@ -169,6 +111,8 @@ workflows:
 
           class MainActivity : FlutterActivity() {
               private val CHANNEL = "com.roster/calendar_real"
+              private val REQUEST_PICK_ICON = 9101
+              private var pendingPickIconResult: MethodChannel.Result? = null
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
@@ -177,10 +121,7 @@ workflows:
                           "getCalendars" -> handleGetCalendars(result)
                           "scanImage" -> handleScanImage(call.argument<String>("path"), result)
                           "requestManageStorage" -> handleRequestManageStorage(result)
-                          "switchIcon" -> {
-                              val index = call.argument<Int>("index") ?: 0
-                              handleSwitchIcon(index, result)
-                          }
+                          "pickAndPinIcon" -> handlePickAndPinIcon(result)
                           "deleteAllEventsInCalendar" -> {
                               val calendarId = call.argument<String>("calendarId")
                               if (calendarId == null) {
@@ -194,33 +135,58 @@ workflows:
                   }
               }
 
-              private fun handleSwitchIcon(index: Int, result: MethodChannel.Result) {
-                  val aliases = arrayOf(
-                      "$packageName.IconDefault",
-                      "$packageName.IconAlt1",
-                      "$packageName.IconAlt2",
-                      "$packageName.IconAlt3",
-                      "$packageName.IconAlt4"
-                  )
-                  if (index < 0 || index >= aliases.size) {
-                      result.error("INVALID_INDEX", "Index out of range: $index", null)
-                      return
-                  }
+              private fun handlePickAndPinIcon(result: MethodChannel.Result) {
+                  pendingPickIconResult = result
+                  val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+                  intent.type = "image/*"
                   try {
-                      for (i in aliases.indices) {
-                          val state = if (i == index)
-                              PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-                          else
-                              PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-                          packageManager.setComponentEnabledSetting(
-                              ComponentName(packageName, aliases[i]),
-                              state,
-                              PackageManager.DONT_KILL_APP
-                          )
-                      }
-                      result.success(true)
+                      startActivityForResult(intent, REQUEST_PICK_ICON)
                   } catch (e: Exception) {
-                      result.error("SWITCH_FAIL", e.message, null)
+                      pendingPickIconResult = null
+                      result.error("NO_PICKER", e.message, null)
+                  }
+              }
+
+              override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+                  super.onActivityResult(requestCode, resultCode, data)
+                  if (requestCode == REQUEST_PICK_ICON) {
+                      val r = pendingPickIconResult
+                      pendingPickIconResult = null
+                      if (resultCode != Activity.RESULT_OK || data?.data == null) {
+                          r?.success(false)
+                          return
+                      }
+                      try {
+                          val uri = data.data!!
+                          val inputStream = contentResolver.openInputStream(uri)
+                          val iconFile = File(filesDir, "custom_icon.png")
+                          iconFile.outputStream().use { out -> inputStream?.copyTo(out) }
+                          inputStream?.close()
+                          createPinnedShortcut(iconFile)
+                          r?.success(true)
+                      } catch (e: Exception) {
+                          r?.error("ICON_FAIL", e.message, null)
+                      }
+                  }
+              }
+
+              private fun createPinnedShortcut(iconFile: File) {
+                  try {
+                      val bitmap = android.graphics.BitmapFactory.decodeFile(iconFile.absolutePath) ?: return
+                      val icon = IconCompat.createWithAdaptiveBitmap(bitmap)
+                      val launchIntent = Intent(this, MainActivity::class.java).apply {
+                          action = Intent.ACTION_MAIN
+                          addCategory(Intent.CATEGORY_LAUNCHER)
+                      }
+                      val shortcut = ShortcutInfoCompat.Builder(this, "roster_pro_custom_icon")
+                          .setShortLabel("Roster Pro")
+                          .setLongLabel("Roster Pro 自訂圖標")
+                          .setIcon(icon)
+                          .setIntent(launchIntent)
+                          .build()
+                      ShortcutManagerCompat.requestPinShortcut(this, shortcut, null)
+                  } catch (e: Exception) {
+                      android.util.Log.e("MainActivity", "createPinnedShortcut failed: ${e.message}")
                   }
               }
 
@@ -324,7 +290,6 @@ workflows:
           }
           MAIN_EOF
 
-          # ============ DateTimeUtils.kt ============
           cat > android/app/src/main/kotlin/com/example/roster_pro/DateTimeUtils.kt <<'DATETIME_EOF'
           package com.example.roster_pro
 
@@ -344,7 +309,6 @@ workflows:
           }
           DATETIME_EOF
 
-          # ============ widget_info.xml ============
           mkdir -p android/app/src/main/res/xml
           cat > android/app/src/main/res/xml/widget_info.xml <<'INFO_EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -358,57 +322,16 @@ workflows:
           </appwidget-provider>
           INFO_EOF
 
-          # ============ 新增 drawable：今天黑框 + 5 套 App 圖標 ============
           mkdir -p android/app/src/main/res/drawable
-
-          cat > android/app/src/main/res/drawable/cell_bg_today.xml <<'DRAWABLE_EOF'
+          cat > android/app/src/main/res/drawable/cell_bg_today.xml <<'CELLBORDER_EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
               <solid android:color="#BBDEFB"/>
               <stroke android:width="3dp" android:color="#000000"/>
               <corners android:radius="8dp"/>
           </shape>
-          DRAWABLE_EOF
+          CELLBORDER_EOF
 
-          cat > android/app/src/main/res/drawable/ic_launcher_alt1.xml <<'ICON1_EOF'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp" android:height="108dp"
-              android:viewportWidth="108" android:viewportHeight="108">
-              <path android:fillColor="#E53935" android:pathData="M0,0h108v108h-108z"/>
-              <path android:fillColor="#FFFFFF" android:pathData="M54,26 L64,46 L86,46 L68,60 L75,82 L54,68 L33,82 L40,60 L22,46 L44,46 Z"/>
-          </vector>
-          ICON1_EOF
-
-          cat > android/app/src/main/res/drawable/ic_launcher_alt2.xml <<'ICON2_EOF'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp" android:height="108dp"
-              android:viewportWidth="108" android:viewportHeight="108">
-              <path android:fillColor="#1E88E5" android:pathData="M0,0h108v108h-108z"/>
-              <path android:fillColor="#FFFFFF" android:pathData="M54,20 C72,20 86,34 86,52 C86,70 72,84 54,84 C36,84 22,70 22,52 C22,34 36,20 54,20 Z"/>
-              <path android:fillColor="#1E88E5" android:pathData="M44,40 L64,40 L64,44 L44,44 Z M44,52 L64,52 L64,56 L44,56 Z M44,64 L64,64 L64,68 L44,68 Z"/>
-          </vector>
-          ICON2_EOF
-
-          cat > android/app/src/main/res/drawable/ic_launcher_alt3.xml <<'ICON3_EOF'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp" android:height="108dp"
-              android:viewportWidth="108" android:viewportHeight="108">
-              <path android:fillColor="#43A047" android:pathData="M0,0h108v108h-108z"/>
-              <path android:fillColor="#FFFFFF" android:pathData="M30,20 L78,20 L78,30 L70,30 L70,88 L62,88 L62,30 L46,30 L46,88 L38,88 L38,30 L30,30 Z"/>
-          </vector>
-          ICON3_EOF
-
-          cat > android/app/src/main/res/drawable/ic_launcher_alt4.xml <<'ICON4_EOF'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp" android:height="108dp"
-              android:viewportWidth="108" android:viewportHeight="108">
-              <path android:fillColor="#8E24AA" android:pathData="M0,0h108v108h-108z"/>
-              <path android:fillColor="#FFFFFF" android:pathData="M54,22 A32,32 0 1,1 54,86 A32,32 0 1,1 54,22 Z"/>
-              <path android:fillColor="#8E24AA" android:pathData="M42,22 L66,22 L66,86 L42,86 Z"/>
-          </vector>
-          ICON4_EOF
-
-          # ============ widget_layout.xml（含 cell0~cell41）============
           mkdir -p android/app/src/main/res/layout
           cat > android/app/src/main/res/layout/widget_layout.xml <<'LAYOUT_EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -515,7 +438,6 @@ workflows:
           </LinearLayout>
           LAYOUT_EOF
 
-          # ============ RosterWidgetProvider.kt（頂部字體 × 2、今天黑框）============
           cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt <<'WIDGET_EOF'
           package com.example.roster_pro
 
@@ -526,6 +448,8 @@ workflows:
           import android.content.Intent
           import android.content.SharedPreferences
           import android.graphics.Color
+          import android.os.Handler
+          import android.os.Looper
           import android.util.Log
           import android.util.TypedValue
           import android.view.View
@@ -539,11 +463,14 @@ workflows:
 
               override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
                   writeDebugLog(context, "=== onUpdate: ${appWidgetIds.size} widgets ===")
-                  for (appWidgetId in appWidgetIds) {
-                      try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (e: Exception) {
-                          writeDebugLog(context, "onUpdate error: ${e.message}")
+                  // 延遲 500ms 再渲染，避免初始添加時 PendingIntent 未就緒
+                  Handler(Looper.getMainLooper()).postDelayed({
+                      for (appWidgetId in appWidgetIds) {
+                          try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (e: Exception) {
+                              writeDebugLog(context, "onUpdate error: ${e.message}")
+                          }
                       }
-                  }
+                  }, 500)
               }
 
               override fun onAppWidgetOptionsChanged(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int, newOptions: android.os.Bundle) {
@@ -706,7 +633,6 @@ workflows:
 
                           writeDebugLog(context, "FontSize=$fontSize TextColor=0x${Integer.toHexString(textColor)} TodayBg=0x${Integer.toHexString(todayBgColor)}")
 
-                          // 頂部年月標題：字體放大兩倍
                           views.setTextViewText(R.id.tv_month_title, "${year}年${monthNames[month]}")
                           views.setTextColor(R.id.tv_month_title, textColor)
                           views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, (fontSize * 2.0).toFloat())
@@ -745,7 +671,7 @@ workflows:
                                   views.setTextColor(dayTvId, cellColor)
                                   views.setTextViewTextSize(dayTvId, TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat())
 
-                                  // 格子背景：今天用黑色外框 drawable，其他用動態色
+                                  // 格子背景
                                   if (cellId != 0) {
                                       if (dateStr == todayStr && isCurrMonth && todayDrawableId != 0) {
                                           try { views.setInt(cellId, "setBackgroundResource", todayDrawableId) } catch (e: Exception) {
@@ -763,8 +689,9 @@ workflows:
                                       }
                                   }
 
+                                  // 【修改 1】移除 isCurrMonth 檢查：即使非本月日期，也顯示班次和農曆
                                   if (shiftTvId != 0) {
-                                      if (isCurrMonth && shiftCode.isNotEmpty()) {
+                                      if (shiftCode.isNotEmpty()) {
                                           views.setTextViewText(shiftTvId, shiftCode)
                                           views.setTextColor(shiftTvId, 0xFFFFFFFF.toInt())
                                           views.setTextViewTextSize(shiftTvId, TypedValue.COMPLEX_UNIT_SP, (fontSize * 0.7).toFloat())
@@ -783,8 +710,9 @@ workflows:
                                       }
                                   }
 
+                                  // 【修改 1】農曆也顯示（不限本月）
                                   if (lunarTvId != 0) {
-                                      if (isCurrMonth && lunarText.isNotEmpty()) {
+                                      if (lunarText.isNotEmpty()) {
                                           views.setTextViewText(lunarTvId, lunarText)
                                           views.setTextColor(lunarTvId, 0xFF666666.toInt())
                                           views.setTextViewTextSize(lunarTvId, TypedValue.COMPLEX_UNIT_SP, (fontSize * 0.55).toFloat())
@@ -797,6 +725,7 @@ workflows:
 
                                   val intent = Intent(context, MainActivity::class.java)
                                   intent.putExtra("selected_date", dateStr)
+                                  intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                                   views.setOnClickPendingIntent(dayTvId, PendingIntent.getActivity(context, appWidgetId * 1000 + i, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                               } catch (e: Exception) { writeDebugLog(context, "cell $i error: ${e.message}") }
                           }
