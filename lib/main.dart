@@ -28,7 +28,7 @@ void main() {
   runApp(const RosterApp());
 }
 
-// ------------------- 新增：假期定義類別 -------------------
+// ------------------- 假期定義類別 -------------------
 class LeaveDef {
   String name;
   String fullName;
@@ -185,15 +185,15 @@ class MainPageState extends State<MainPage> {
   Map<String, double> rosterExtra = {};
   Map<String, double> rosterExtraHrs = {};
 
-  // ------------------- 新增：假期相關數據 -------------------
+  // ------------------- 假期相關數據 -------------------
   List<LeaveDef> leaveDefs = [
     LeaveDef('AL', 'Annual Leave', Colors.teal),
     LeaveDef('GH', 'General Holiday', Colors.indigo),
     LeaveDef('SH', 'Statutory Holiday', Colors.deepOrange),
     LeaveDef('WB', 'Well-being Leave', Colors.lightBlue),
   ];
-  Map<String, Map<String, dynamic>> leaveRecords = {}; // 格式: { "2026": { "AL": {"total": 10, "adjust": 2, "carry": 5} } }
-  Map<String, String> rosterLeave = {}; // 格式: { "2026-01-01": "AL" }
+  Map<String, Map<String, dynamic>> leaveRecords = {};
+  Map<String, String> rosterLeave = {};
   // ------------------------------------------------------
 
   Map<String, ShiftDef> defs = {
@@ -396,7 +396,7 @@ class MainPageState extends State<MainPage> {
     var evMap = sp.getString('googleEventIdMap'); if (evMap != null) { try { _googleEventIdMap = Map<String, String>.from(jsonDecode(evMap)); } catch (_) {} }
     var mh = sp.getString('manualHolidays'); if (mh != null) { try { manualHolidays = Map<String, String>.from(jsonDecode(mh)); } catch (_) {} }
 
-    // ------------------- 新增：加載假期數據 -------------------
+    // ------------------- 加載假期數據 -------------------
     var ld = sp.getString('leaveDefs'); 
     if (ld != null) { 
       try { 
@@ -483,7 +483,7 @@ class MainPageState extends State<MainPage> {
     sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
     sp.setString('manualHolidays', jsonEncode(manualHolidays));
 
-    // ------------------- 新增：儲存假期數據 -------------------
+    // ------------------- 儲存假期數據 -------------------
     await sp.setString('leaveDefs', jsonEncode(leaveDefs.map((e) => e.toJson()).toList()));
     await sp.setString('leaveRecords', jsonEncode(leaveRecords));
     await sp.setString('rosterLeave', jsonEncode(rosterLeave));
@@ -977,7 +977,6 @@ Future<void> restoreFromFile(String path) async {
       if (j['nightAllow'] != null) nightAllowance = (j['nightAllow'] as num).toDouble();
       if (j['mealAllow'] != null) mealAllowance = (j['mealAllow'] as num).toDouble();
       if (j['nightAllowMultiplier'] != null) nightAllowMultiplier = (j['nightAllowMultiplier'] as num).toDouble();
-      // 還原假期數據
       if (j['leaveDefs'] != null) leaveDefs = (j['leaveDefs'] as List).map((e) => LeaveDef.fromJson(Map<String, dynamic>.from(e as Map))).toList();
       if (j['leaveRecords'] != null) leaveRecords = Map<String, Map<String, dynamic>>.from((j['leaveRecords'] as Map).map((k, v) => MapEntry(k as String, Map<String, dynamic>.from(v as Map))));
       if (j['rosterLeave'] != null) rosterLeave = Map<String, String>.from(j['rosterLeave']);
@@ -1153,7 +1152,6 @@ Future<void> backupAnywhere() async {
       'showLunar': showLunar, 'widgetFontSize': widgetFontSize,
       'widgetTextColor': widgetTextColor,
       'iconIndex': iconIndex,
-      // 加入假期數據
       'leaveDefs': leaveDefs.map((e) => e.toJson()).toList(),
       'leaveRecords': leaveRecords,
       'rosterLeave': rosterLeave,
@@ -1178,7 +1176,7 @@ Future<void> clearRosterByRange() async {
     _markDirty(k);
     if (roster.containsKey(k)) {
       count++;
-      roster.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); rosterExtraType.remove(k);
+      roster.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); rosterExtraType.remove(k); rosterLeave.remove(k);
       if (_googleEventIdMap.containsKey(k) && _rosterCalendarId != null) {
         try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, _googleEventIdMap[k]); } catch (_) {}
         _googleEventIdMap.remove(k);
@@ -1406,6 +1404,42 @@ Future<void> showNotesListDialog() async {
   });
 }
 
+// 【修復】補回 pickRangeAndApply 方法
+Future<void> pickRangeAndApply() async {
+  List<List<String>> chosenPattern = pattern;
+  if (savedPatterns.isNotEmpty) {
+    int? selected = await showDialog<int>(context: context, builder: (ctx) {
+      return AlertDialog(
+        title: const Text('選擇排更模式'),
+        content: SizedBox(width: 300, child: ListView(shrinkWrap: true, children: [
+          ListTile(title: const Text('當前版面'), subtitle: Text('${pattern.length}行'), leading: const Icon(Icons.edit), onTap: () => Navigator.pop(ctx, -1)),
+          const Divider(),
+          ...savedPatterns.asMap().entries.map((en) => ListTile(title: Text(en.value.name), subtitle: Text('${en.value.data.length}行'), leading: const Icon(Icons.folder), onTap: () => Navigator.pop(ctx, en.key))),
+        ])),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消'))]
+      );
+    });
+    if (selected == null) return;
+    if (selected == -1) chosenPattern = pattern; else chosenPattern = savedPatterns[selected].data.map((r) => List<String>.from(r)).toList();
+  }
+  DateTimeRange? p = await showDateRangePicker(context: context, firstDate: DateTime(2023), lastDate: DateTime(DateTime.now().year + 30, 12, 31));
+  if (p == null) return;
+  if (!await _confirmAction()) return;
+  var flat = chosenPattern.expand((e) => e).toList();
+  setState(() {
+    int i = 0;
+    for (DateTime d = p.start; !d.isAfter(p.end); d = d.add(const Duration(days: 1))) {
+      String dateKey = DateFormat('yyyy-MM-dd').format(d);
+      roster[dateKey] = flat[i % flat.length];
+      _markDirty(dateKey);
+      i++;
+    }
+  });
+  await save();
+  setState(() => tab = 0);
+  await _syncNow();
+}
+
 Future<void> smartSchedule() async {
   if (savedPatterns.isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請先建立至少一個已存模式'))); return; }
   int? selectedIdx = await showDialog<int>(context: context, builder: (ctx) {
@@ -1479,7 +1513,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
             ]))),
             const Spacer(),
             IconButton(icon: const Icon(Icons.list_alt), tooltip: '記事查詢', onPressed: showNotesListDialog, visualDensity: VisualDensity.compact),
-            IconButton(icon: const Icon(Icons.beach_access), tooltip: '假期清單', onPressed: showLeaveListDialog, visualDensity: VisualDensity.compact), // 【新增】假期清單按鈕
+            IconButton(icon: const Icon(Icons.beach_access), tooltip: '假期清單', onPressed: showLeaveListDialog, visualDensity: VisualDensity.compact),
             IconButton(icon: const Icon(Icons.camera_alt_outlined), tooltip: '整月截圖分享', onPressed: shareScreenshotDialog, visualDensity: VisualDensity.compact),
             IconButton(icon: const Icon(Icons.chevron_left), onPressed: _goToPrevMonth, visualDensity: VisualDensity.compact),
             IconButton(icon: const Icon(Icons.chevron_right), onPressed: _goToNextMonth, visualDensity: VisualDensity.compact),
@@ -1675,10 +1709,8 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               Text('${DateFormat('yyyy-MM-dd EEE').format(day)} ${isHoliday(day) ? ' [${holidayName(day)}]' : ''}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              // 選擇班次
               Wrap(spacing: 8, children: defs.keys.map((c) => ChoiceChip(label: Text(c), selected: cur == c, onSelected: (_) => setM(() => cur = c))).toList()),
               const SizedBox(height: 8),
-              // 選擇假期
               Wrap(spacing: 8, children: [
                 ChoiceChip(label: const Text('無'), selected: curLeave == '', onSelected: (_) => setM(() => curLeave = '')),
                 ...leaveDefs.map((leave) => ChoiceChip(
@@ -1962,7 +1994,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
     });
   }
 
-  // 【新增】假期清單對話框
+  // 假期清單對話框
   Future<void> showLeaveListDialog() async {
     int queryYear = focused.year;
     bool yearMode = false;
@@ -1980,7 +2012,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
         }
         leaveEntries.sort((a, b) => a.key.compareTo(b.key));
 
-        // 計算該年假期餘額
         Map<String, double> yearTotals = {};
         Map<String, double> yearUsed = {};
         Map<String, double> yearCarry = {};
@@ -1995,7 +2026,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
           });
         }
         
-        // 計算已使用天數
         rosterLeave.forEach((k, v) {
           if (k.startsWith('$queryYear')) {
             yearUsed[v] = (yearUsed[v] ?? 0) + 1;
@@ -2030,7 +2060,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
               );
             })),
             const Divider(),
-            // 顯示餘額結算
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
@@ -2099,17 +2128,15 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
     });
   }
 
-  // 【新增】假期數據管理對話框
+  // 假期數據管理對話框
   void showLeaveManagementDialog() {
     int selectedYear = DateTime.now().year;
     showDialog(context: context, builder: (ctx) {
       return StatefulBuilder(builder: (ctx2, setD) {
-        // 確保該年有數據
         if (!leaveRecords.containsKey('$selectedYear')) {
           leaveRecords['$selectedYear'] = {};
         }
         var yearRecords = leaveRecords['$selectedYear']!;
-        // 確保每個假期都有默認記錄
         for (var def in leaveDefs) {
           if (!yearRecords.containsKey(def.name)) {
             yearRecords[def.name] = {'total': 0.0, 'adjust': 0.0, 'carry': 0.0};
@@ -2134,7 +2161,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                 Expanded(
                   child: ListView(
                     children: [
-                      // 標準假期
                       ...leaveDefs.where((e) => !e.isCustom).map((leave) {
                         var record = yearRecords[leave.name]!;
                         var totalCtrl = TextEditingController(text: (record['total'] ?? 0.0).toString());
@@ -2164,7 +2190,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                           ),
                         );
                       }),
-                      // 自訂假期
                       const SizedBox(height: 16),
                       const Text('自訂假期', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                       ...leaveDefs.where((e) => e.isCustom).map((leave) {
@@ -2202,7 +2227,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                           ),
                         );
                       }),
-                      // 新增自訂假期按鈕
                       TextButton.icon(
                         icon: const Icon(Icons.add),
                         label: const Text('新增自訂假期'),
