@@ -198,6 +198,26 @@ class MainPageState extends State<MainPage> {
     } catch (_) {}
   }
 
+  // 【新增】通用破壞性操作確認對話框
+  Future<bool> _confirmAction() async {
+    bool? r = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('⚠️ 確認操作'),
+        content: const Text('相關數據會被刪除或覆蓋，確定繼續進行？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('確定繼續'),
+          ),
+        ],
+      ),
+    );
+    return r == true;
+  }
+
   Future<void> updateWidget() async {
     try {
       String todayKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -211,6 +231,16 @@ class MainPageState extends State<MainPage> {
       try { await HomeWidget.saveWidgetData<double>('today_border', todayBorderColor.value.toDouble()); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('roster_json', jsonEncode(roster)); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson())))); } catch (_) {}
+      // 【新增】傳遞農曆映射（前後各 1 年）給桌面小工具
+      try {
+        Map<String, String> lunarMap = {};
+        DateTime startLunar = DateTime(DateTime.now().year - 1, 1, 1);
+        DateTime endLunar = DateTime(DateTime.now().year + 1, 12, 31);
+        for (DateTime d = startLunar; !d.isAfter(endLunar); d = d.add(const Duration(days: 1))) {
+          lunarMap[DateFormat('yyyy-MM-dd').format(d)] = LunarHelper.getLunarDayText(d);
+        }
+        await HomeWidget.saveWidgetData<String>('lunar_json', jsonEncode(lunarMap));
+      } catch (e) { await _writeDebugLog('寫入 lunar_json 失敗: $e'); }
       try {
         await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
       } catch (e) { await _writeDebugLog('寫入 widgetFontSize 失敗: $e'); }
@@ -581,7 +611,7 @@ Future<void> _syncNow() async {
   await _syncToGoogle(silent: true);
 }
 
-// 【新增】範圍同步：只同步使用者選定日期範圍內、且有變更的日期
+// 範圍同步：只同步使用者選定日期範圍內、且有變更的日期
 Future<void> syncDateRange() async {
   if (!googleSyncEnabled) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('請先啟用日曆同步')));
@@ -609,6 +639,7 @@ Future<void> syncDateRange() async {
       const SnackBar(content: Text('所選範圍內沒有變更需要同步'), duration: Duration(seconds: 3)));
     return;
   }
+  if (!await _confirmAction()) return;
   // 保存範圍外的 dirty，把 _dirtyDates 臨時設為 inRange
   Set<String> others = Set<String>.from(_dirtyDates)..removeAll(inRange);
   _dirtyDates = inRange;
@@ -779,6 +810,7 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
     ]
   ));
   if (confirm != true) return;
+  if (!await _confirmAction()) return;
   _needsFullSync = true;
   _dirtyDates.clear();
   await _syncToGoogle(forceFullSync: true);
@@ -858,6 +890,7 @@ Future<void> restoreFromFile(String path) async {
 Future<void> restoreLocalFile() async {
   var res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['json']);
   if (res == null) return;
+  if (!await _confirmAction()) return;
   await restoreFromFile(res.files.single.path!);
 }
 
@@ -923,6 +956,7 @@ Future<void> showBackupList() async {
                 ],
               ));
               if (c == true) {
+                if (!await _confirmAction()) return;
                 int deleted = 0;
                 for (var p in selectedPaths) { try { await File(p).delete(); deleted++; } catch (_) {} }
                 if (mounted) { Navigator.pop(ctx2); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已刪除 $deleted 個備份'))); }
@@ -1012,6 +1046,7 @@ Future<void> backupAnywhere() async {
 Future<void> clearRosterByRange() async {
   DateTimeRange? range = await showDateRangePicker(context: context, firstDate: DateTime(2023), lastDate: DateTime(DateTime.now().year + 30, 12, 31), helpText: '選擇要清除的排更範圍');
   if (range == null) return;
+  if (!await _confirmAction()) return;
   int count = 0;
   for (DateTime d = range.start; !d.isAfter(range.end); d = d.add(const Duration(days: 1))) {
     String k = DateFormat('yyyy-MM-dd').format(d);
@@ -1267,6 +1302,7 @@ Future<void> smartSchedule() async {
     ]
   ));
   if (confirm != true) return;
+  if (!await _confirmAction()) return;
   List<String> flat = [];
   for (var row in selectedPattern) flat.addAll(row);
   setState(() {
@@ -1411,17 +1447,28 @@ Widget calTab() {
         child: SingleChildScrollView(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
-              Expanded(child: Text('${roster[selKey] ?? '未排班'}${isHoliday(selectedDay) ? ' [${holidayName(selectedDay)}]' : ''} ${extraType.isNotEmpty ? '[$extraType]' : ''}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-              const SizedBox(width: 8),
-              if (selDef != null) Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: selDef.color, borderRadius: BorderRadius.circular(10)), child: Text(selDef.code, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold))),
-              const SizedBox(width: 8),
-              if (showLunar) Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(10)),
-                child: Text(LunarHelper.getFullLunarText(selectedDay), style: const TextStyle(fontSize: 11, color: Colors.black87, fontWeight: FontWeight.bold)),
+              Expanded(child: Text('${roster[selKey] ?? '未排班'}${isHoliday(selectedDay) ? ' [${holidayName(selectedDay)}]' : ''} ${extraType.isNotEmpty ? '[$extraType]' : ''}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+              const SizedBox(width: 6),
+              if (selDef != null) Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: selDef.color, borderRadius: BorderRadius.circular(8)), child: Text(selDef.code, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))),
+              const SizedBox(width: 6),
+              // 實際年月日 + 農曆（垂直堆疊）
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    DateFormat('yyyy年M月d日').format(selectedDay),
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87),
+                  ),
+                  if (showLunar)
+                    Text(
+                      LunarHelper.getFullLunarText(selectedDay),
+                      style: TextStyle(fontSize: 10, color: Colors.grey[700]),
+                    ),
+                ],
               ),
               const SizedBox(width: 8),
-              // 【新增】範圍同步按鈕
+              // 範圍同步按鈕
               Container(
                 decoration: BoxDecoration(
                   color: Colors.blue.shade50,
@@ -1438,7 +1485,12 @@ Widget calTab() {
                 ),
               ),
               const SizedBox(width: 4),
-              FilledButton.tonalIcon(onPressed: () { showDetail(selectedDay); }, icon: const Icon(Icons.edit, size: 16), label: const Text('編輯', style: TextStyle(fontSize: 12)), style: FilledButton.styleFrom(minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 12))),
+              FilledButton.tonalIcon(
+                onPressed: () { showDetail(selectedDay); },
+                icon: const Icon(Icons.edit, size: 16),
+                label: const Text('編輯', style: TextStyle(fontSize: 12)),
+                style: FilledButton.styleFrom(minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 12)),
+              ),
             ]),
             const SizedBox(height: 10),
             Container(
@@ -1668,6 +1720,7 @@ void showDetail(DateTime day) {
     }
     DateTimeRange? p = await showDateRangePicker(context: context, firstDate: DateTime(2023), lastDate: DateTime(DateTime.now().year + 30, 12, 31));
     if (p == null) return;
+    if (!await _confirmAction()) return;
     var flat = chosenPattern.expand((e) => e).toList();
     setState(() {
       int i = 0;
@@ -2047,9 +2100,17 @@ void showDetail(DateTime day) {
         SwitchListTile(title: const Text('啟用日曆同步'), subtitle: Text(googleSyncEnabled ? '已授權' : '未授權'), value: googleSyncEnabled, onChanged: (v) async { if (v) { await _requestGooglePerm(); } else { setState(() => googleSyncEnabled = false); save(); } }),
         SwitchListTile(title: const Text('自動同步'), value: autoSync, onChanged: googleSyncEnabled ? (v) { setState(() => autoSync = v); save(); } : null),
         Row(children: [
-          Expanded(child: OutlinedButton.icon(onPressed: googleSyncEnabled ? () => _syncToGoogle() : null, icon: const Icon(Icons.sync), label: const Text('手動同步'))),
+          Expanded(child: OutlinedButton.icon(
+            onPressed: googleSyncEnabled ? () async { if (await _confirmAction()) _syncToGoogle(); } : null,
+            icon: const Icon(Icons.sync),
+            label: const Text('手動同步'),
+          )),
           const SizedBox(width: 8),
-          Expanded(child: OutlinedButton.icon(onPressed: googleSyncEnabled ? () => syncDateRange() : null, icon: const Icon(Icons.date_range), label: const Text('範圍同步'))),
+          Expanded(child: OutlinedButton.icon(
+            onPressed: googleSyncEnabled ? () => syncDateRange() : null,
+            icon: const Icon(Icons.date_range),
+            label: const Text('範圍同步'),
+          )),
         ]),
         const SizedBox(height: 8),
         Row(children: [
