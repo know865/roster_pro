@@ -182,11 +182,9 @@ class MainPageState extends State<MainPage> {
   double get standardHourlyRate => (monthlySalary > 0 && hourlyDivisor > 0) ? monthlySalary / hourlyDivisor : 0.0;
   double get overtimeHourlyRate => standardHourlyRate * otMultiplier;
 
-  // 【新增】三個固定津貼金額
   double morningAllowance = 0; 
   double nightAllowance = 0; 
   double mealAllowance = 0; 
-  // 【新增】通宵津貼倍數
   double nightAllowMultiplier = 0.4;
 
   List<ExtraAllowance> extraAllowances = [];
@@ -212,7 +210,6 @@ class MainPageState extends State<MainPage> {
   Set<String> _dirtyDates = <String>{};
   bool _needsFullSync = true;
 
-  // 【問題1 修復】預設字體大小改為 14.0
   double widgetFontSize = 14.0; 
   int widgetTextColor = 0xFF000000;
   int widgetBgColor = 0xFFFFFFFF;
@@ -281,7 +278,6 @@ class MainPageState extends State<MainPage> {
         await HomeWidget.saveWidgetData<String>('lunar_json', jsonEncode(lunarMap));
       } catch (e) { await _writeDebugLog('寫入 lunar_json 失敗: $e'); }
       try {
-        // 【問題1 修復】確保寫入的是較小的字體值
         await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
       } catch (e) { await _writeDebugLog('寫入 widgetFontSize 失敗: $e'); }
       try {
@@ -1154,7 +1150,7 @@ Future<void> exportShareImage() async {
     y += 54;
     for (var v in legendDefs) {
       canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(24, y, 32, 32), const Radius.circular(8)), Paint()..color = v.color);
-      tp.text = TextSpan(text: ' ${v.code} ${v.label} ${v.isAllDay ? '全天' : '${v.start}-${v.end}'} ${v.hours.toStringAsFixed(1)}h${v.hasMorningAllow ? ' 早班津貼' : ''}${v.hasNightAllow ? ' 通宵津貼' : ''}${v.hasMealAllow ? ' 飯鐘津貼' : ''}', style: const TextStyle(color: Colors.black87, fontSize: 28, fontWeight: FontWeight.w600));
+      tp.text = TextSpan(text: ' ${v.code} ${v.label} ${v.isAllDay ? '全天' : '${v.start}-${v.end}'} ${v.hours.toStringAsFixed(1)}h${v.hasMorningAllow ? ' 早/夜班津貼' : ''}${v.hasNightAllow ? ' 通宵津貼' : ''}${v.hasMealAllow ? ' 膳食津貼' : ''}', style: const TextStyle(color: Colors.black87, fontSize: 28, fontWeight: FontWeight.w600));
       tp.layout(maxWidth: width - 80);
       tp.paint(canvas, Offset(64, y));
       y += 46;
@@ -1555,8 +1551,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                   const SizedBox(height: 4),
                   Text('2. 時間：${selDef != null ? (selDef.isAllDay ? '全天' : '${selDef.start}-${selDef.end}') : ''} | 工時：${selDef?.hours ?? 0}h', style: const TextStyle(fontSize: 12)),
                   const SizedBox(height: 4),
-                  // 【修改】通宵津貼乘上工時顯示
-                  Text('3. 班次津貼：${selDef != null ? ((selDef.hasMorningAllow ? '早班 \$${morningAllowance.toStringAsFixed(0)} ' : '') + (selDef.hasNightAllow ? '通宵 \$${(nightAllowance * selDef.hours).toStringAsFixed(0)} ' : '') + (selDef.hasMealAllow ? '飯津 \$${mealAllowance.toStringAsFixed(0)}' : '')).trim() : '無'} | 午飯時間：${selDef != null && selDef.hasLunch ? '有 (已扣1h)' : '無'}', style: const TextStyle(fontSize: 12)),
+                  Text('3. 班次津貼：${selDef != null ? ((selDef.hasMorningAllow ? '早/夜班 \$${morningAllowance.toStringAsFixed(0)} ' : '') + (selDef.hasNightAllow ? '通宵 \$${(nightAllowance * selDef.hours).toStringAsFixed(0)} ' : '') + (selDef.hasMealAllow ? '膳食 \$${mealAllowance.toStringAsFixed(0)}' : '')).trim() : '無'} | 午飯時間：${selDef != null && selDef.hasLunch ? '有 (已扣1h)' : '無'}', style: const TextStyle(fontSize: 12)),
                   const SizedBox(height: 4),
                   Text('4. 額外津貼名稱：${extraType.isNotEmpty ? extraType : '無'}  金額：\$${(rosterExtra[selKey] ?? 0).toStringAsFixed(1)}', style: const TextStyle(fontSize: 12, color: Colors.deepPurple, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 4),
@@ -1773,15 +1768,16 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
               Expanded(child: SizedBox(height: 78, child: TextField(controller: otCtrl, decoration: const InputDecoration(labelText: 'OT', border: OutlineInputBorder(), helperText: ' ', helperStyle: TextStyle(fontSize: 10)), keyboardType: TextInputType.number))),
             ]),
             const SizedBox(height: 12),
+            // 【修改 2, 3, 4】核實格文字
             Row(children: [
               Checkbox(value: hasMorningAllow, onChanged: (v) => setS(() => hasMorningAllow = v ?? false)), 
-              const Text('早班', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text('早/夜班津貼', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(width: 8),
               Checkbox(value: hasNightAllow, onChanged: (v) => setS(() => hasNightAllow = v ?? false)), 
-              const Text('通宵', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text('通宵津貼', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(width: 8),
               Checkbox(value: hasMealAllow, onChanged: (v) => setS(() => hasMealAllow = v ?? false)), 
-              const Text('飯津', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text('膳食津貼', style: TextStyle(fontWeight: FontWeight.bold)),
             ]),
             const SizedBox(height: 4),
             Row(children: [
@@ -2169,7 +2165,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
           return ListTile(
             leading: CircleAvatar(backgroundColor: d.color, child: Text(d.code, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))),
             title: Text('${d.code} - ${d.label}', style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: (d.hasLunch || d.hasMorningAllow || d.hasNightAllow || d.hasMealAllow) ? Text('${d.hasMorningAllow ? '早班 ' : ''}${d.hasNightAllow ? '通宵 ' : ''}${d.hasMealAllow ? '飯津' : ''}${d.hasLunch ? ' 午飯1h' : ''}', style: const TextStyle(fontSize: 11, color: Colors.deepPurple)) : null,
+            subtitle: (d.hasLunch || d.hasMorningAllow || d.hasNightAllow || d.hasMealAllow) ? Text('${d.hasMorningAllow ? '早/夜班 ' : ''}${d.hasNightAllow ? '通宵 ' : ''}${d.hasMealAllow ? '膳食' : ''}${d.hasLunch ? ' 午飯1h' : ''}', style: const TextStyle(fontSize: 11, color: Colors.deepPurple)) : null,
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
               IconButton(icon: const Icon(Icons.edit), onPressed: () => editShiftDialog(oldDef: d)),
               IconButton(icon: const Icon(Icons.delete), onPressed: () { setState(() => defs.remove(e.key)); save(); })
@@ -2347,7 +2343,8 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                       const SizedBox(height: 16),
                       const Text('固定津貼設定', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple)),
                       const SizedBox(height: 8),
-                      Row(children: [Expanded(child: TextField(controller: mAllowCtrl, decoration: const InputDecoration(labelText: '早班津貼', prefixText: '\$ ', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (_) => setD(() {}))), const SizedBox(width: 8), Expanded(child: TextField(controller: mealCtrl, decoration: const InputDecoration(labelText: '飯鐘津貼', prefixText: '\$ ', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (_) => setD(() {})))]),
+                      // 【修改 1】早班津貼 -> 早/夜班津貼
+                      Row(children: [Expanded(child: TextField(controller: mAllowCtrl, decoration: const InputDecoration(labelText: '早/夜班津貼', prefixText: '\$ ', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (_) => setD(() {}))), const SizedBox(width: 8), Expanded(child: TextField(controller: mealCtrl, decoration: const InputDecoration(labelText: '膳食津貼', prefixText: '\$ ', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (_) => setD(() {})))]),
                       const SizedBox(height: 8),
                       Row(children: [Expanded(child: TextField(controller: nightMultCtrl, decoration: const InputDecoration(labelText: '通宵倍數 (預設0.4)', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (_) => setD(() {}))), const SizedBox(width: 8), Expanded(child: TextField(controller: nAllowCtrl, readOnly: true, enabled: false, decoration: const InputDecoration(labelText: '通宵時薪津貼 (自動計算)', prefixText: '\$ ', isDense: true, border: OutlineInputBorder(), filled: true, fillColor: Color(0xFFEEEEEE))))]),
                     ])),
