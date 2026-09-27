@@ -19,7 +19,7 @@ import 'package:home_widget/home_widget.dart';
 import 'package:image/image.dart' as img;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:open_filex/open_filex.dart'; // 依賴已加入 pubspec.yaml
+import 'package:open_filex/open_filex.dart';
 
 void main() {
   tzData.initializeTimeZones();
@@ -56,7 +56,6 @@ class LeaveDef {
 class ShiftDef {
   String code; String label; double hours; double ot; Color color; String start; String end; 
   bool hasMorningAllow; bool hasNightAllow; bool hasMealAllow; bool isAllDay; bool hasLunch;
-  // 新增4個假期標示
   bool hasAL; bool hasSH; bool hasGH; bool hasWB; 
   
   ShiftDef(this.code, this.label, this.hours, this.color, {
@@ -191,7 +190,6 @@ class MainPageState extends State<MainPage> {
   Map<String, double> rosterExtra = {};
   Map<String, double> rosterExtraHrs = {};
 
-  // ------------------- 假期相關數據 -------------------
   List<LeaveDef> leaveDefs = [
     LeaveDef('AL', 'Annual Leave', Colors.teal),
     LeaveDef('GH', 'General Holiday', Colors.indigo),
@@ -200,7 +198,6 @@ class MainPageState extends State<MainPage> {
   ];
   Map<String, Map<String, dynamic>> leaveRecords = {};
   Map<String, String> rosterLeave = {};
-  // ------------------------------------------------------
 
   Map<String, ShiftDef> defs = {
     '早': ShiftDef('早', '早更', 8, Colors.orange, start: '07:00', end: '15:30', hasMorningAllow: true),
@@ -325,12 +322,32 @@ class MainPageState extends State<MainPage> {
       try {
         await HomeWidget.saveWidgetData<double>('widgetTextColor', widgetTextColor.toDouble());
       } catch (e) { await _writeDebugLog('寫入 widgetTextColor 失敗: $e'); }
+      // 【修改】保存 widgetBgColor，確保 Android 端能讀取到正確的背景色
+      try {
+        await HomeWidget.saveWidgetData<double>('widgetBgColor', widgetBgColor.toDouble());
+      } catch (e) { await _writeDebugLog('寫入 widgetBgColor 失敗: $e'); }
       DateTime now = DateTime.now();
       try { await HomeWidget.saveWidgetData<int>('initial_year', now.year); } catch (_) {}
       try { await HomeWidget.saveWidgetData<int>('initial_month', now.month); } catch (_) {}
+      
+      // 等待數據完全寫入 SharedPreferences
       await Future.delayed(const Duration(milliseconds: 300));
-      await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
-      await _writeDebugLog('觸發 Widget 更新 OK');
+      
+      // 原本的 HomeWidget 更新（發送廣播）
+      try {
+        await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
+        await _writeDebugLog('觸發 HomeWidget 更新 OK');
+      } catch (e) {
+        await _writeDebugLog('觸發 HomeWidget 更新失敗: $e');
+      }
+      
+      // 【修改】透過原生 MethodChannel 強制立即刷新 Widget
+      try {
+        await _realChannel.invokeMethod('updateWidget');
+        await _writeDebugLog('觸發原生強制更新 OK');
+      } catch (e) {
+        await _writeDebugLog('觸發原生強制更新失敗: $e');
+      }
     } catch (e) {
       await _writeDebugLog('updateWidget 整體失敗: $e');
     }
@@ -370,7 +387,7 @@ class MainPageState extends State<MainPage> {
     super.initState();
     nameCtrl.text = customName;
     _loadVersion();
-    _requestStoragePermission(); // 在啟動時請求權限，避免後續匯出時被詢問
+    _requestStoragePermission();
     load().then((_) async {
       await Future.delayed(const Duration(milliseconds: 500));
       bool ok = await handleCalendarPermission(silent: false);
@@ -409,7 +426,6 @@ class MainPageState extends State<MainPage> {
     var evMap = sp.getString('googleEventIdMap'); if (evMap != null) { try { _googleEventIdMap = Map<String, String>.from(jsonDecode(evMap)); } catch (_) {} }
     var mh = sp.getString('manualHolidays'); if (mh != null) { try { manualHolidays = Map<String, String>.from(jsonDecode(mh)); } catch (_) {} }
 
-    // ------------------- 加載假期數據 -------------------
     var ld = sp.getString('leaveDefs'); 
     if (ld != null) { 
       try { 
@@ -430,7 +446,6 @@ class MainPageState extends State<MainPage> {
         rosterLeave = Map<String, String>.from(jsonDecode(rl)); 
       } catch (_) {} 
     }
-    // ------------------------------------------------------
 
     var ddList = sp.getStringList('dirtyDates');
     if (ddList != null) _dirtyDates = ddList.toSet();
@@ -496,11 +511,9 @@ class MainPageState extends State<MainPage> {
     sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
     sp.setString('manualHolidays', jsonEncode(manualHolidays));
 
-    // ------------------- 儲存假期數據 -------------------
     await sp.setString('leaveDefs', jsonEncode(leaveDefs.map((e) => e.toJson()).toList()));
     await sp.setString('leaveRecords', jsonEncode(leaveRecords));
     await sp.setString('rosterLeave', jsonEncode(rosterLeave));
-    // ------------------------------------------------------
 
     await sp.setStringList('dirtyDates', _dirtyDates.toList());
     await sp.setBool('needsFullSync', _needsFullSync);
@@ -634,7 +647,6 @@ Future<String?> _pickGoogleCalendarDialog() async {
   return null;
 }
 
-// 【新增】建立自訂日曆對話框
 Future<String?> _createCustomCalendarDialog() async {
   if (!await handleCalendarPermission(silent: false)) return null;
 
@@ -668,7 +680,6 @@ Future<String?> _createCustomCalendarDialog() async {
   if (confirm != true || nameCtrl.text.trim().isEmpty) return null;
 
   try {
-    // 修改這裡：device_calendar 4.3.3 的 createCalendar 只接受 String? 名稱
     final result = await _calendarPlugin.createCalendar(nameCtrl.text.trim());
 
     if (result.isSuccess && result.data != null) {
@@ -689,7 +700,6 @@ Future<String?> _createCustomCalendarDialog() async {
       return _rosterCalendarId;
     } else {
       if (mounted) {
-        // device_calendar 4.3.3 的 Result<String> 沒有 error 欄位，改用通用訊息
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('建立日曆失敗，請確認日曆權限或稍後再試')),
         );
@@ -706,7 +716,6 @@ Future<String?> _createCustomCalendarDialog() async {
   }
 }
 
-// 【修改】開啟日曆同步時的選擇邏輯
 Future<void> _requestGooglePerm() async {
   int? choice = await showDialog<int>(
     context: context,
@@ -1203,7 +1212,6 @@ Future<void> showBackupList() async {
   });
 }
 
-// 【新增】匯出清單管理對話框
 Future<void> showExportListManager() async {
   final dirPath = await _getBackupDir();
   final dir = Directory(dirPath);
@@ -1213,7 +1221,6 @@ Future<void> showExportListManager() async {
   files.sort((a, b) => b.path.compareTo(a.path));
   if (files.isEmpty) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('沒有匯出檔案'))); return; }
 
-  // 分類
   Map<String, List<File>> categorized = {};
   for (var f in files) {
     String name = f.path.split('/').last;
@@ -1252,11 +1259,9 @@ Future<void> showExportListManager() async {
                       if (multiSelectMode) {
                         setD(() { if (isSelected) selectedPaths.remove(f.path); else selectedPaths.add(f.path); });
                       } else {
-                        // 修改：按下清單名稱直接開啟檔案
                         try {
                           await OpenFilex.open(f.path);
                         } catch (e) {
-                          // 如果開啟失敗，回退到分享
                           await Share.shareXFiles([XFile(f.path)], text: '開啟檔案: $name');
                         }
                       }
@@ -1265,7 +1270,6 @@ Future<void> showExportListManager() async {
                       IconButton(
                         icon: const Icon(Icons.share, size: 18, color: Colors.blue),
                         onPressed: () async {
-                          // 修改：分享按鈕單獨分享該檔案
                           try {
                             await Share.shareXFiles([XFile(f.path)], text: '分享檔案: $name');
                           } catch (e) {
@@ -1337,7 +1341,6 @@ Future<void> showExportListManager() async {
   });
 }
 
-// 【新增】顯示匯出完成對話框
 Future<void> _showExportResultDialog(String path) async {
   String fileName = path.split('/').last;
   await showDialog(
@@ -1578,7 +1581,6 @@ Future<void> exportReport() async {
         hrs += (rosterExtraHrs[k] ?? 0);
       }
       
-      // 詳細報表內容
       sb.writeln('========================================');
       sb.writeln('       ${focused.year}年${focused.month}月 排更報表');
       sb.writeln('========================================');
@@ -1660,7 +1662,6 @@ Future<void> exportReport() async {
       sb.writeln('全年總工時, ${totalYearHrs.toStringAsFixed(1)}h');
     }
     
-    // 直接存入預設路徑
     String dir = await _getBackupDir();
     String fileName = 'report_${isYearReport ? 'year${focused.year}' : '${focused.year}${focused.month.toString().padLeft(2, '0')}'}.csv';
     String path = '$dir/$fileName';
@@ -1734,7 +1735,6 @@ Future<void> showNotesListDialog() async {
               StringBuffer sb = StringBuffer();
               sb.writeln('日期,記事');
               for (var n in notes) sb.writeln('${n.key},"${n.value.replaceAll('"', '""')}"');
-              // 直接存入預設路徑
               String dir = await _getBackupDir();
               String path = '$dir/notes_${queryYear}${yearMode ? '' : queryMonth.toString().padLeft(2, '0')}.csv';
               final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(sb.toString())];
@@ -1752,7 +1752,6 @@ Future<void> showNotesListDialog() async {
   });
 }
 
-// 【修復】補回 pickRangeAndApply 方法
 Future<void> pickRangeAndApply() async {
   List<List<String>> chosenPattern = pattern;
   if (savedPatterns.isNotEmpty) {
@@ -1847,7 +1846,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
     String selKey = DateFormat('yyyy-MM-dd').format(selectedDay);
     var selDef = roster[selKey] != null ? defs[roster[selKey]] : null;
     
-    // 根據班次定義取得假期
     String? selLeaveCode;
     if (selDef != null) {
       if (selDef.hasAL) selLeaveCode = 'AL';
@@ -1919,7 +1917,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                               String? code = roster[k];
                               var def = code != null ? defs[code] : null;
                               
-                              // 根據班次定義取得假期
                               String? leaveCode;
                               if (def != null) {
                                 if (def.hasAL) leaveCode = 'AL';
@@ -2077,7 +2074,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
               const SizedBox(height: 8),
               Wrap(spacing: 8, children: defs.keys.map((c) => ChoiceChip(label: Text(c), selected: cur == c, onSelected: (_) => setM(() => cur = c))).toList()),
               const SizedBox(height: 8),
-              // 【已刪除 無,GH,SH,AL,WB 的選擇區塊】
               Padding(padding: const EdgeInsets.only(top: 6), child: TextField(controller: nc, minLines: 2, maxLines: 6, keyboardType: TextInputType.multiline, textInputAction: TextInputAction.newline, decoration: const InputDecoration(labelText: '記事 (可換行多行)', alignLabelWithHint: true, isDense: true, border: OutlineInputBorder()))),
               Row(children: [
                 Expanded(child: SizedBox(height: 56, child: TextField(controller: otc, decoration: const InputDecoration(labelText: 'OT時數', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number))),
@@ -2214,7 +2210,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
     bool hasLunch = oldDef?.hasLunch ?? false;
     bool isAllDay = oldDef?.isAllDay ?? false;
     
-    // 新增4個假期核實變數
     bool hasAL = oldDef?.hasAL ?? false;
     bool hasSH = oldDef?.hasSH ?? false;
     bool hasGH = oldDef?.hasGH ?? false;
@@ -2271,7 +2266,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
             const SizedBox(height: 12),
             Column(
               children: [
-                // 【修改】AL SH GH WB 核實格子，改為一行排列，並解決文字出界問題
                 Row(
                   children: [
                     Expanded(
@@ -2406,7 +2400,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                   ot: double.tryParse(otCtrl.text) ?? 0, start: startCtrl.text, end: endCtrl.text, 
                   hasMorningAllow: hasMorningAllow, hasNightAllow: hasNightAllow, hasMealAllow: hasMealAllow, 
                   isAllDay: isAllDay, hasLunch: hasLunch,
-                  hasAL: hasAL, hasSH: hasSH, hasGH: hasGH, hasWB: hasWB // 儲存4個假期設定
+                  hasAL: hasAL, hasSH: hasSH, hasGH: hasGH, hasWB: hasWB
                 );
                 for (var entry in roster.entries) {
                   if (entry.value == newCode) affectedDates.add(entry.key);
@@ -2422,16 +2416,14 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
     });
   }
 
-  // 假期清單對話框
   Future<void> showLeaveListDialog() async {
     int queryYear = focused.year;
-    int queryMonth = focused.month; // 初始化月份
+    int queryMonth = focused.month;
     bool yearMode = false;
     await showDialog(context: context, builder: (ctx) {
       return StatefulBuilder(builder: (ctx2, setD) {
         List<MapEntry<String, String>> leaveEntries = [];
         if (yearMode) {
-          // 從 roster 提取符合條件的假期記錄
           roster.forEach((k, v) {
             if (k.startsWith('$queryYear')) {
               var d = defs[v];
@@ -2442,14 +2434,12 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
               }
             }
           });
-          // 合併 rosterLeave 手動記錄
           rosterLeave.forEach((k, v) {
             if (k.startsWith('$queryYear')) {
               if (!leaveEntries.any((e) => e.key == k)) leaveEntries.add(MapEntry(k, v));
             }
           });
         } else {
-          // 從 roster 提取指定月份的假期記錄
           roster.forEach((k, v) {
             if (k.startsWith('$queryYear-${queryMonth.toString().padLeft(2, '0')}')) {
               var d = defs[v];
@@ -2470,7 +2460,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
 
         Map<String, double> yearUsed = {};
         
-        // 統計該年度的已用天數
         roster.forEach((k, v) {
           if (k.startsWith('$queryYear')) {
             var d = defs[v];
@@ -2495,13 +2484,11 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
             ]),
             const SizedBox(height: 8),
             Row(children: [
-              // 修復左右按鍵邏輯：指定月時切換月份，全年時切換年份
               IconButton(icon: const Icon(Icons.chevron_left), onPressed: () { setD(() { if (yearMode) { queryYear--; } else { queryMonth--; if (queryMonth < 1) { queryMonth = 12; queryYear--; } } }); }),
               Expanded(child: Text(yearMode ? '$queryYear年' : '$queryYear年$queryMonth月', textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
               IconButton(icon: const Icon(Icons.chevron_right), onPressed: () { setD(() { if (yearMode) { queryYear++; } else { queryMonth++; if (queryMonth > 12) { queryMonth = 1; queryYear++; } } }); }),
             ]),
             const Divider(),
-            // 列表支援上下拉動
             Expanded(child: leaveEntries.isEmpty ? const Center(child: Text('沒有假期記錄')) : ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
               itemCount: leaveEntries.length, 
@@ -2517,14 +2504,13 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
             })),
             const Divider(),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8), // 減少水平內邊距，讓內容更貼近邊緣
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
               decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('$queryYear年假期餘額結算', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                   const SizedBox(height: 4),
-                  // 【修改】使用 Row + spaceBetween，向左右拉伸，完整顯示
                   ...leaveDefs.map((leave) {
                     double used = yearUsed[leave.name] ?? 0.0;
                     var rec = leaveRecords['$queryYear']?[leave.name] ?? {'total': 0.0, 'adjust': 0.0, 'carry': 0.0};
@@ -2563,7 +2549,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                   String monthStr = dateStr.substring(5, 7);
                   sb.writeln('$yearStr,$monthStr,$dateStr,${leave.name},${leave.fullName},$used,${balance.toStringAsFixed(1)}');
                 }
-                // 修改：直接存入預設路徑
                 String dir = await _getBackupDir();
                 String path = '$dir/leaves_${queryYear}${yearMode ? '' : queryMonth.toString().padLeft(2, '0')}.csv';
                 final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(sb.toString())];
@@ -2581,7 +2566,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
     });
   }
 
-  // 假期數據管理對話框
   void showLeaveManagementDialog() {
     int selectedYear = DateTime.now().year;
     showDialog(context: context, builder: (ctx) {
@@ -3034,7 +3018,6 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
           onPressed: showLeaveManagementDialog,
         )),
         const SizedBox(height: 8),
-        // 【新增】匯出清單管理按鈕
         SizedBox(width: double.infinity, child: FilledButton.icon(
           icon: const Icon(Icons.folder_open),
           label: const Text('匯出清單管理'),
