@@ -285,7 +285,6 @@ workflows:
           </shape>
           DRAW1_EOF
 
-          # ---------- 用 bash 動態產生 widget_layout.xml（只產生 5 行） ----------
           LAYOUT_FILE="android/app/src/main/res/layout/widget_layout.xml"
           mkdir -p android/app/src/main/res/layout
 
@@ -327,7 +326,6 @@ workflows:
               </LinearLayout>
           HEADER_EOF
 
-          # 只產生 5 行（row0 ~ row4）
           for row in 0 1 2 3 4; do
               cat >> "$LAYOUT_FILE" <<ROW_HEADER_EOF
               <LinearLayout android:id="@+id/row$row" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
@@ -352,7 +350,6 @@ workflows:
           </LinearLayout>
           FOOTER_EOF
 
-          # ---------- RosterWidgetProvider.kt ----------
           cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt <<'WIDGET_EOF'
           package com.example.roster_pro
 
@@ -375,11 +372,8 @@ workflows:
           class RosterWidgetProvider : AppWidgetProvider() {
 
               override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
-                  writeDebugLog(context, "=== onUpdate: ${appWidgetIds.size} widgets ===")
                   for (appWidgetId in appWidgetIds) {
-                      try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (e: Exception) {
-                          writeDebugLog(context, "onUpdate error: ${e.message}")
-                      }
+                      try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (e: Exception) {}
                   }
               }
 
@@ -426,25 +420,6 @@ workflows:
                               }
                           } catch (e: Exception) {}
                       } catch (e: Exception) {}
-                  }
-
-                  private fun getValueAsDouble(sp: SharedPreferences, key: String, def: Double): Double {
-                      return try {
-                          val v = sp.all[key]
-                          val result = when (v) {
-                              null -> def
-                              is Double -> v
-                              is Float -> v.toDouble()
-                              is Long -> {
-                                  val decoded = java.lang.Double.longBitsToDouble(v)
-                                  if (decoded.isNaN() || decoded < 0.1 || decoded > 500.0) v.toDouble() else decoded
-                              }
-                              is Int -> v.toDouble()
-                              is String -> v.toDoubleOrNull() ?: def
-                              else -> def
-                          }
-                          if (result.isNaN() || result <= 0.0 || result > 100.0) def else result
-                      } catch (e: Exception) { def }
                   }
 
                   private fun getValueAsInt(sp: SharedPreferences, key: String, def: Int): Int {
@@ -502,12 +477,11 @@ workflows:
                           calendar.set(year, month, 1)
                           val firstDayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
                           val startOffset = if (firstDayOfWeek == Calendar.SUNDAY) 6 else firstDayOfWeek - 2
-                          val maxDaysInMonth = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
                           val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
                           val paleTextColor = 0xFFB0B0B0.toInt()
                           val weekFormat = SimpleDateFormat("ww", Locale.UK)
 
-                          // 只處理 5 行（0 ~ 4），共 35 格
+                          // 5 行 = 35 格
                           for (i in 0 until 35) {
                               val dayNumId = context.resources.getIdentifier("dayNum$i", "id", context.packageName)
                               val shiftId = context.resources.getIdentifier("shift$i", "id", context.packageName)
@@ -515,7 +489,6 @@ workflows:
                               val cellId = context.resources.getIdentifier("cell$i", "id", context.packageName)
 
                               if (dayNumId == 0) continue
-                              if (cellId != 0) views.setViewVisibility(cellId, View.VISIBLE)
 
                               val cellCal = Calendar.getInstance()
                               cellCal.set(year, month, 1)
@@ -529,13 +502,15 @@ workflows:
                               val shiftCode = rosterJson.optString(dateStr, "")
                               val lunarText = lunarJson.optString(dateStr, "")
 
+                              // 日期（本月黑、非本月灰）
                               views.setTextViewText(dayNumId, cellDay.toString())
                               views.setTextColor(dayNumId, if (isCurrMonth) textColor else paleTextColor)
                               views.setTextViewTextSize(dayNumId, TypedValue.COMPLEX_UNIT_SP, 18f)
                               views.setViewVisibility(dayNumId, View.VISIBLE)
 
+                              // 班次膠囊（不論本月或非本月都顯示）
                               if (shiftId != 0) {
-                                  if (isCurrMonth && shiftCode.isNotEmpty()) {
+                                  if (shiftCode.isNotEmpty()) {
                                       views.setTextViewText(shiftId, shiftCode)
                                       var chipColor = 0xFF4CAF50.toInt()
                                       val defObj = defsJson.optJSONObject(shiftCode)
@@ -556,8 +531,9 @@ workflows:
                                   }
                               }
 
+                              // 農曆（不論本月或非本月都顯示）
                               if (lunarId != 0) {
-                                  if (isCurrMonth && lunarText.isNotEmpty()) {
+                                  if (lunarText.isNotEmpty()) {
                                       views.setTextViewText(lunarId, lunarText)
                                       views.setTextColor(lunarId, 0xFF888888.toInt())
                                       views.setTextViewTextSize(lunarId, TypedValue.COMPLEX_UNIT_SP, 10f)
@@ -567,19 +543,21 @@ workflows:
                                   }
                               }
 
+                              // 格子背景
                               if (cellId != 0) {
                                   if (dateStr == todayStr && isCurrMonth) {
                                       try { views.setInt(cellId, "setBackgroundResource", R.drawable.cell_bg_today) } catch (e: Exception) {}
                                   } else {
                                       var cellBg = bgColor
-                                      if (isCurrMonth && shiftCode.isNotEmpty()) {
+                                      if (shiftCode.isNotEmpty()) {
                                           val defObj = defsJson.optJSONObject(shiftCode)
                                           if (defObj != null) {
                                               val c = defObj.optLong("color", 0).toInt()
                                               if (c != 0) {
-                                                  val r = (Color.red(c) * 0.18 + 255 * 0.82).toInt()
-                                                  val g = (Color.green(c) * 0.18 + 255 * 0.82).toInt()
-                                                  val b = (Color.blue(c) * 0.18 + 255 * 0.82).toInt()
+                                                  val alpha = if (isCurrMonth) 0.18 else 0.10
+                                                  val r = (Color.red(c) * alpha + 255 * (1 - alpha)).toInt()
+                                                  val g = (Color.green(c) * alpha + 255 * (1 - alpha)).toInt()
+                                                  val b = (Color.blue(c) * alpha + 255 * (1 - alpha)).toInt()
                                                   cellBg = Color.rgb(r, g, b)
                                               }
                                           }
@@ -593,11 +571,9 @@ workflows:
                               views.setOnClickPendingIntent(dayNumId, PendingIntent.getActivity(context, appWidgetId * 1000 + i, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                           }
 
-                          // 5 行週數
+                          // 5 行週數（用當週第一天計算）
                           for (r in 0 until 5) {
                               val weekTvId = context.resources.getIdentifier("week$r", "id", context.packageName)
-                              val rowId = context.resources.getIdentifier("row$r", "id", context.packageName)
-                              if (rowId != 0) views.setViewVisibility(rowId, View.VISIBLE)
                               if (weekTvId != 0) {
                                   val rowFirstDay = DateTimeUtils.getDateOfIndex(year, month, r * 7, startOffset)
                                   if (rowFirstDay != null) {
