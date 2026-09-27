@@ -2270,43 +2270,37 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
             Column(
               children: [
                 // 【修改】AL SH GH WB 核實格子，改為4個一行排列，並解決文字出界問題
-                Row(
+                Wrap(
+                  spacing: 4.0,
+                  runSpacing: 4.0,
                   children: [
-                    Expanded(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Checkbox(value: hasAL, onChanged: (v) => setS(() { hasAL = v ?? false; if (hasAL) { hasSH = false; hasGH = false; hasWB = false; } })),
-                          const Flexible(child: Text('AL', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-                        ],
-                      ),
+                    SizedBox(
+                      width: 70,
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Checkbox(value: hasAL, onChanged: (v) => setS(() { hasAL = v ?? false; if (hasAL) { hasSH = false; hasGH = false; hasWB = false; } })),
+                        const Text('AL', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ]),
                     ),
-                    Expanded(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Checkbox(value: hasSH, onChanged: (v) => setS(() { hasSH = v ?? false; if (hasSH) { hasAL = false; hasGH = false; hasWB = false; } })),
-                          const Flexible(child: Text('SH', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-                        ],
-                      ),
+                    SizedBox(
+                      width: 70,
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Checkbox(value: hasSH, onChanged: (v) => setS(() { hasSH = v ?? false; if (hasSH) { hasAL = false; hasGH = false; hasWB = false; } })),
+                        const Text('SH', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ]),
                     ),
-                    Expanded(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Checkbox(value: hasGH, onChanged: (v) => setS(() { hasGH = v ?? false; if (hasGH) { hasAL = false; hasSH = false; hasWB = false; } })),
-                          const Flexible(child: Text('GH', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-                        ],
-                      ),
+                    SizedBox(
+                      width: 70,
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Checkbox(value: hasGH, onChanged: (v) => setS(() { hasGH = v ?? false; if (hasGH) { hasAL = false; hasSH = false; hasWB = false; } })),
+                        const Text('GH', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ]),
                     ),
-                    Expanded(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Checkbox(value: hasWB, onChanged: (v) => setS(() { hasWB = v ?? false; if (hasWB) { hasAL = false; hasSH = false; hasGH = false; } })),
-                          const Flexible(child: Text('WB', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-                        ],
-                      ),
+                    SizedBox(
+                      width: 70,
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Checkbox(value: hasWB, onChanged: (v) => setS(() { hasWB = v ?? false; if (hasWB) { hasAL = false; hasSH = false; hasGH = false; } })),
+                        const Text('WB', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ]),
                     ),
                   ],
                 ),
@@ -2502,7 +2496,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                 children: [
                   Text('$queryYear年假期餘額結算', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                   const SizedBox(height: 4),
-                  // 【修改】顯示已用和結餘天數，刪除括號後綴，並使用 Flexible 解決文字出界問題
+                  // 【修改】顯示已用和結餘天數，使用 Column 分行顯示，確保完整顯示
                   ...leaveDefs.map((leave) {
                     double used = yearUsed[leave.name] ?? 0.0;
                     var rec = leaveRecords['$queryYear']?[leave.name] ?? {'total': 0.0, 'adjust': 0.0, 'carry': 0.0};
@@ -2510,15 +2504,11 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                     double balance = totalDays - used;
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Flexible(
-                            child: Text(leave.name, style: TextStyle(fontWeight: FontWeight.bold, color: leave.color), overflow: TextOverflow.ellipsis),
-                          ),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text('已用: ${used.toStringAsFixed(1)} 天 / 結餘: ${balance.toStringAsFixed(1)} 天', style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
-                          ),
+                          Text(leave.name, style: TextStyle(fontWeight: FontWeight.bold, color: leave.color)),
+                          Text('已用: ${used.toStringAsFixed(1)} 天 / 結餘: ${balance.toStringAsFixed(1)} 天', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                         ],
                       ),
                     );
