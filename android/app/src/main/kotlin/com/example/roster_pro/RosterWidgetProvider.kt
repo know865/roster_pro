@@ -107,24 +107,25 @@ class RosterWidgetProvider : AppWidgetProvider() {
             return def
         }
 
+        // 【關鍵修復】將顏色上限從 Int.MAX_VALUE 改為 4294967296.0 (2^32)
+        // 並優先解碼 double（home_widget 把 double 存成 rawBits 的 Long）
         private fun getColorSafe(sp: SharedPreferences, key: String, def: Int): Int {
             val raw = sp.all[key] ?: return def
             val candidates = mutableListOf<Long>()
             when (raw) {
                 is Int -> candidates.add(raw.toLong())
                 is Long -> {
-                    candidates.add(raw)
+                    // 先嘗試將 raw 解碼為 double（home_widget 把 double 存成 rawBits 的 Long）
                     try {
                         val decoded = java.lang.Double.longBitsToDouble(raw)
-                        if (decoded > 0 && decoded <= Int.MAX_VALUE.toDouble()) candidates.add(decoded.toLong())
+                        if (decoded > 0 && decoded < 4294967296.0) {
+                            candidates.add(0, decoded.toLong())
+                        }
                     } catch (_: Exception) {}
+                    candidates.add(raw)
                 }
                 is Double -> {
-                    if (raw > 0 && raw <= Int.MAX_VALUE.toDouble()) candidates.add(raw.toLong())
-                    try {
-                        val decoded = java.lang.Double.longBitsToDouble(raw.toLong())
-                        if (decoded > 0 && decoded <= Int.MAX_VALUE.toDouble()) candidates.add(decoded.toLong())
-                    } catch (_: Exception) {}
+                    if (raw > 0 && raw < 4294967296.0) candidates.add(raw.toLong())
                 }
                 is Float -> candidates.add(raw.toLong())
                 is String -> raw.toLongOrNull()?.let { candidates.add(it) }
@@ -189,7 +190,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
                 val lunarJson = try { JSONObject(lunarJsonStr) } catch (e: Exception) { JSONObject() }
 
-                writeDebugLog(context, "FontSize=$fontSize TextColor=0x${Integer.toHexString(textColor)} TodayBg=0x${Integer.toHexString(todayBgColor)}")
+                writeDebugLog(context, "FontSize=$fontSize TextColor=0x${Integer.toHexString(textColor)} BgColor=0x${Integer.toHexString(bgColor)} TodayBg=0x${Integer.toHexString(todayBgColor)}")
 
                 views.setTextViewText(R.id.tv_month_title, "${year}年${monthNames[month]}")
                 views.setTextColor(R.id.tv_month_title, textColor)
@@ -206,7 +207,6 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 val todayDrawableId = context.resources.getIdentifier("cell_bg_today", "drawable", context.packageName)
 
                 for (i in 0 until 42) {
-                    // 【修改】單獨 try-catch 保護每個格子的渲染，防止一個格子出錯導致整個 Widget 崩潰
                     try {
                         val dayIndex = i - startOffset + 1
                         val dayTvId = context.resources.getIdentifier("day$i", "id", context.packageName)
@@ -231,7 +231,6 @@ class RosterWidgetProvider : AppWidgetProvider() {
                         views.setTextColor(dayTvId, cellColor)
                         views.setTextViewTextSize(dayTvId, TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat())
 
-                        // 格子背景
                         if (cellId != 0) {
                             if (dateStr == todayStr && isCurrMonth && todayDrawableId != 0) {
                                 try { views.setInt(cellId, "setBackgroundResource", todayDrawableId) } catch (e: Exception) {
@@ -248,7 +247,6 @@ class RosterWidgetProvider : AppWidgetProvider() {
                             }
                         }
 
-                        // 顯示班次
                         if (shiftTvId != 0) {
                             if (shiftCode.isNotEmpty()) {
                                 views.setTextViewText(shiftTvId, shiftCode)
@@ -260,7 +258,6 @@ class RosterWidgetProvider : AppWidgetProvider() {
                                     if (c != 0) chipColor = c
                                 }
 
-                                // 【修改】動態計算文字顏色，確保與背景對比清晰
                                 val r = (chipColor shr 16) and 0xFF
                                 val g = (chipColor shr 8) and 0xFF
                                 val b = chipColor and 0xFF
@@ -278,7 +275,6 @@ class RosterWidgetProvider : AppWidgetProvider() {
                             }
                         }
 
-                        // 顯示農曆
                         if (lunarTvId != 0) {
                             if (lunarText.isNotEmpty()) {
                                 views.setTextViewText(lunarTvId, lunarText)
@@ -314,12 +310,12 @@ class RosterWidgetProvider : AppWidgetProvider() {
                     if (rowHasCurrentMonth) {
                         val weekTvId = context.resources.getIdentifier("week$row", "id", context.packageName)
                         if (weekTvId != 0) {
-                            val rowFirstDay = DateTimeUtils.getDateOfIndex(year, month, row * 7, startOffset)
-                            if (rowFirstDay != null) {
-                                val weekStr = weekFormat.format(rowFirstDay)
-                                views.setTextViewText(weekTvId, "W$weekStr")
-                                views.setTextColor(weekTvId, 0xFF673AB7.toInt())
-                            }
+                            val rowFirstDayCal = Calendar.getInstance()
+                            rowFirstDayCal.set(year, month, 1)
+                            rowFirstDayCal.add(Calendar.DAY_OF_MONTH, row * 7 - startOffset)
+                            val weekStr = weekFormat.format(rowFirstDayCal.time)
+                            views.setTextViewText(weekTvId, "W$weekStr")
+                            views.setTextColor(weekTvId, 0xFF673AB7.toInt())
                         }
                     }
                 }
