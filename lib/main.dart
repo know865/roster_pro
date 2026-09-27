@@ -2345,6 +2345,13 @@ class MainPageState extends State<MainPage> {
 
   void showLeaveManagementDialog() {
     int selectedYear = DateTime.now().year;
+    
+    // 【關鍵修復】在彈窗外聲明控制器 Map，防止每次重建時重置 TextEditingController 導致無法輸入
+    final Map<String, TextEditingController> totalCtrls = {};
+    final Map<String, TextEditingController> adjustCtrls = {};
+    final Map<String, TextEditingController> nameCtrls = {};
+    final Map<String, TextEditingController> fullNameCtrls = {};
+
     showDialog(context: context, builder: (ctx) {
       return StatefulBuilder(builder: (ctx2, setD) {
         if (!leaveRecords.containsKey('$selectedYear')) leaveRecords['$selectedYear'] = {};
@@ -2377,8 +2384,19 @@ class MainPageState extends State<MainPage> {
             Expanded(child: ListView(children: [
               ...leaveDefs.where((e) => !e.isCustom).map((leave) {
                 var record = yearRecords[leave.name]!;
-                var totalCtrl = TextEditingController(text: (record['total'] ?? 0.0).toString());
-                var adjustCtrl = TextEditingController(text: (record['adjust'] ?? 0.0).toString());
+                
+                // 使用年份+假期名作為 Key，確保不同年份和假期對應正確的控制器
+                String key = '${selectedYear}_${leave.name}';
+                
+                if (!totalCtrls.containsKey(key)) {
+                  totalCtrls[key] = TextEditingController(text: (record['total'] ?? 0.0).toString());
+                }
+                var totalCtrl = totalCtrls[key]!;
+                
+                if (!adjustCtrls.containsKey(key)) {
+                  adjustCtrls[key] = TextEditingController(text: (record['adjust'] ?? 0.0).toString());
+                }
+                var adjustCtrl = adjustCtrls[key]!;
                 
                 // 自動計算出的 carry
                 double prevCarry = 0.0;
@@ -2427,10 +2445,28 @@ class MainPageState extends State<MainPage> {
               const Text('自訂假期', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               ...leaveDefs.where((e) => e.isCustom).map((leave) {
                 var record = yearRecords[leave.name]!;
-                var totalCtrl = TextEditingController(text: (record['total'] ?? 0.0).toString());
-                var adjustCtrl = TextEditingController(text: (record['adjust'] ?? 0.0).toString());
-                var nameCtrl = TextEditingController(text: leave.name);
-                var fullNameCtrl = TextEditingController(text: leave.fullName);
+                
+                String key = '${selectedYear}_${leave.name}';
+                
+                if (!totalCtrls.containsKey(key)) {
+                  totalCtrls[key] = TextEditingController(text: (record['total'] ?? 0.0).toString());
+                }
+                var totalCtrl = totalCtrls[key]!;
+                
+                if (!adjustCtrls.containsKey(key)) {
+                  adjustCtrls[key] = TextEditingController(text: (record['adjust'] ?? 0.0).toString());
+                }
+                var adjustCtrl = adjustCtrls[key]!;
+                
+                if (!nameCtrls.containsKey(key)) {
+                  nameCtrls[key] = TextEditingController(text: leave.name);
+                }
+                var nameCtrl = nameCtrls[key]!;
+                
+                if (!fullNameCtrls.containsKey(key)) {
+                  fullNameCtrls[key] = TextEditingController(text: leave.fullName);
+                }
+                var fullNameCtrl = fullNameCtrls[key]!;
                 
                 double prevCarry = 0.0;
                 if (selectedYear > 2000) {
