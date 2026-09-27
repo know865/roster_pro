@@ -27,7 +27,7 @@ class MainActivity : FlutterActivity() {
                 "getCalendars" -> handleGetCalendars(result)
                 "scanImage" -> handleScanImage(call.argument<String>("path"), result)
                 "requestManageStorage" -> handleRequestManageStorage(result)
-                "updateWidget" -> handleUpdateWidget(result) // 新增：立即更新 Widget
+                "updateWidget" -> handleUpdateWidget(result)
                 "deleteAllEventsInCalendar" -> {
                     val calendarId = call.argument<String>("calendarId")
                     if (calendarId == null) {
@@ -41,7 +41,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // 新增：強制刷新 Widget
     private fun handleUpdateWidget(result: MethodChannel.Result) {
         try {
             val appWidgetManager = AppWidgetManager.getInstance(this)
