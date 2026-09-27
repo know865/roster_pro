@@ -342,9 +342,9 @@ class MainPageState extends State<MainPage> {
     nameCtrl.text = customName;
     _loadVersion();
     _requestStoragePermission();
-    
+
     HomeWidget.registerInteractivityCallback(backgroundCallback);
-    
+
     load().then((_) async {
       await Future.delayed(const Duration(milliseconds: 500));
       bool ok = await handleCalendarPermission(silent: false);
@@ -410,7 +410,7 @@ class MainPageState extends State<MainPage> {
     var ddList = sp.getStringList('dirtyDates');
     if (ddList != null) _dirtyDates = ddList.toSet();
     _needsFullSync = sp.getBool('needsFullSync') ?? false;
-    
+
     setState(() {
       carry = sp.getDouble('carry') ?? 0;
       customName = sp.getString('cName') ?? '我的排更-專屬日曆';
@@ -910,7 +910,7 @@ class MainPageState extends State<MainPage> {
 
         statusNotifier.value = '正在重建事件...';
         progressNotifier.value = 0.0;
-        
+
         int total = roster.length;
         int current = 0;
         for (var entry in roster.entries) {
@@ -925,7 +925,7 @@ class MainPageState extends State<MainPage> {
         _dirtyDates.clear();
       } else {
         // ===== 增量同步 =====
-        
+
         // 1. 如果 _googleEventIdMap 為空（例如卸載重裝App後），先掃描重建映射
         if (_googleEventIdMap.isEmpty) {
           statusNotifier.value = '正在掃描現有日曆事件...';
@@ -958,7 +958,7 @@ class MainPageState extends State<MainPage> {
 
         final datesToSync = List<String>.from(_dirtyDates);
         datesToSync.sort();
-        
+
         statusNotifier.value = '正在同步變更...';
         progressNotifier.value = 0.0;
         int total = datesToSync.length;
@@ -968,7 +968,7 @@ class MainPageState extends State<MainPage> {
           current++;
           progressNotifier.value = current / total;
           statusNotifier.value = '正在處理 ($current/$total)...';
-          
+
           DateTime date = DateTime.parse(dateKey);
           DateTime startOfDay = DateTime(date.year, date.month, date.day, 0, 0, 0);
           DateTime endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59);
@@ -986,7 +986,7 @@ class MainPageState extends State<MainPage> {
           }
 
           List<Event> rosterEvents = eventsOnDay.where((e) => e.description != null && e.description!.contains('[RosterPro]')).toList();
-          
+
           // 刪除所有舊事件，不管它是不是重複的
           for (var e in rosterEvents) {
             if (e.eventId != null) {
@@ -1024,8 +1024,10 @@ class MainPageState extends State<MainPage> {
       if (!silent) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('同步失敗 $e')));
     } finally {
       _isSyncing = false;
-      if (loadingCtx != null && loadingCtx!.mounted) {
-        Navigator.pop(loadingCtx);
+      // ✅ 修正：用 local 變數取得非空 BuildContext，避免 BuildContext? 編譯錯誤
+      final ctx = loadingCtx;
+      if (ctx != null && ctx.mounted) {
+        Navigator.pop(ctx);
       }
     }
   }
@@ -1052,7 +1054,7 @@ class MainPageState extends State<MainPage> {
     if (!await _confirmAction()) return;
 
     _isSyncing = true;
-    
+
     final ValueNotifier<double> progressNotifier = ValueNotifier(-1.0);
     final ValueNotifier<String> statusNotifier = ValueNotifier('正在掃描並清理重複事件...');
 
@@ -1096,12 +1098,12 @@ class MainPageState extends State<MainPage> {
     try {
       DateTime scanStart = _calcScanStart();
       DateTime scanEnd = _calcScanEnd();
-      
+
       var res = await _calendarPlugin.retrieveEvents(
         _rosterCalendarId!,
         RetrieveEventsParams(startDate: scanStart, endDate: scanEnd),
       );
-      
+
       if (res.data != null && res.data!.isNotEmpty) {
         Map<String, List<Event>> eventsByDate = {};
         for (var e in res.data!) {
@@ -1146,8 +1148,10 @@ class MainPageState extends State<MainPage> {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('清理失敗 $e')));
     } finally {
       _isSyncing = false;
-      if (loadingCtx != null && loadingCtx!.mounted) {
-        Navigator.pop(loadingCtx);
+      // ✅ 修正：用 local 變數取得非空 BuildContext，避免 BuildContext? 編譯錯誤
+      final ctx = loadingCtx;
+      if (ctx != null && ctx.mounted) {
+        Navigator.pop(ctx);
       }
     }
   }
@@ -1638,7 +1642,6 @@ class MainPageState extends State<MainPage> {
         DateTime calStart = firstDayOfMonth.subtract(Duration(days: firstDayOfMonth.weekday - 1));
         DateTime calEnd = lastDayOfMonth.add(Duration(days: 7 - lastDayOfMonth.weekday));
 
-        // 1. 获取全局排班起始日
         DateTime? globalStart;
         for (String k in roster.keys) {
           try {
@@ -1648,7 +1651,6 @@ class MainPageState extends State<MainPage> {
         }
         DateTime calcStart = globalStart != null ? globalStart.subtract(Duration(days: globalStart.weekday - 1)) : calStart;
 
-        // 2. 计算全局每周工时
         Map<int, double> allWeeklyHours = {};
         DateTime tempDt = calcStart;
         while (!tempDt.isAfter(calEnd)) {
@@ -1664,7 +1666,6 @@ class MainPageState extends State<MainPage> {
           tempDt = tempDt.add(const Duration(days: 1));
         }
 
-        // 3. 计算全局每周余额
         List<int> sortedAllWeeks = allWeeklyHours.keys.toList()..sort();
         double lastCarryExport = carry;
         Map<int, double> weekCarryMap = {};
@@ -1677,17 +1678,15 @@ class MainPageState extends State<MainPage> {
           lastCarryExport = diff;
         }
 
-        // 4. 筛选当前月的周次
         Set<int> currentMonthWeeksSet = {};
         for (DateTime dt = calStart; !dt.isAfter(calEnd); dt = dt.add(const Duration(days: 1))) {
           currentMonthWeeksSet.add(isoWeek(dt));
         }
 
-        // 5. 计算当前月的班次、工时、津贴等统计
         double hrs = 0, ot = 0, allow = 0;
         SplayTreeMap<String, int> shiftCount = SplayTreeMap();
         SplayTreeMap<String, double> extraByType = SplayTreeMap();
-        
+
         for (DateTime dt = firstDayOfMonth; !dt.isAfter(lastDayOfMonth); dt = dt.add(const Duration(days: 1))) {
           String k = DateFormat('yyyy-MM-dd').format(dt);
           String? c = roster[k];
@@ -1725,7 +1724,7 @@ class MainPageState extends State<MainPage> {
         sb.writeln('');
         sb.writeln('【二、每週工時統計】');
         sb.writeln('週次, 本週工時, 標準工時, 承上餘額, 累計差額');
-        
+
         for (var w in sortedAllWeeks) {
           if (!currentMonthWeeksSet.contains(w)) continue;
           double weekHours = allWeeklyHours[w]!;
@@ -1982,12 +1981,10 @@ class MainPageState extends State<MainPage> {
     return SafeArea(
       child: Column(
         children: [
-          // 顶部栏
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
             child: Row(
               children: [
-                // 放大字体的年月选择器
                 Flexible(
                   flex: 2,
                   child: InkWell(
@@ -2007,7 +2004,6 @@ class MainPageState extends State<MainPage> {
                   ),
                 ),
                 const Spacer(),
-                // 紧凑的按钮
                 IconButton(
                   icon: const Icon(Icons.chevron_left),
                   onPressed: _goToPrevMonth,
@@ -2036,7 +2032,6 @@ class MainPageState extends State<MainPage> {
                   ),
                   child: const Text('今天', style: TextStyle(fontSize: 12)),
                 ),
-                // 更多菜单（包含記事、假期、截图）
                 PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert, size: 20),
                   padding: EdgeInsets.zero,
@@ -2055,7 +2050,6 @@ class MainPageState extends State<MainPage> {
               ],
             ),
           ),
-          // 日历区域（占据剩余空间）
           Expanded(
             child: GestureDetector(
               onHorizontalDragEnd: (details) {
@@ -2082,9 +2076,9 @@ class MainPageState extends State<MainPage> {
                           child: GridView.builder(
                             shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), padding: const EdgeInsets.all(2),
                             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 7, 
-                              childAspectRatio: 0.65, 
-                              mainAxisSpacing: 2, 
+                              crossAxisCount: 7,
+                              childAspectRatio: 0.65,
+                              mainAxisSpacing: 2,
                               crossAxisSpacing: 2
                             ),
                             itemCount: 7,
@@ -2092,7 +2086,7 @@ class MainPageState extends State<MainPage> {
                               int idx = row * 7 + col;
                               DateTime day = days[idx];
                               bool inM = day.month == focused.month;
-                              
+
                               String k = DateFormat('yyyy-MM-dd').format(day);
                               String? code = roster[k];
                               var def = code != null ? defs[code] : null;
@@ -2112,7 +2106,7 @@ class MainPageState extends State<MainPage> {
                               String lunarText = showLunar ? LunarHelper.getLunarDayText(day) : '';
                               Color bg;
                               if (isToday) bg = todayBgColor;
-                              else if (!inM) bg = const Color(0xFFF5F5F0); // 跨月背景色
+                              else if (!inM) bg = const Color(0xFFF5F5F0);
                               else if (sel) bg = Colors.white;
                               else if (def != null) bg = def.color.withOpacity(0.18);
                               else bg = const Color(0xFFFFF0D0);
@@ -2152,9 +2146,8 @@ class MainPageState extends State<MainPage> {
               )
             )
           ),
-          // 固定高度的白色详细卡（内容可滚动）
           Container(
-            height: MediaQuery.of(context).size.height * 0.24, // 高度保持为24%，确保第5行完整显示
+            height: MediaQuery.of(context).size.height * 0.24,
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             decoration: const BoxDecoration(
@@ -2666,7 +2659,6 @@ class MainPageState extends State<MainPage> {
                   const SizedBox(height: 4),
                   ...leaveDefs.map((leave) {
                     double used = yearUsed[leave.name] ?? 0.0;
-                    // 結餘公式 = 設定內餘額欄(carry) - 已用天數
                     var rec = leaveRecords['$queryYear']?[leave.name] ?? {'carry': 0.0};
                     double balance = (rec['carry'] as num).toDouble() - used;
                     return Padding(
@@ -2691,7 +2683,6 @@ class MainPageState extends State<MainPage> {
                 for (var n in leaveEntries) {
                   var leave = leaveDefs.firstWhere((e) => e.name == n.value, orElse: () => LeaveDef('', '', Colors.grey));
                   double used = yearUsed[leave.name] ?? 0.0;
-                  // 導出CSV亦使用相同公式
                   var rec = yrRecords[leave.name] ?? {'carry': 0.0};
                   double balance = (rec['carry'] as num).toDouble() - used;
                   String dateStr = n.key;
@@ -2718,8 +2709,7 @@ class MainPageState extends State<MainPage> {
 
   void showLeaveManagementDialog() {
     int selectedYear = DateTime.now().year;
-    
-    // 【關鍵修復】在彈窗外聲明控制器 Map，防止每次重建時重置 TextEditingController 導致無法輸入
+
     final Map<String, TextEditingController> totalCtrls = {};
     final Map<String, TextEditingController> adjustCtrls = {};
     final Map<String, TextEditingController> nameCtrls = {};
@@ -2732,8 +2722,7 @@ class MainPageState extends State<MainPage> {
         for (var def in leaveDefs) {
           if (!yearRecords.containsKey(def.name)) yearRecords[def.name] = {'total': 0.0, 'adjust': 0.0, 'carry': 0.0};
         }
-        
-        // 自動計算並更新目前選中年份的餘額
+
         for (var def in leaveDefs) {
           var record = yearRecords[def.name]!;
           double prevCarry = 0.0;
@@ -2757,21 +2746,19 @@ class MainPageState extends State<MainPage> {
             Expanded(child: ListView(children: [
               ...leaveDefs.where((e) => !e.isCustom).map((leave) {
                 var record = yearRecords[leave.name]!;
-                
-                // 使用年份+假期名作為 Key，確保不同年份和假期對應正確的控制器
+
                 String key = '${selectedYear}_${leave.name}';
-                
+
                 if (!totalCtrls.containsKey(key)) {
                   totalCtrls[key] = TextEditingController(text: (record['total'] ?? 0.0).toString());
                 }
                 var totalCtrl = totalCtrls[key]!;
-                
+
                 if (!adjustCtrls.containsKey(key)) {
                   adjustCtrls[key] = TextEditingController(text: (record['adjust'] ?? 0.0).toString());
                 }
                 var adjustCtrl = adjustCtrls[key]!;
-                
-                // 自動計算出的 carry
+
                 double prevCarry = 0.0;
                 if (selectedYear > 2000) {
                   prevCarry = (leaveRecords['${selectedYear - 1}']?[leave.name]?['carry'] as num?)?.toDouble() ?? 0.0;
@@ -2785,22 +2772,22 @@ class MainPageState extends State<MainPage> {
                   const SizedBox(height: 4),
                   Row(children: [
                     Expanded(child: TextField(
-                      controller: totalCtrl, 
-                      decoration: const InputDecoration(labelText: '天數', isDense: true, border: OutlineInputBorder()), 
-                      keyboardType: TextInputType.number, 
-                      onChanged: (v) { 
-                        record['total'] = double.tryParse(v) ?? 0.0; 
-                        setD(() {}); 
+                      controller: totalCtrl,
+                      decoration: const InputDecoration(labelText: '天數', isDense: true, border: OutlineInputBorder()),
+                      keyboardType: TextInputType.number,
+                      onChanged: (v) {
+                        record['total'] = double.tryParse(v) ?? 0.0;
+                        setD(() {});
                       }
                     )),
                     const SizedBox(width: 8),
                     Expanded(child: TextField(
-                      controller: adjustCtrl, 
-                      decoration: const InputDecoration(labelText: '微調 +/-', isDense: true, border: OutlineInputBorder()), 
-                      keyboardType: TextInputType.number, 
-                      onChanged: (v) { 
-                        record['adjust'] = double.tryParse(v) ?? 0.0; 
-                        setD(() {}); 
+                      controller: adjustCtrl,
+                      decoration: const InputDecoration(labelText: '微調 +/-', isDense: true, border: OutlineInputBorder()),
+                      keyboardType: TextInputType.number,
+                      onChanged: (v) {
+                        record['adjust'] = double.tryParse(v) ?? 0.0;
+                        setD(() {});
                       }
                     )),
                     const SizedBox(width: 8),
@@ -2818,29 +2805,29 @@ class MainPageState extends State<MainPage> {
               const Text('自訂假期', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               ...leaveDefs.where((e) => e.isCustom).map((leave) {
                 var record = yearRecords[leave.name]!;
-                
+
                 String key = '${selectedYear}_${leave.name}';
-                
+
                 if (!totalCtrls.containsKey(key)) {
                   totalCtrls[key] = TextEditingController(text: (record['total'] ?? 0.0).toString());
                 }
                 var totalCtrl = totalCtrls[key]!;
-                
+
                 if (!adjustCtrls.containsKey(key)) {
                   adjustCtrls[key] = TextEditingController(text: (record['adjust'] ?? 0.0).toString());
                 }
                 var adjustCtrl = adjustCtrls[key]!;
-                
+
                 if (!nameCtrls.containsKey(key)) {
                   nameCtrls[key] = TextEditingController(text: leave.name);
                 }
                 var nameCtrl = nameCtrls[key]!;
-                
+
                 if (!fullNameCtrls.containsKey(key)) {
                   fullNameCtrls[key] = TextEditingController(text: leave.fullName);
                 }
                 var fullNameCtrl = fullNameCtrls[key]!;
-                
+
                 double prevCarry = 0.0;
                 if (selectedYear > 2000) {
                   prevCarry = (leaveRecords['${selectedYear - 1}']?[leave.name]?['carry'] as num?)?.toDouble() ?? 0.0;
@@ -2859,16 +2846,16 @@ class MainPageState extends State<MainPage> {
                   const SizedBox(height: 4),
                   Row(children: [
                     Expanded(child: TextField(
-                      controller: totalCtrl, 
-                      decoration: const InputDecoration(labelText: '天數', isDense: true, border: OutlineInputBorder()), 
-                      keyboardType: TextInputType.number, 
+                      controller: totalCtrl,
+                      decoration: const InputDecoration(labelText: '天數', isDense: true, border: OutlineInputBorder()),
+                      keyboardType: TextInputType.number,
                       onChanged: (v) { record['total'] = double.tryParse(v) ?? 0.0; setD(() {}); }
                     )),
                     const SizedBox(width: 8),
                     Expanded(child: TextField(
-                      controller: adjustCtrl, 
-                      decoration: const InputDecoration(labelText: '微調 +/-', isDense: true, border: OutlineInputBorder()), 
-                      keyboardType: TextInputType.number, 
+                      controller: adjustCtrl,
+                      decoration: const InputDecoration(labelText: '微調 +/-', isDense: true, border: OutlineInputBorder()),
+                      keyboardType: TextInputType.number,
                       onChanged: (v) { record['adjust'] = double.tryParse(v) ?? 0.0; setD(() {}); }
                     )),
                     const SizedBox(width: 8),
@@ -3087,7 +3074,7 @@ class MainPageState extends State<MainPage> {
         yearMonthlyHrs[m] = hrs;
       }
     }
-    
+
     int dim = DateTime(year, month + 1, 0).day;
     double hrs = 0, ot = 0, allow = 0;
     Map<String, int> shiftCount = {};
@@ -3099,7 +3086,6 @@ class MainPageState extends State<MainPage> {
     DateTime calStart = firstDayOfMonth.subtract(Duration(days: firstDayOfMonth.weekday - 1));
     DateTime calEnd = lastDayOfMonth.add(Duration(days: 7 - lastDayOfMonth.weekday));
 
-    // 1. 获取全局排班起始日
     DateTime? globalStart;
     for (String k in roster.keys) {
       try {
@@ -3109,7 +3095,6 @@ class MainPageState extends State<MainPage> {
     }
     DateTime calcStart = globalStart != null ? globalStart.subtract(Duration(days: globalStart.weekday - 1)) : calStart;
 
-    // 2. 计算全局每周工时
     Map<int, double> allWeeklyHours = {};
     DateTime tempDt = calcStart;
     while (!tempDt.isAfter(calEnd)) {
@@ -3125,7 +3110,6 @@ class MainPageState extends State<MainPage> {
       tempDt = tempDt.add(const Duration(days: 1));
     }
 
-    // 3. 计算全局每周余额
     List<int> sortedAllWeeks = allWeeklyHours.keys.toList()..sort();
     double lastCarry = carry;
     Map<int, double> weekCarryMap = {};
@@ -3138,7 +3122,6 @@ class MainPageState extends State<MainPage> {
       lastCarry = diff;
     }
 
-    // 4. 筛选当前月的周次
     Set<int> currentMonthWeeksSet = {};
     for (DateTime dt = calStart; !dt.isAfter(calEnd); dt = dt.add(const Duration(days: 1))) {
       currentMonthWeeksSet.add(isoWeek(dt));
@@ -3158,7 +3141,6 @@ class MainPageState extends State<MainPage> {
 
     double totalDiff = weeklyStats.isNotEmpty ? (weeklyStats.last['diff'] as double) : 0.0;
 
-    // 5. 计算当前月的班次、工时、津贴等统计
     for (DateTime dt = firstDayOfMonth; !dt.isAfter(lastDayOfMonth); dt = dt.add(const Duration(days: 1))) {
       String k = DateFormat('yyyy-MM-dd').format(dt);
       String? c = roster[k];
@@ -3683,7 +3665,7 @@ class MainPageState extends State<MainPage> {
     return Scaffold(
       body: [calTab(), patternTab(), reportTab(), settingsTab()][tab],
       bottomNavigationBar: NavigationBar(
-        height: 55, // 調矮底部導航欄
+        height: 55,
         selectedIndex: tab,
         onDestinationSelected: (i) => setState(() => tab = i),
         destinations: const [
