@@ -43,25 +43,29 @@ class ShiftDef {
   String code; String label; double hours; double ot; Color color; String start; String end;
   bool hasMorningAllow; bool hasNightAllow; bool hasMealAllow; bool isAllDay; bool hasLunch;
   bool hasAL; bool hasSH; bool hasGH; bool hasWB;
+  bool hasCustomLeave; String? customLeaveCode;
   ShiftDef(this.code, this.label, this.hours, this.color, {
     this.ot = 0, this.start = '07:00', this.end = '15:30',
     this.hasMorningAllow = false, this.hasNightAllow = false, this.hasMealAllow = false,
     this.isAllDay = false, this.hasLunch = false,
-    this.hasAL = false, this.hasSH = false, this.hasGH = false, this.hasWB = false
+    this.hasAL = false, this.hasSH = false, this.hasGH = false, this.hasWB = false,
+    this.hasCustomLeave = false, this.customLeaveCode
   });
   Map<String, dynamic> toJson() => {
     'code': code, 'label': label, 'hours': hours, 'ot': ot, 'color': color.value,
     'start': start, 'end': end,
     'hasMorningAllow': hasMorningAllow, 'hasNightAllow': hasNightAllow, 'hasMealAllow': hasMealAllow,
     'isAllDay': isAllDay, 'hasLunch': hasLunch,
-    'hasAL': hasAL, 'hasSH': hasSH, 'hasGH': hasGH, 'hasWB': hasWB
+    'hasAL': hasAL, 'hasSH': hasSH, 'hasGH': hasGH, 'hasWB': hasWB,
+    'hasCustomLeave': hasCustomLeave, 'customLeaveCode': customLeaveCode
   };
   factory ShiftDef.fromJson(Map<String, dynamic> j) => ShiftDef(
     j['code'], j['label'] ?? j['code'], (j['hours'] ?? 8).toDouble(), Color(j['color'] ?? 0xFFFF9800),
     ot: (j['ot'] ?? 0).toDouble(), start: j['start'] ?? '07:00', end: j['end'] ?? '15:30',
     hasMorningAllow: j['hasMorningAllow'] ?? false, hasNightAllow: j['hasNightAllow'] ?? false,
     hasMealAllow: j['hasMealAllow'] ?? false, isAllDay: j['isAllDay'] ?? false, hasLunch: j['hasLunch'] ?? false,
-    hasAL: j['hasAL'] ?? false, hasSH: j['hasSH'] ?? false, hasGH: j['hasGH'] ?? false, hasWB: j['hasWB'] ?? false
+    hasAL: j['hasAL'] ?? false, hasSH: j['hasSH'] ?? false, hasGH: j['hasGH'] ?? false, hasWB: j['hasWB'] ?? false,
+    hasCustomLeave: j['hasCustomLeave'] ?? false, customLeaveCode: j['customLeaveCode']
   );
   String get detailTime => isAllDay ? '全天 ${hours.toStringAsFixed(1)}h' : '${start}-${end} ${hours.toStringAsFixed(1)}h';
 }
@@ -1780,6 +1784,7 @@ class MainPageState extends State<MainPage> {
       else if (selDef.hasSH) selLeaveCode = 'SH';
       else if (selDef.hasGH) selLeaveCode = 'GH';
       else if (selDef.hasWB) selLeaveCode = 'WB';
+      else if (selDef.hasCustomLeave && selDef.customLeaveCode != null && selDef.customLeaveCode!.isNotEmpty) selLeaveCode = selDef.customLeaveCode;
     }
     var selLeave = selLeaveCode != null ? leaveDefs.firstWhere((e) => e.name == selLeaveCode, orElse: () => LeaveDef('', '', Colors.grey)) : null;
 
@@ -1858,6 +1863,7 @@ class MainPageState extends State<MainPage> {
                                     else if (def.hasSH) leaveCode = 'SH';
                                     else if (def.hasGH) leaveCode = 'GH';
                                     else if (def.hasWB) leaveCode = 'WB';
+                                    else if (def.hasCustomLeave && def.customLeaveCode != null && def.customLeaveCode!.isNotEmpty) leaveCode = def.customLeaveCode;
                                   }
                                   var leaveDef = leaveCode != null ? leaveDefs.firstWhere((e) => e.name == leaveCode, orElse: () => LeaveDef('', '', Colors.grey)) : null;
                                   bool sel = k == selKey;
@@ -2184,6 +2190,8 @@ class MainPageState extends State<MainPage> {
     bool hasSH = oldDef?.hasSH ?? false;
     bool hasGH = oldDef?.hasGH ?? false;
     bool hasWB = oldDef?.hasWB ?? false;
+    bool hasCustomLeave = oldDef?.hasCustomLeave ?? false;
+    String? customLeaveCode = oldDef?.customLeaveCode;
 
     Color picked = oldDef?.color ?? Colors.orange;
     String oldKey = oldDef?.code ?? '';
@@ -2239,23 +2247,39 @@ class MainPageState extends State<MainPage> {
                 Row(
                   children: [
                     Expanded(child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Checkbox(value: hasAL, onChanged: (v) => setS(() { hasAL = v ?? false; if (hasAL) { hasSH = false; hasGH = false; hasWB = false; } }), visualDensity: VisualDensity.compact, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      Checkbox(value: hasAL, onChanged: (v) => setS(() { hasAL = v ?? false; if (hasAL) { hasSH = false; hasGH = false; hasWB = false; hasCustomLeave = false; customLeaveCode = null; } }), visualDensity: VisualDensity.compact, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
                       const Flexible(child: Text('AL', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                     ])),
                     Expanded(child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Checkbox(value: hasSH, onChanged: (v) => setS(() { hasSH = v ?? false; if (hasSH) { hasAL = false; hasGH = false; hasWB = false; } }), visualDensity: VisualDensity.compact, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      Checkbox(value: hasSH, onChanged: (v) => setS(() { hasSH = v ?? false; if (hasSH) { hasAL = false; hasGH = false; hasWB = false; hasCustomLeave = false; customLeaveCode = null; } }), visualDensity: VisualDensity.compact, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
                       const Flexible(child: Text('SH', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                     ])),
                     Expanded(child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Checkbox(value: hasGH, onChanged: (v) => setS(() { hasGH = v ?? false; if (hasGH) { hasAL = false; hasSH = false; hasWB = false; } }), visualDensity: VisualDensity.compact, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      Checkbox(value: hasGH, onChanged: (v) => setS(() { hasGH = v ?? false; if (hasGH) { hasAL = false; hasSH = false; hasWB = false; hasCustomLeave = false; customLeaveCode = null; } }), visualDensity: VisualDensity.compact, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
                       const Flexible(child: Text('GH', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                     ])),
                     Expanded(child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Checkbox(value: hasWB, onChanged: (v) => setS(() { hasWB = v ?? false; if (hasWB) { hasAL = false; hasSH = false; hasGH = false; } }), visualDensity: VisualDensity.compact, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      Checkbox(value: hasWB, onChanged: (v) => setS(() { hasWB = v ?? false; if (hasWB) { hasAL = false; hasSH = false; hasGH = false; hasCustomLeave = false; customLeaveCode = null; } }), visualDensity: VisualDensity.compact, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
                       const Flexible(child: Text('WB', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                     ])),
                   ],
                 ),
+                const SizedBox(height: 4),
+                Row(children: [
+                  Expanded(child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Checkbox(value: hasCustomLeave, onChanged: (v) => setS(() { hasCustomLeave = v ?? false; if (hasCustomLeave) { hasAL = false; hasSH = false; hasGH = false; hasWB = false; } }), visualDensity: VisualDensity.compact, materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    const Flexible(child: Text('自訂假期', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                  ])),
+                  if (hasCustomLeave)
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: customLeaveCode,
+                        decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8)),
+                        items: leaveDefs.where((e) => e.isCustom).map((e) => DropdownMenuItem(value: e.name, child: Text(e.name, style: const TextStyle(fontSize: 12)))).toList(),
+                        onChanged: (v) { setS(() => customLeaveCode = v); },
+                      ),
+                    )
+                ]),
                 const SizedBox(height: 8),
                 Row(children: [
                   Expanded(child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -2306,7 +2330,8 @@ class MainPageState extends State<MainPage> {
                   ot: double.tryParse(otCtrl.text) ?? 0, start: startCtrl.text, end: endCtrl.text,
                   hasMorningAllow: hasMorningAllow, hasNightAllow: hasNightAllow, hasMealAllow: hasMealAllow,
                   isAllDay: isAllDay, hasLunch: hasLunch,
-                  hasAL: hasAL, hasSH: hasSH, hasGH: hasGH, hasWB: hasWB
+                  hasAL: hasAL, hasSH: hasSH, hasGH: hasGH, hasWB: hasWB,
+                  hasCustomLeave: hasCustomLeave, customLeaveCode: customLeaveCode
                 );
                 for (var entry in roster.entries) {
                   if (entry.value == newCode) affectedDates.add(entry.key);
@@ -2336,6 +2361,7 @@ class MainPageState extends State<MainPage> {
               if (d != null) {
                 String? code;
                 if (d.hasAL) code = 'AL'; else if (d.hasSH) code = 'SH'; else if (d.hasGH) code = 'GH'; else if (d.hasWB) code = 'WB';
+                else if (d.hasCustomLeave && d.customLeaveCode != null && d.customLeaveCode!.isNotEmpty) code = d.customLeaveCode;
                 if (code != null) leaveEntries.add(MapEntry(k, code));
               }
             }
@@ -2352,6 +2378,7 @@ class MainPageState extends State<MainPage> {
               if (d != null) {
                 String? code;
                 if (d.hasAL) code = 'AL'; else if (d.hasSH) code = 'SH'; else if (d.hasGH) code = 'GH'; else if (d.hasWB) code = 'WB';
+                else if (d.hasCustomLeave && d.customLeaveCode != null && d.customLeaveCode!.isNotEmpty) code = d.customLeaveCode;
                 if (code != null) leaveEntries.add(MapEntry(k, code));
               }
             }
@@ -2373,6 +2400,9 @@ class MainPageState extends State<MainPage> {
               if (d.hasSH) yearUsed['SH'] = (yearUsed['SH'] ?? 0) + 1;
               if (d.hasGH) yearUsed['GH'] = (yearUsed['GH'] ?? 0) + 1;
               if (d.hasWB) yearUsed['WB'] = (yearUsed['WB'] ?? 0) + 1;
+              if (d.hasCustomLeave && d.customLeaveCode != null && d.customLeaveCode!.isNotEmpty) {
+                yearUsed[d.customLeaveCode!] = (yearUsed[d.customLeaveCode!] ?? 0) + 1;
+              }
             }
           }
         });
@@ -3037,7 +3067,7 @@ class MainPageState extends State<MainPage> {
           return ListTile(
             leading: CircleAvatar(backgroundColor: d.color, child: Text(d.code, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))),
             title: Text('${d.code} - ${d.label}', style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: (d.hasLunch || d.hasMorningAllow || d.hasNightAllow || d.hasMealAllow || d.hasAL || d.hasSH || d.hasGH || d.hasWB) ? Text('${d.hasMorningAllow ? '早/夜班 ' : ''}${d.hasNightAllow ? '通宵 ' : ''}${d.hasMealAllow ? '膳食 ' : ''}${d.hasLunch ? '午飯1h ' : ''}${d.hasAL ? 'AL ' : ''}${d.hasSH ? 'SH ' : ''}${d.hasGH ? 'GH ' : ''}${d.hasWB ? 'WB' : ''}', style: const TextStyle(fontSize: 11, color: Colors.deepPurple)) : null,
+            subtitle: (d.hasLunch || d.hasMorningAllow || d.hasNightAllow || d.hasMealAllow || d.hasAL || d.hasSH || d.hasGH || d.hasWB || d.hasCustomLeave) ? Text('${d.hasMorningAllow ? '早/夜班 ' : ''}${d.hasNightAllow ? '通宵 ' : ''}${d.hasMealAllow ? '膳食 ' : ''}${d.hasLunch ? '午飯1h ' : ''}${d.hasAL ? 'AL ' : ''}${d.hasSH ? 'SH ' : ''}${d.hasGH ? 'GH ' : ''}${d.hasWB ? 'WB ' : ''}${d.hasCustomLeave ? '自訂假期(${d.customLeaveCode})' : ''}', style: const TextStyle(fontSize: 11, color: Colors.deepPurple)) : null,
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
               IconButton(icon: const Icon(Icons.edit), onPressed: () => editShiftDialog(oldDef: d)),
               IconButton(icon: const Icon(Icons.delete), onPressed: () { setState(() => defs.remove(e.key)); save(); })
