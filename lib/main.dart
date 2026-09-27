@@ -1447,37 +1447,76 @@ class MainPageState extends State<MainPage> {
         DateTime calStart = firstDayOfMonth.subtract(Duration(days: firstDayOfMonth.weekday - 1));
         DateTime calEnd = lastDayOfMonth.add(Duration(days: 7 - lastDayOfMonth.weekday));
 
+        // 1. 获取全局排班起始日
+        DateTime? globalStart;
+        for (String k in roster.keys) {
+          try {
+            DateTime dt = DateTime.parse(k);
+            if (globalStart == null || dt.isBefore(globalStart)) globalStart = dt;
+          } catch (_) {}
+        }
+        DateTime calcStart = globalStart != null ? globalStart.subtract(Duration(days: globalStart.weekday - 1)) : calStart;
+
+        // 2. 计算全局每周工时
+        Map<int, double> allWeeklyHours = {};
+        DateTime tempDt = calcStart;
+        while (!tempDt.isAfter(calEnd)) {
+          String k = DateFormat('yyyy-MM-dd').format(tempDt);
+          String? c = roster[k];
+          if (c != null) {
+            var d = defs[c];
+            if (d != null) {
+              int w = isoWeek(tempDt);
+              allWeeklyHours[w] = (allWeeklyHours[w] ?? 0) + d.hours;
+            }
+          }
+          tempDt = tempDt.add(const Duration(days: 1));
+        }
+
+        // 3. 计算全局每周余额
+        List<int> sortedAllWeeks = allWeeklyHours.keys.toList()..sort();
+        double lastCarryExport = carry;
+        Map<int, double> weekCarryMap = {};
+        Map<int, double> weekDiffMap = {};
+        for (var w in sortedAllWeeks) {
+          double weekHours = allWeeklyHours[w]!;
+          weekCarryMap[w] = lastCarryExport;
+          double diff = lastCarryExport + weekHours - standardWeeklyHours;
+          weekDiffMap[w] = diff;
+          lastCarryExport = diff;
+        }
+
+        // 4. 筛选当前月的周次
+        Set<int> currentMonthWeeksSet = {};
+        for (DateTime dt = calStart; !dt.isAfter(calEnd); dt = dt.add(const Duration(days: 1))) {
+          currentMonthWeeksSet.add(isoWeek(dt));
+        }
+
+        // 5. 计算当前月的班次、工时、津贴等统计
         double hrs = 0, ot = 0, allow = 0;
         SplayTreeMap<String, int> shiftCount = SplayTreeMap();
         SplayTreeMap<String, double> extraByType = SplayTreeMap();
-        Map<int, double> weeklyHours = {};
-
-        for (DateTime dt = calStart; !dt.isAfter(calEnd); dt = dt.add(const Duration(days: 1))) {
+        
+        for (DateTime dt = firstDayOfMonth; !dt.isAfter(lastDayOfMonth); dt = dt.add(const Duration(days: 1))) {
           String k = DateFormat('yyyy-MM-dd').format(dt);
           String? c = roster[k];
           if (c == null) continue;
           var d = defs[c];
           if (d != null) {
-            int w = isoWeek(dt);
-            weeklyHours[w] = (weeklyHours[w] ?? 0) + d.hours;
-
-            if (dt.year == year && dt.month == month) {
-              hrs += d.hours;
-              shiftCount[c] = (shiftCount[c] ?? 0) + 1;
-              if (d.hasMorningAllow) allow += morningAllowance;
-              if (d.hasNightAllow) allow += nightAllowance * d.hours;
-              if (d.hasMealAllow) allow += mealAllowance;
-            }
+            hrs += d.hours;
+            shiftCount[c] = (shiftCount[c] ?? 0) + 1;
+            if (d.hasMorningAllow) allow += morningAllowance;
+            if (d.hasNightAllow) allow += nightAllowance * d.hours;
+            if (d.hasMealAllow) allow += mealAllowance;
           }
-          if (dt.year == year && dt.month == month) {
-            ot += (rosterOt[k] ?? d?.ot ?? 0);
-            allow += (rosterExtra[k] ?? 0);
-            if (rosterExtraType.containsKey(k) && rosterExtra.containsKey(k)) {
-              extraByType[rosterExtraType[k]!] = (extraByType[rosterExtraType[k]!] ?? 0) + rosterExtra[k]!;
-            }
-            hrs += (rosterExtraHrs[k] ?? 0);
+          ot += (rosterOt[k] ?? d?.ot ?? 0);
+          allow += (rosterExtra[k] ?? 0);
+          if (rosterExtraType.containsKey(k) && rosterExtra.containsKey(k)) {
+            extraByType[rosterExtraType[k]!] = (extraByType[rosterExtraType[k]!] ?? 0) + rosterExtra[k]!;
           }
+          hrs += (rosterExtraHrs[k] ?? 0);
         }
+
         sb.writeln('========================================');
         sb.writeln('       ${focused.year}年${focused.month}月 排更報表');
         sb.writeln('========================================');
@@ -1495,14 +1534,15 @@ class MainPageState extends State<MainPage> {
         sb.writeln('');
         sb.writeln('【二、每週工時統計】');
         sb.writeln('週次, 本週工時, 標準工時, 承上餘額, 累計差額');
-        List<int> sortedWeeks = weeklyHours.keys.toList()..sort();
-        double lastCarryExport = carry;
-        for (var week in sortedWeeks) {
-          double weekHours = weeklyHours[week]!;
-          double diff = lastCarryExport + weekHours - standardWeeklyHours;
-          sb.writeln('W$week, ${weekHours.toStringAsFixed(1)}h, ${standardWeeklyHours}h, ${lastCarryExport.toStringAsFixed(1)}h, ${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}h');
-          lastCarryExport = diff;
+        
+        for (var w in sortedAllWeeks) {
+          if (!currentMonthWeeksSet.contains(w)) continue;
+          double weekHours = allWeeklyHours[w]!;
+          double displayCarry = weekCarryMap[w]!;
+          double diff = weekDiffMap[w]!;
+          sb.writeln('W$w, ${weekHours.toStringAsFixed(1)}h, ${standardWeeklyHours}h, ${displayCarry.toStringAsFixed(1)}h, ${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}h');
         }
+
         sb.writeln('');
         sb.writeln('【三、津貼類別統計】');
         sb.writeln('類別, 金額');
@@ -2777,7 +2817,6 @@ class MainPageState extends State<MainPage> {
     double hrs = 0, ot = 0, allow = 0;
     Map<String, int> shiftCount = {};
     Map<String, double> shiftHours = {};
-    Map<int, double> weeklyHours = {};
     Map<String, double> extraByType = {};
 
     DateTime firstDayOfMonth = DateTime(year, month, 1);
@@ -2785,47 +2824,90 @@ class MainPageState extends State<MainPage> {
     DateTime calStart = firstDayOfMonth.subtract(Duration(days: firstDayOfMonth.weekday - 1));
     DateTime calEnd = lastDayOfMonth.add(Duration(days: 7 - lastDayOfMonth.weekday));
 
+    // 1. 获取全局排班起始日
+    DateTime? globalStart;
+    for (String k in roster.keys) {
+      try {
+        DateTime dt = DateTime.parse(k);
+        if (globalStart == null || dt.isBefore(globalStart)) globalStart = dt;
+      } catch (_) {}
+    }
+    DateTime calcStart = globalStart != null ? globalStart.subtract(Duration(days: globalStart.weekday - 1)) : calStart;
+
+    // 2. 计算全局每周工时
+    Map<int, double> allWeeklyHours = {};
+    DateTime tempDt = calcStart;
+    while (!tempDt.isAfter(calEnd)) {
+      String k = DateFormat('yyyy-MM-dd').format(tempDt);
+      String? c = roster[k];
+      if (c != null) {
+        var d = defs[c];
+        if (d != null) {
+          int w = isoWeek(tempDt);
+          allWeeklyHours[w] = (allWeeklyHours[w] ?? 0) + d.hours;
+        }
+      }
+      tempDt = tempDt.add(const Duration(days: 1));
+    }
+
+    // 3. 计算全局每周余额
+    List<int> sortedAllWeeks = allWeeklyHours.keys.toList()..sort();
+    double lastCarry = carry;
+    Map<int, double> weekCarryMap = {};
+    Map<int, double> weekDiffMap = {};
+    for (var w in sortedAllWeeks) {
+      double weekHours = allWeeklyHours[w]!;
+      weekCarryMap[w] = lastCarry;
+      double diff = lastCarry + weekHours - standardWeeklyHours;
+      weekDiffMap[w] = diff;
+      lastCarry = diff;
+    }
+
+    // 4. 筛选当前月的周次
+    Set<int> currentMonthWeeksSet = {};
     for (DateTime dt = calStart; !dt.isAfter(calEnd); dt = dt.add(const Duration(days: 1))) {
+      currentMonthWeeksSet.add(isoWeek(dt));
+    }
+
+    List<Map<String, dynamic>> weeklyStats = [];
+    for (int w in sortedAllWeeks) {
+      if (currentMonthWeeksSet.contains(w)) {
+        weeklyStats.add({
+          'week': w,
+          'hours': allWeeklyHours[w]!,
+          'carry': weekCarryMap[w]!,
+          'diff': weekDiffMap[w]!,
+        });
+      }
+    }
+
+    double totalDiff = weeklyStats.isNotEmpty ? (weeklyStats.last['diff'] as double) : 0.0;
+
+    // 5. 计算当前月的班次、工时、津贴等统计
+    for (DateTime dt = firstDayOfMonth; !dt.isAfter(lastDayOfMonth); dt = dt.add(const Duration(days: 1))) {
       String k = DateFormat('yyyy-MM-dd').format(dt);
       String? c = roster[k];
       if (c == null) continue;
       var d = defs[c];
       if (d != null) {
-        int w = isoWeek(dt);
-        weeklyHours[w] = (weeklyHours[w] ?? 0) + d.hours;
-
-        if (dt.year == year && dt.month == month) {
-          hrs += d.hours;
-          shiftCount[c] = (shiftCount[c] ?? 0) + 1;
-          shiftHours[c] = (shiftHours[c] ?? 0) + d.hours;
-          if (d.hasMorningAllow) allow += morningAllowance;
-          if (d.hasNightAllow) allow += nightAllowance * d.hours;
-          if (d.hasMealAllow) allow += mealAllowance;
-        }
+        hrs += d.hours;
+        shiftCount[c] = (shiftCount[c] ?? 0) + 1;
+        shiftHours[c] = (shiftHours[c] ?? 0) + d.hours;
+        if (d.hasMorningAllow) allow += morningAllowance;
+        if (d.hasNightAllow) allow += nightAllowance * d.hours;
+        if (d.hasMealAllow) allow += mealAllowance;
       }
-      if (dt.year == year && dt.month == month) {
-        ot += (rosterOt[k] ?? d?.ot ?? 0);
-        allow += (rosterExtra[k] ?? 0);
-        if (rosterExtra.containsKey(k) && rosterExtraType.containsKey(k)) {
-          String t = rosterExtraType[k]!;
-          extraByType[t] = (extraByType[t] ?? 0) + rosterExtra[k]!;
-        }
-        hrs += (rosterExtraHrs[k] ?? 0);
+      ot += (rosterOt[k] ?? d?.ot ?? 0);
+      allow += (rosterExtra[k] ?? 0);
+      if (rosterExtra.containsKey(k) && rosterExtraType.containsKey(k)) {
+        String t = rosterExtraType[k]!;
+        extraByType[t] = (extraByType[t] ?? 0) + rosterExtra[k]!;
       }
+      hrs += (rosterExtraHrs[k] ?? 0);
     }
-    
+
     double otAmount = ot * overtimeRate;
     double totalAllow = allow + otAmount;
-    List<Map<String, dynamic>> weeklyStats = [];
-    List<int> sortedWeeks = weeklyHours.keys.toList()..sort();
-    double lastCarry = carry;
-    for (var week in sortedWeeks) {
-      double weekHours = weeklyHours[week]!;
-      double diff = lastCarry + weekHours - standardWeeklyHours;
-      weeklyStats.add({'week': week, 'hours': weekHours, 'carry': lastCarry, 'diff': diff});
-      lastCarry = diff;
-    }
-    double totalDiff = lastCarry; // 修正：最終差額就是最後一週的累計差額
 
     return SafeArea(child: ListView(padding: const EdgeInsets.all(12), children: [
       Row(children: [
