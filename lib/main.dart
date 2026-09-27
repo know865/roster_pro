@@ -1010,6 +1010,85 @@ class MainPageState extends State<MainPage> {
     }
   }
 
+  Future<void> _forceCleanDuplicates() async {
+    if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('尚未選擇日曆')));
+      return;
+    }
+    bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('⚠️ 強制清理重複事件'),
+      content: const Text('這會掃描你設定的日期範圍內所有帶有 [RosterPro] 的事件，並將同一日期的重複事件刪除，只保留最新的一個。\n\n確定要執行嗎？'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('確定清理'))
+      ]
+    ));
+    if (confirm != true) return;
+    if (!await _confirmAction()) return;
+
+    _isSyncing = true;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('開始掃描並清理重複事件...')));
+
+    int cleaned = 0;
+    try {
+      DateTime scanStart = _calcScanStart();
+      DateTime scanEnd = _calcScanEnd();
+      DateTime current = scanStart;
+      
+      while (current.isBefore(scanEnd)) {
+        DateTime next = DateTime(current.year, current.month + 1, 1);
+        if (next.isAfter(scanEnd)) next = scanEnd;
+
+        // 查詢這個月的事件
+        var res = await _calendarPlugin.retrieveEvents(
+          _rosterCalendarId!,
+          RetrieveEventsParams(startDate: current, endDate: next),
+        );
+        
+        if (res.data != null && res.data!.isNotEmpty) {
+          // 按日期分組帶有 [RosterPro] 的事件
+          Map<String, List<Event>> eventsByDate = {};
+          for (var e in res.data!) {
+            if (e.description != null && e.description!.contains('[RosterPro]')) {
+              RegExp regExp = RegExp(r'\[RosterPro\](\d{4}-\d{2}-\d{2})');
+              var match = regExp.firstMatch(e.description!);
+              if (match != null) {
+                String dateKey = match.group(1)!;
+                eventsByDate.putIfAbsent(dateKey, () => []).add(e);
+              }
+            }
+          }
+
+          // 清理同一天的重複事件
+          for (var entry in eventsByDate.entries) {
+            if (entry.value.length > 1) {
+              // 保留第一個（假設是最新的），刪除其他的
+              for (int i = 1; i < entry.value.length; i++) {
+                try {
+                  await _calendarPlugin.deleteEvent(_rosterCalendarId!, entry.value[i].eventId!);
+                  cleaned++;
+                  _writeDebugLog('強制清理重複: ${entry.key}, 刪除 ID: ${entry.value[i].eventId}');
+                } catch (_) {}
+              }
+            }
+          }
+        }
+        current = next;
+      }
+
+      _needsFullSync = false; // 清理後不需要全清重建
+      await _syncToGoogle(silent: true, forceFullSync: false);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('清理完成，共刪除 $cleaned 個重複事件'), duration: const Duration(seconds: 4)));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('清理失敗 $e')));
+    } finally {
+      _isSyncing = false;
+    }
+  }
+
   Future<void> _forceFullResync() async {
     bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
       title: const Text('⚠️ 全清重建確認'),
@@ -1889,7 +1968,7 @@ class MainPageState extends State<MainPage> {
                   ),
                   child: const Text('今天', style: TextStyle(fontSize: 12)),
                 ),
-                // 更多菜单（包含记事、假期、截图）
+                // 更多菜单（包含記事、假期、截图）
                 PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert, size: 20),
                   padding: EdgeInsets.zero,
@@ -3210,6 +3289,8 @@ class MainPageState extends State<MainPage> {
             const Text('• 刪除所有 [RosterPro] 事件\n• App 排班資料不受影響', style: TextStyle(fontSize: 10, color: Colors.black54)),
             const SizedBox(height: 8),
             SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: googleSyncEnabled ? _forceFullResync : null, icon: const Icon(Icons.cleaning_services, size: 18), label: const Text('執行全清重建'), style: FilledButton.styleFrom(backgroundColor: Colors.red))),
+            const SizedBox(height: 8),
+            SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: googleSyncEnabled ? _forceCleanDuplicates : null, icon: const Icon(Icons.cleaning_services, size: 18), label: const Text('強制清理重複事件'), style: FilledButton.styleFrom(backgroundColor: Colors.orange))),
             const SizedBox(height: 8),
             SizedBox(width: double.infinity, child: OutlinedButton.icon(
               onPressed: () async {
