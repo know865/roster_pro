@@ -837,6 +837,29 @@ class MainPageState extends State<MainPage> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(needFull ? '開始完整同步...' : '開始增量同步...')));
     }
 
+    BuildContext? loadingCtx;
+    if (needFull && mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) {
+          loadingCtx = ctx;
+          return PopScope(
+            canPop: false,
+            child: AlertDialog(
+              content: Row(
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(width: 20),
+                  Expanded(child: Text('正在全清重建，清理大量事件可能需時較長，請耐心等待...', style: TextStyle(fontSize: 13))),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    }
+
     try {
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) await _ensureCalendar();
       if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) throw '未選真 Google 日曆';
@@ -958,10 +981,17 @@ class MainPageState extends State<MainPage> {
       if (!silent) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('同步失敗 $e')));
     } finally {
       _isSyncing = false;
+      if (loadingCtx != null && loadingCtx!.mounted) {
+        Navigator.pop(loadingCtx);
+      }
     }
   }
 
   Future<void> _forceCleanDuplicates() async {
+    if (_isSyncing) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在同步中，請稍候...')));
+      return;
+    }
     if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('尚未選擇日曆')));
       return;
@@ -975,25 +1005,44 @@ class MainPageState extends State<MainPage> {
       ]
     ));
     if (confirm != true) return;
+    if (_isSyncing) return; // 再檢查
     if (!await _confirmAction()) return;
 
     _isSyncing = true;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('開始掃描並清理重複事件...')));
+    BuildContext? loadingCtx;
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) {
+          loadingCtx = ctx;
+          return PopScope(
+            canPop: false,
+            child: AlertDialog(
+              content: Row(
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(width: 20),
+                  Expanded(child: Text('正在掃描並清理重複事件，請耐心等待...', style: TextStyle(fontSize: 13))),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    }
 
     int cleaned = 0;
     try {
-      // 掃描全部範圍
       DateTime scanStart = _calcScanStart();
       DateTime scanEnd = _calcScanEnd();
       
-      // 直接掃描整個範圍
       var res = await _calendarPlugin.retrieveEvents(
         _rosterCalendarId!,
         RetrieveEventsParams(startDate: scanStart, endDate: scanEnd),
       );
       
       if (res.data != null && res.data!.isNotEmpty) {
-        // 按日期分組帶有 [RosterPro] 的事件
         Map<String, List<Event>> eventsByDate = {};
         for (var e in res.data!) {
           if (e.description != null && e.description!.contains('[RosterPro]')) {
@@ -1006,10 +1055,8 @@ class MainPageState extends State<MainPage> {
           }
         }
 
-        // 清理同一天的重複事件
         for (var entry in eventsByDate.entries) {
           if (entry.value.length > 1) {
-            // 保留第一個，刪除其他的
             for (int i = 1; i < entry.value.length; i++) {
               try {
                 await _calendarPlugin.deleteEvent(_rosterCalendarId!, entry.value[i].eventId!);
@@ -1021,7 +1068,7 @@ class MainPageState extends State<MainPage> {
         }
       }
 
-      _needsFullSync = false; // 清理後不需要全清重建
+      _needsFullSync = false;
       await _syncToGoogle(silent: true, forceFullSync: false);
 
       if (mounted) {
@@ -1031,10 +1078,17 @@ class MainPageState extends State<MainPage> {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('清理失敗 $e')));
     } finally {
       _isSyncing = false;
+      if (loadingCtx != null && loadingCtx!.mounted) {
+        Navigator.pop(loadingCtx);
+      }
     }
   }
 
   Future<void> _forceFullResync() async {
+    if (_isSyncing) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在同步中，請稍候...')));
+      return;
+    }
     bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
       title: const Text('⚠️ 全清重建確認'),
       content: const Text('這會刪除 Google 日曆上「所有」事件，並根據 App 現有排班重新建立。\n\n✅ App 排班資料不受影響\n✅ 你其他 Google 行程不會被刪除\n\n確定要執行嗎？'),
@@ -1044,6 +1098,7 @@ class MainPageState extends State<MainPage> {
       ]
     ));
     if (confirm != true) return;
+    if (_isSyncing) return; // 再檢查
     if (!await _confirmAction()) return;
     _needsFullSync = true;
     _dirtyDates.clear();
@@ -1066,7 +1121,6 @@ class MainPageState extends State<MainPage> {
     }
   }
 
-  // 還原後，強制先清理一次舊的日曆事件（因為可能已經有重複），再進行同步
   Future<void> restoreFromFile(String path) async {
     try {
       String c = await File(path).readAsString();
@@ -3235,9 +3289,19 @@ class MainPageState extends State<MainPage> {
             const Text('⚠️ 全清重建（救援用）', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 13)),
             const Text('• 刪除所有 [RosterPro] 事件\n• App 排班資料不受影響', style: TextStyle(fontSize: 10, color: Colors.black54)),
             const SizedBox(height: 8),
-            SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: googleSyncEnabled ? _forceFullResync : null, icon: const Icon(Icons.cleaning_services, size: 18), label: const Text('執行全清重建'), style: FilledButton.styleFrom(backgroundColor: Colors.red))),
+            SizedBox(width: double.infinity, child: FilledButton.icon(
+              onPressed: (googleSyncEnabled && !_isSyncing) ? _forceFullResync : null,
+              icon: _isSyncing ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.cleaning_services, size: 18),
+              label: Text(_isSyncing ? '正在同步中...' : '執行全清重建'),
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            )),
             const SizedBox(height: 8),
-            SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: googleSyncEnabled ? _forceCleanDuplicates : null, icon: const Icon(Icons.cleaning_services, size: 18), label: const Text('強制清理重複事件'), style: FilledButton.styleFrom(backgroundColor: Colors.orange))),
+            SizedBox(width: double.infinity, child: FilledButton.icon(
+              onPressed: (googleSyncEnabled && !_isSyncing) ? _forceCleanDuplicates : null,
+              icon: _isSyncing ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.cleaning_services, size: 18),
+              label: Text(_isSyncing ? '正在清理中...' : '強制清理重複事件'),
+              style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+            )),
             const SizedBox(height: 8),
             SizedBox(width: double.infinity, child: OutlinedButton.icon(
               onPressed: () async {
