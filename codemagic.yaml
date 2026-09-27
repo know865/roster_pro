@@ -242,7 +242,6 @@ workflows:
           }
           MAIN_EOF
 
-          # ---------- 新增 DateTimeUtils.kt ----------
           cat > android/app/src/main/kotlin/com/example/roster_pro/DateTimeUtils.kt <<'DATETIME_EOF'
           package com.example.roster_pro
 
@@ -275,7 +274,6 @@ workflows:
           </appwidget-provider>
           INFO_EOF
 
-          # ---------- 新版 widget_layout.xml（左側有「週」欄，共 8 欄） ----------
           mkdir -p android/app/src/main/res/layout
           cat > android/app/src/main/res/layout/widget_layout.xml <<'LAYOUT_EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -372,7 +370,6 @@ workflows:
           </LinearLayout>
           LAYOUT_EOF
 
-          # ---------- 新版 RosterWidgetProvider.kt（含週數計算，TAG 已移入 companion object 修正編譯錯誤） ----------
           cat > android/app/src/main/kotlin/com/example/roster_pro/RosterWidgetProvider.kt <<'WIDGET_EOF'
           package com.example.roster_pro
 
@@ -464,11 +461,26 @@ workflows:
                       } catch (e: Exception) { Log.e(TAG, "writeDebugLog fatal error: ${e.message}") }
                   }
 
+                  // 【關鍵修復】支援解碼 longBitsToDouble，避免讀取到 rawBits 天文數字
                   private fun getValueAsDouble(sp: SharedPreferences, key: String, def: Double): Double {
-                      return try { val v = sp.all[key]; when (v) { null -> def; is Double -> v; is Float -> v.toDouble(); is Long -> v.toDouble(); is Int -> v.toDouble(); is String -> v.toDoubleOrNull() ?: def; else -> def } } catch (e: Exception) { def }
+                      return try {
+                          val v = sp.all[key]
+                          val result = when (v) {
+                              null -> def
+                              is Double -> v
+                              is Float -> v.toDouble()
+                              is Long -> {
+                                  val decoded = java.lang.Double.longBitsToDouble(v)
+                                  if (decoded.isNaN() || decoded < 0.1 || decoded > 500.0) v.toDouble() else decoded
+                              }
+                              is Int -> v.toDouble()
+                              is String -> v.toDoubleOrNull() ?: def
+                              else -> def
+                          }
+                          if (result.isNaN() || result <= 0.0 || result > 100.0) def else result
+                      } catch (e: Exception) { def }
                   }
 
-                  // 【修復】支援 Int / Long / String / Double / Float
                   private fun getValueAsInt(sp: SharedPreferences, key: String, def: Int): Int {
                       return try {
                           val v = sp.all[key]
