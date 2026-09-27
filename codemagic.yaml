@@ -274,7 +274,6 @@ workflows:
           </appwidget-provider>
           INFO_EOF
 
-          # ---------- 建立 drawable 資源 ----------
           mkdir -p android/app/src/main/res/drawable
 
           cat > android/app/src/main/res/drawable/cell_bg_today.xml <<'DRAW1_EOF'
@@ -282,19 +281,11 @@ workflows:
           <shape xmlns:android="http://schemas.android.com/apk/res/android">
               <solid android:color="#FFFFFF" />
               <stroke android:width="2.5dp" android:color="#000000" />
-              <corners android:radius="4dp" />
+              <corners android:radius="6dp" />
           </shape>
           DRAW1_EOF
 
-          cat > android/app/src/main/res/drawable/shift_badge.xml <<'DRAW2_EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <shape xmlns:android="http://schemas.android.com/apk/res/android">
-              <solid android:color="#4CAF50" />
-              <corners android:radius="8dp" />
-          </shape>
-          DRAW2_EOF
-
-          # ---------- 用 bash 動態產生 widget_layout.xml ----------
+          # ---------- 用 bash 動態產生 widget_layout.xml（只產生 5 行） ----------
           LAYOUT_FILE="android/app/src/main/res/layout/widget_layout.xml"
           mkdir -p android/app/src/main/res/layout
 
@@ -306,48 +297,49 @@ workflows:
               android:layout_height="match_parent"
               android:orientation="vertical"
               android:background="#FFFFFF"
-              android:padding="2dp">
+              android:padding="1dp">
 
               <LinearLayout
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
                   android:orientation="horizontal"
                   android:gravity="center_vertical"
-                  android:layout_marginBottom="2dp">
-                  <ImageButton android:id="@+id/btn_prev" android:layout_width="40dp" android:layout_height="40dp" android:src="@android:drawable/ic_media_previous" android:background="?android:attr/selectableItemBackground" android:contentDescription="上個月" />
-                  <TextView android:id="@+id/tv_month_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="2024年1月" android:textAlignment="center" android:textSize="18sp" android:textStyle="bold" android:textColor="#333333" />
-                  <ImageButton android:id="@+id/btn_next" android:layout_width="40dp" android:layout_height="40dp" android:src="@android:drawable/ic_media_next" android:background="?android:attr/selectableItemBackground" android:contentDescription="下個月" />
-                  <ImageButton android:id="@+id/btn_refresh" android:layout_width="40dp" android:layout_height="40dp" android:src="@android:drawable/ic_popup_sync" android:background="?android:attr/selectableItemBackground" android:contentDescription="重新整理" />
+                  android:layout_marginBottom="1dp">
+                  <ImageButton android:id="@+id/btn_prev" android:layout_width="36dp" android:layout_height="36dp" android:src="@android:drawable/ic_media_previous" android:background="?android:attr/selectableItemBackground" android:contentDescription="上個月" />
+                  <TextView android:id="@+id/tv_month_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="2024年1月" android:textAlignment="center" android:textSize="24sp" android:textStyle="bold" android:textColor="#000000" />
+                  <ImageButton android:id="@+id/btn_next" android:layout_width="36dp" android:layout_height="36dp" android:src="@android:drawable/ic_media_next" android:background="?android:attr/selectableItemBackground" android:contentDescription="下個月" />
+                  <ImageButton android:id="@+id/btn_refresh" android:layout_width="36dp" android:layout_height="36dp" android:src="@android:drawable/ic_popup_sync" android:background="?android:attr/selectableItemBackground" android:contentDescription="重新整理" />
               </LinearLayout>
 
               <LinearLayout
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
                   android:orientation="horizontal"
-                  android:layout_marginBottom="2dp">
-                  <TextView android:layout_width="24dp" android:layout_height="wrap_content" android:text="週" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="一" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="二" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="三" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="四" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="五" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#333333" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="六" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#D32F2F" />
-                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="日" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#D32F2F" />
+                  android:layout_marginBottom="1dp">
+                  <TextView android:layout_width="26dp" android:layout_height="wrap_content" android:text="週" android:textAlignment="center" android:textSize="12sp" android:textStyle="bold" android:textColor="#000000" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="一" android:textAlignment="center" android:textSize="12sp" android:textStyle="bold" android:textColor="#000000" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="二" android:textAlignment="center" android:textSize="12sp" android:textStyle="bold" android:textColor="#000000" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="三" android:textAlignment="center" android:textSize="12sp" android:textStyle="bold" android:textColor="#000000" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="四" android:textAlignment="center" android:textSize="12sp" android:textStyle="bold" android:textColor="#000000" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="五" android:textAlignment="center" android:textSize="12sp" android:textStyle="bold" android:textColor="#000000" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="六" android:textAlignment="center" android:textSize="12sp" android:textStyle="bold" android:textColor="#D32F2F" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="日" android:textAlignment="center" android:textSize="12sp" android:textStyle="bold" android:textColor="#D32F2F" />
               </LinearLayout>
           HEADER_EOF
 
-          for row in 0 1 2 3 4 5; do
+          # 只產生 5 行（row0 ~ row4）
+          for row in 0 1 2 3 4; do
               cat >> "$LAYOUT_FILE" <<ROW_HEADER_EOF
               <LinearLayout android:id="@+id/row$row" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
-                  <TextView android:id="@+id/week$row" android:layout_width="24dp" android:layout_height="match_parent" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="1" />
+                  <TextView android:id="@+id/week$row" android:layout_width="26dp" android:layout_height="match_parent" android:gravity="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#000000" android:maxLines="1" />
           ROW_HEADER_EOF
               for col in 0 1 2 3 4 5 6; do
                   idx=$((row * 7 + col))
                   cat >> "$LAYOUT_FILE" <<CELL_EOF
                   <LinearLayout android:id="@+id/cell$idx" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp">
-                      <TextView android:id="@+id/dayNum$idx" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textStyle="bold" android:textColor="#333333" />
-                      <TextView android:id="@+id/shift$idx" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:paddingLeft="5dp" android:paddingRight="5dp" android:paddingTop="1dp" android:paddingBottom="1dp" android:textSize="9sp" android:textStyle="bold" android:textColor="#FFFFFF" android:visibility="gone" />
-                      <TextView android:id="@+id/lunar$idx" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:textSize="8sp" android:textColor="#666666" android:visibility="gone" />
+                      <TextView android:id="@+id/dayNum$idx" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="18sp" android:textStyle="bold" android:textColor="#000000" />
+                      <TextView android:id="@+id/shift$idx" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="1dp" android:paddingLeft="6dp" android:paddingRight="6dp" android:paddingTop="1dp" android:paddingBottom="1dp" android:textSize="11sp" android:textStyle="bold" android:textColor="#FFFFFF" android:visibility="gone" />
+                      <TextView android:id="@+id/lunar$idx" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="1dp" android:textSize="10sp" android:textColor="#888888" android:visibility="gone" />
                   </LinearLayout>
           CELL_EOF
               done
@@ -483,13 +475,9 @@ workflows:
                           val month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH))
                           val monthNames = arrayOf("1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月")
 
-                          var fontSize = getValueAsDouble(homeWidgetPrefs, "widgetFontSize", 0.0)
-                          if (fontSize <= 0.0) fontSize = getValueAsDouble(flutterPrefs, "flutter.widgetFontSize", 0.0)
-                          if (fontSize <= 0.0) fontSize = 12.0
-
                           var textColor = getValueAsInt(homeWidgetPrefs, "widgetTextColor", 0)
                           if (textColor == 0) textColor = getValueAsInt(flutterPrefs, "flutter.widgetTextColor", 0)
-                          if (textColor == 0) textColor = 0xFF333333.toInt()
+                          if (textColor == 0) textColor = 0xFF000000.toInt()
 
                           var bgColor = getValueAsInt(homeWidgetPrefs, "widgetBgColor", 0)
                           if (bgColor == 0) bgColor = getValueAsInt(flutterPrefs, "flutter.widgetBgColor", 0)
@@ -506,11 +494,9 @@ workflows:
                           val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
                           val lunarJson = try { JSONObject(lunarJsonStr) } catch (e: Exception) { JSONObject() }
 
-                          writeDebugLog(context, "FontSize=$fontSize TextColor=0x${Integer.toHexString(textColor)}")
-
                           views.setTextViewText(R.id.tv_month_title, "${year}年${monthNames[month]}")
                           views.setTextColor(R.id.tv_month_title, textColor)
-                          views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, (fontSize * 1.5).toFloat())
+                          views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, 24f)
 
                           val calendar = Calendar.getInstance()
                           calendar.set(year, month, 1)
@@ -521,27 +507,15 @@ workflows:
                           val paleTextColor = 0xFFB0B0B0.toInt()
                           val weekFormat = SimpleDateFormat("ww", Locale.UK)
 
-                          val neededCells = startOffset + maxDaysInMonth
-                          val totalWeeks = Math.ceil(neededCells / 7.0).toInt()
-
-                          for (i in 0 until 42) {
-                              val row = i / 7
+                          // 只處理 5 行（0 ~ 4），共 35 格
+                          for (i in 0 until 35) {
                               val dayNumId = context.resources.getIdentifier("dayNum$i", "id", context.packageName)
                               val shiftId = context.resources.getIdentifier("shift$i", "id", context.packageName)
                               val lunarId = context.resources.getIdentifier("lunar$i", "id", context.packageName)
                               val cellId = context.resources.getIdentifier("cell$i", "id", context.packageName)
 
                               if (dayNumId == 0) continue
-
-                              if (row >= totalWeeks) {
-                                  if (dayNumId != 0) views.setViewVisibility(dayNumId, View.GONE)
-                                  if (shiftId != 0) views.setViewVisibility(shiftId, View.GONE)
-                                  if (lunarId != 0) views.setViewVisibility(lunarId, View.GONE)
-                                  if (cellId != 0) views.setViewVisibility(cellId, View.GONE)
-                                  continue
-                              } else {
-                                  if (cellId != 0) views.setViewVisibility(cellId, View.VISIBLE)
-                              }
+                              if (cellId != 0) views.setViewVisibility(cellId, View.VISIBLE)
 
                               val cellCal = Calendar.getInstance()
                               cellCal.set(year, month, 1)
@@ -555,13 +529,11 @@ workflows:
                               val shiftCode = rosterJson.optString(dateStr, "")
                               val lunarText = lunarJson.optString(dateStr, "")
 
-                              // 日期
                               views.setTextViewText(dayNumId, cellDay.toString())
                               views.setTextColor(dayNumId, if (isCurrMonth) textColor else paleTextColor)
-                              views.setTextViewTextSize(dayNumId, TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat())
+                              views.setTextViewTextSize(dayNumId, TypedValue.COMPLEX_UNIT_SP, 18f)
                               views.setViewVisibility(dayNumId, View.VISIBLE)
 
-                              // 班次（膠囊）
                               if (shiftId != 0) {
                                   if (isCurrMonth && shiftCode.isNotEmpty()) {
                                       views.setTextViewText(shiftId, shiftCode)
@@ -577,24 +549,24 @@ workflows:
                                       val lum = 0.299 * r + 0.587 * g + 0.114 * b
                                       views.setTextColor(shiftId, if (lum > 150) 0xFF000000.toInt() else 0xFFFFFFFF.toInt())
                                       try { views.setInt(shiftId, "setBackgroundColor", chipColor) } catch (e: Exception) {}
+                                      views.setTextViewTextSize(shiftId, TypedValue.COMPLEX_UNIT_SP, 11f)
                                       views.setViewVisibility(shiftId, View.VISIBLE)
                                   } else {
                                       views.setViewVisibility(shiftId, View.GONE)
                                   }
                               }
 
-                              // 農曆
                               if (lunarId != 0) {
                                   if (isCurrMonth && lunarText.isNotEmpty()) {
                                       views.setTextViewText(lunarId, lunarText)
                                       views.setTextColor(lunarId, 0xFF888888.toInt())
+                                      views.setTextViewTextSize(lunarId, TypedValue.COMPLEX_UNIT_SP, 10f)
                                       views.setViewVisibility(lunarId, View.VISIBLE)
                                   } else {
                                       views.setViewVisibility(lunarId, View.GONE)
                                   }
                               }
 
-                              // 格子背景：今天用黑框 drawable
                               if (cellId != 0) {
                                   if (dateStr == todayStr && isCurrMonth) {
                                       try { views.setInt(cellId, "setBackgroundResource", R.drawable.cell_bg_today) } catch (e: Exception) {}
@@ -605,9 +577,9 @@ workflows:
                                           if (defObj != null) {
                                               val c = defObj.optLong("color", 0).toInt()
                                               if (c != 0) {
-                                                  val r = (Color.red(c) * 0.15 + 255 * 0.85).toInt()
-                                                  val g = (Color.green(c) * 0.15 + 255 * 0.85).toInt()
-                                                  val b = (Color.blue(c) * 0.15 + 255 * 0.85).toInt()
+                                                  val r = (Color.red(c) * 0.18 + 255 * 0.82).toInt()
+                                                  val g = (Color.green(c) * 0.18 + 255 * 0.82).toInt()
+                                                  val b = (Color.blue(c) * 0.18 + 255 * 0.82).toInt()
                                                   cellBg = Color.rgb(r, g, b)
                                               }
                                           }
@@ -616,28 +588,24 @@ workflows:
                                   }
                               }
 
-                              // 點擊
                               val intent = Intent(context, MainActivity::class.java)
                               intent.putExtra("selected_date", dateStr)
                               views.setOnClickPendingIntent(dayNumId, PendingIntent.getActivity(context, appWidgetId * 1000 + i, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                           }
 
-                          // 週數
-                          for (r in 0 until 6) {
+                          // 5 行週數
+                          for (r in 0 until 5) {
                               val weekTvId = context.resources.getIdentifier("week$r", "id", context.packageName)
                               val rowId = context.resources.getIdentifier("row$r", "id", context.packageName)
-                              if (r < totalWeeks) {
-                                  if (rowId != 0) views.setViewVisibility(rowId, View.VISIBLE)
-                                  if (weekTvId != 0) {
-                                      val rowFirstDay = DateTimeUtils.getDateOfIndex(year, month, r * 7, startOffset)
-                                      if (rowFirstDay != null) {
-                                          views.setTextViewText(weekTvId, "W${weekFormat.format(rowFirstDay)}")
-                                          views.setTextColor(weekTvId, textColor)
-                                          views.setViewVisibility(weekTvId, View.VISIBLE)
-                                      }
+                              if (rowId != 0) views.setViewVisibility(rowId, View.VISIBLE)
+                              if (weekTvId != 0) {
+                                  val rowFirstDay = DateTimeUtils.getDateOfIndex(year, month, r * 7, startOffset)
+                                  if (rowFirstDay != null) {
+                                      views.setTextViewText(weekTvId, "W${weekFormat.format(rowFirstDay)}")
+                                      views.setTextColor(weekTvId, textColor)
+                                      views.setTextViewTextSize(weekTvId, TypedValue.COMPLEX_UNIT_SP, 11f)
+                                      views.setViewVisibility(weekTvId, View.VISIBLE)
                                   }
-                              } else {
-                                  if (rowId != 0) views.setViewVisibility(rowId, View.GONE)
                               }
                           }
 
