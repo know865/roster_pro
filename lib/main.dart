@@ -900,8 +900,7 @@ class MainPageState extends State<MainPage> {
       } else {
         // ===== 增量同步 =====
         
-        // 【新增】如果 _googleEventIdMap 為空（例如卸載重裝App後），先掃描 Google 日曆上帶有 [RosterPro] 的事件，重建對應關係。
-        // 這樣可以避免重複建立相同班次。
+        // 1. 如果 _googleEventIdMap 為空（例如卸載重裝App後），先掃描重建映射
         if (_googleEventIdMap.isEmpty) {
           await _writeDebugLog('檢測到 googleEventIdMap 為空（可能重裝App），開始掃描日曆重建對應...');
           DateTime scanStart = _calcScanStart();
@@ -930,9 +929,50 @@ class MainPageState extends State<MainPage> {
         }
 
         final datesToSync = List<String>.from(_dirtyDates);
+        // 按日期排序，方便處理
+        datesToSync.sort();
+
         for (var dateKey in datesToSync) {
-          String? existingId = _googleEventIdMap[dateKey];
+          DateTime date = DateTime.parse(dateKey);
+          DateTime startOfDay = DateTime(date.year, date.month, date.day, 0, 0, 0);
+          DateTime endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59);
+
+          // 2. 查詢該日期的所有事件，進行「防重複清理」
+          List<Event> eventsOnDay = [];
+          try {
+            var res = await _calendarPlugin.retrieveEvents(
+              _rosterCalendarId!,
+              RetrieveEventsParams(startDate: startOfDay, endDate: endOfDay),
+            );
+            eventsOnDay = res.data ?? [];
+          } catch (e) {
+            await _writeDebugLog('查詢日期 $dateKey 事件失敗: $e');
+          }
+
+          // 3. 找出所有帶有 [RosterPro] 的事件
+          List<Event> rosterEvents = eventsOnDay.where((e) => e.description != null && e.description!.contains('[RosterPro]')).toList();
           
+          String? existingId;
+          if (rosterEvents.isNotEmpty) {
+            existingId = rosterEvents.first.eventId;
+            // 如果發現多個重複的事件，刪除多餘的，只保留第一個
+            for (int i = 1; i < rosterEvents.length; i++) {
+              try { 
+                await _calendarPlugin.deleteEvent(_rosterCalendarId!, rosterEvents[i].eventId!); 
+                del++;
+                await _writeDebugLog('清理重複事件: $dateKey, ID: ${rosterEvents[i].eventId}');
+              } catch (_) {}
+            }
+          }
+
+          // 更新本地映射
+          if (existingId != null) {
+            _googleEventIdMap[dateKey] = existingId;
+          } else {
+            _googleEventIdMap.remove(dateKey);
+          }
+
+          // 4. 根據最新狀態進行更新或刪除
           if (roster.containsKey(dateKey)) {
             // 如果該日期有排班，帶入 existingEventId 進行原地更新；如果沒有則新建。
             final added = await _buildAndInsertEvent(dateKey, roster[dateKey]!, offset, existingEventId: existingId);
