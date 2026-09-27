@@ -807,7 +807,7 @@ class MainPageState extends State<MainPage> {
   }
 
   // 【核心修改】增量同步邏輯：對於每個要同步的日期，先刪除該日期所有 [RosterPro] 事件，然後重新建立。
-  // 這樣可徹底避免重複。
+  // 這樣可徹底避免重複。並且加入動態進度條與防重入鎖。
   Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) async {
     if (!googleSyncEnabled && !silent) {
       bool? en = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
@@ -837,8 +837,12 @@ class MainPageState extends State<MainPage> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(needFull ? '開始完整同步...' : '開始增量同步...')));
     }
 
+    // 進度與狀態變數
+    final ValueNotifier<double> progressNotifier = ValueNotifier(0.0);
+    final ValueNotifier<String> statusNotifier = ValueNotifier(needFull ? '正在準備全清重建...' : '正在準備增量同步...');
+
     BuildContext? loadingCtx;
-    if (needFull && mounted) {
+    if (mounted) {
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -847,12 +851,30 @@ class MainPageState extends State<MainPage> {
           return PopScope(
             canPop: false,
             child: AlertDialog(
-              content: Row(
-                children: [
-                  const CircularProgressIndicator(),
-                  const SizedBox(width: 20),
-                  Expanded(child: Text('正在全清重建，清理大量事件可能需時較長，請耐心等待...', style: TextStyle(fontSize: 13))),
-                ],
+              title: const Text('同步進行中'),
+              content: ValueListenableBuilder<double>(
+                valueListenable: progressNotifier,
+                builder: (context, progress, child) {
+                  return ValueListenableBuilder<String>(
+                    valueListenable: statusNotifier,
+                    builder: (context, status, child) {
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          LinearProgressIndicator(value: progress == -1 ? null : progress),
+                          const SizedBox(height: 16),
+                          Text(status, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                          if (progress >= 0)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text('${(progress * 100).toStringAsFixed(1)}%', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                            ),
+                        ],
+                      );
+                    },
+                  );
+                },
               ),
             ),
           );
@@ -872,6 +894,8 @@ class MainPageState extends State<MainPage> {
 
       if (needFull) {
         await _writeDebugLog('=== 使用原生 API 強制清理日曆 ID: $_rosterCalendarId ===');
+        statusNotifier.value = '正在清理舊事件，請稍候...';
+        progressNotifier.value = -1; // 無限進度條
         try {
           final deletedCount = await _realChannel.invokeMethod('deleteAllEventsInCalendar', {'calendarId': _rosterCalendarId});
           del = deletedCount as int? ?? 0;
@@ -884,7 +908,15 @@ class MainPageState extends State<MainPage> {
         _googleEventIdMap.clear();
         await Future.delayed(const Duration(seconds: 3));
 
+        statusNotifier.value = '正在重建事件...';
+        progressNotifier.value = 0.0;
+        
+        int total = roster.length;
+        int current = 0;
         for (var entry in roster.entries) {
+          current++;
+          progressNotifier.value = current / total;
+          statusNotifier.value = '正在建立事件 ($current/$total)...';
           final added = await _buildAndInsertEvent(entry.key, entry.value, offset);
           if (added) add++;
         }
@@ -896,6 +928,8 @@ class MainPageState extends State<MainPage> {
         
         // 1. 如果 _googleEventIdMap 為空（例如卸載重裝App後），先掃描重建映射
         if (_googleEventIdMap.isEmpty) {
+          statusNotifier.value = '正在掃描現有日曆事件...';
+          progressNotifier.value = -1; // 無限進度條
           await _writeDebugLog('檢測到 googleEventIdMap 為空，開始掃描日曆重建對應...');
           DateTime scanStart = _calcScanStart();
           DateTime scanEnd = _calcScanEnd();
@@ -924,8 +958,17 @@ class MainPageState extends State<MainPage> {
 
         final datesToSync = List<String>.from(_dirtyDates);
         datesToSync.sort();
+        
+        statusNotifier.value = '正在同步變更...';
+        progressNotifier.value = 0.0;
+        int total = datesToSync.length;
+        int current = 0;
 
         for (var dateKey in datesToSync) {
+          current++;
+          progressNotifier.value = current / total;
+          statusNotifier.value = '正在處理 ($current/$total)...';
+          
           DateTime date = DateTime.parse(dateKey);
           DateTime startOfDay = DateTime(date.year, date.month, date.day, 0, 0, 0);
           DateTime endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59);
@@ -1009,6 +1052,10 @@ class MainPageState extends State<MainPage> {
     if (!await _confirmAction()) return;
 
     _isSyncing = true;
+    
+    final ValueNotifier<double> progressNotifier = ValueNotifier(-1.0);
+    final ValueNotifier<String> statusNotifier = ValueNotifier('正在掃描並清理重複事件...');
+
     BuildContext? loadingCtx;
     if (mounted) {
       showDialog(
@@ -1019,12 +1066,25 @@ class MainPageState extends State<MainPage> {
           return PopScope(
             canPop: false,
             child: AlertDialog(
-              content: Row(
-                children: [
-                  const CircularProgressIndicator(),
-                  const SizedBox(width: 20),
-                  Expanded(child: Text('正在掃描並清理重複事件，請耐心等待...', style: TextStyle(fontSize: 13))),
-                ],
+              title: const Text('清理進行中'),
+              content: ValueListenableBuilder<double>(
+                valueListenable: progressNotifier,
+                builder: (context, progress, child) {
+                  return ValueListenableBuilder<String>(
+                    valueListenable: statusNotifier,
+                    builder: (context, status, child) {
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          LinearProgressIndicator(value: progress == -1 ? null : progress),
+                          const SizedBox(height: 16),
+                          Text(status, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                        ],
+                      );
+                    },
+                  );
+                },
               ),
             ),
           );
@@ -1055,7 +1115,13 @@ class MainPageState extends State<MainPage> {
           }
         }
 
+        int total = eventsByDate.length;
+        int current = 0;
         for (var entry in eventsByDate.entries) {
+          current++;
+          statusNotifier.value = '正在清理 ($current/$total)...';
+          progressNotifier.value = current / total;
+
           if (entry.value.length > 1) {
             for (int i = 1; i < entry.value.length; i++) {
               try {
@@ -1069,6 +1135,8 @@ class MainPageState extends State<MainPage> {
       }
 
       _needsFullSync = false;
+      statusNotifier.value = '清理完成，正在同步最新狀態...';
+      progressNotifier.value = -1;
       await _syncToGoogle(silent: true, forceFullSync: false);
 
       if (mounted) {
