@@ -1797,24 +1797,76 @@ class MainPageState extends State<MainPage> {
         children: [
           // 顶部栏
           Padding(
-            padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-            child: Row(children: [
-              Flexible(flex: 2, child: InkWell(onTap: () => quickJumpMonth(), child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text('${focused.year}年${focused.month}月', style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold)))),
-                const Icon(Icons.arrow_drop_down, size: 30),
-              ]))),
-              const Spacer(),
-              IconButton(icon: const Icon(Icons.list_alt), tooltip: '記事查詢', onPressed: showNotesListDialog, visualDensity: VisualDensity.compact),
-              IconButton(icon: const Icon(Icons.beach_access), tooltip: '假期清單', onPressed: showLeaveListDialog, visualDensity: VisualDensity.compact),
-              IconButton(icon: const Icon(Icons.camera_alt_outlined), tooltip: '整月截圖分享', onPressed: shareScreenshotDialog, visualDensity: VisualDensity.compact),
-              IconButton(icon: const Icon(Icons.chevron_left), onPressed: _goToPrevMonth, visualDensity: VisualDensity.compact),
-              IconButton(icon: const Icon(Icons.chevron_right), onPressed: _goToNextMonth, visualDensity: VisualDensity.compact),
-              FilledButton.tonal(
-                onPressed: () { setState(() { focused = DateTime(today.year, today.month, 1); selectedDay = DateTime(today.year, today.month, today.day); }); },
-                style: FilledButton.styleFrom(minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 8)),
-                child: const Text('今天', style: TextStyle(fontSize: 12)),
-              ),
-            ]),
+            padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+            child: Row(
+              children: [
+                // 放大字体的年月选择器
+                Flexible(
+                  flex: 2,
+                  child: InkWell(
+                    onTap: () => quickJumpMonth(),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '${focused.year}年${focused.month}月',
+                          style: TextStyle(fontSize: calendarFontSize * 2, fontWeight: FontWeight.bold),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Icon(Icons.arrow_drop_down, size: calendarFontSize * 1.5),
+                      ],
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                // 紧凑的按钮
+                IconButton(
+                  icon: const Icon(Icons.chevron_left),
+                  onPressed: _goToPrevMonth,
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right),
+                  onPressed: _goToNextMonth,
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+                FilledButton.tonal(
+                  onPressed: () {
+                    setState(() {
+                      focused = DateTime(today.year, today.month, 1);
+                      selectedDay = DateTime(today.year, today.month, today.day);
+                    });
+                  },
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 32),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  child: const Text('今天', style: TextStyle(fontSize: 12)),
+                ),
+                // 更多菜单（包含记事、假期、截图）
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, size: 20),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  onSelected: (value) {
+                    if (value == 'notes') showNotesListDialog();
+                    else if (value == 'leaves') showLeaveListDialog();
+                    else if (value == 'screenshot') shareScreenshotDialog();
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(value: 'notes', child: Text('記事查詢')),
+                    const PopupMenuItem(value: 'leaves', child: Text('假期清單')),
+                    const PopupMenuItem(value: 'screenshot', child: Text('整月截圖分享')),
+                  ],
+                ),
+              ],
+            ),
           ),
           // 日历区域（占据剩余空间）
           Expanded(
@@ -1914,9 +1966,9 @@ class MainPageState extends State<MainPage> {
           ),
           // 固定高度的白色详细卡（内容可滚动）
           Container(
-            height: MediaQuery.of(context).size.height * 0.33,
+            height: MediaQuery.of(context).size.height * 0.24, // 高度保持为24%，确保第5行完整显示
             width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             decoration: const BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
