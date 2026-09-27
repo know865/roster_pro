@@ -1251,7 +1251,7 @@ Future<void> showExportListManager() async {
                       if (multiSelectMode) {
                         setD(() { if (isSelected) selectedPaths.remove(f.path); else selectedPaths.add(f.path); });
                       } else {
-                        // 直接開啟檔案 (使用預設程式開啟)
+                        // 修改：按下清單名稱直接開啟檔案
                         try {
                           await Share.shareXFiles([XFile(f.path)], text: '開啟檔案: $name');
                         } catch (e) {
@@ -1263,6 +1263,7 @@ Future<void> showExportListManager() async {
                       IconButton(
                         icon: const Icon(Icons.share, size: 18, color: Colors.blue),
                         onPressed: () async {
+                          // 修改：分享按鈕單獨分享該檔案
                           try {
                             await Share.shareXFiles([XFile(f.path)], text: '分享檔案: $name');
                           } catch (e) {
@@ -2616,7 +2617,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                                     const SizedBox(width: 8),
                                     Expanded(child: TextField(controller: adjustCtrl, decoration: const InputDecoration(labelText: '微調 +/-', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (v) => record['adjust'] = double.tryParse(v) ?? 0.0)),
                                     const SizedBox(width: 8),
-                                    Expanded(child: TextField(controller: carryCtrl, decoration: const InputDecoration(labelText: '承上', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (v) => record['carry'] = double.tryParse(v) ?? 0.0)),
+                                    Expanded(child: TextField(controller: carryCtrl, decoration: const InputDecoration(labelText: '餘額', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (v) => record['carry'] = double.tryParse(v) ?? 0.0)),
                                   ],
                                 ),
                               ],
@@ -3636,7 +3637,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
 
                 Text('4. 設定與同步', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
-                Text('• 「假期數據管理」：可設定每年的假期天數、微調、承上，並新增自訂假期。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：刪除 Google 日曆上所有 [RosterPro] 事件並重新建立。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
+                Text('• 「假期數據管理」：可設定每年的假期天數、微調、餘額，並自動計算。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：刪除 Google 日曆上所有 [RosterPro] 事件並重新建立。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
                 SizedBox(height: 16),
 
                 Text('5. 常見問題', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
