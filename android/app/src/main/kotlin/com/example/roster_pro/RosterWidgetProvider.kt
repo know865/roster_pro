@@ -24,23 +24,20 @@ class RosterWidgetProvider : AppWidgetProvider() {
         writeDebugLog(context, "=== onUpdate: ${appWidgetIds.size} widgets ===")
         Handler(Looper.getMainLooper()).postDelayed({
             for (appWidgetId in appWidgetIds) {
-                try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (e: Exception) {
-                    writeDebugLog(context, "onUpdate error: ${e.message}")
-                }
+                try { updateAppWidget(context, appWidgetManager, appWidgetId) }
+                catch (e: Exception) { writeDebugLog(context, "onUpdate error: ${e.message}") }
             }
         }, 500)
     }
 
     override fun onAppWidgetOptionsChanged(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int, newOptions: android.os.Bundle) {
         super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions)
-        writeDebugLog(context, "onAppWidgetOptionsChanged")
-        try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (e: Exception) {}
+        try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (_: Exception) {}
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         val action = intent.action ?: return
-        writeDebugLog(context, "=== onReceive: $action ===")
         if (action == "PREV_MONTH" || action == "NEXT_MONTH" || action == "REFRESH_WIDGET") {
             try {
                 val appWidgetManager = AppWidgetManager.getInstance(context)
@@ -52,13 +49,10 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 if (action == "PREV_MONTH") { month--; if (month < 0) { month = 11; year-- } }
                 else if (action == "NEXT_MONTH") { month++; if (month > 11) { month = 0; year++ } }
                 prefs.edit().putInt("year", year).putInt("month", month).apply()
-                writeDebugLog(context, "Month changed to: $year-$month")
                 for (appWidgetId in allWidgetIds) {
-                    try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (e: Exception) {}
+                    try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (_: Exception) {}
                 }
-            } catch (e: Exception) {
-                writeDebugLog(context, "onReceive error: ${e.message}")
-            }
+            } catch (_: Exception) {}
         }
     }
 
@@ -78,22 +72,24 @@ class RosterWidgetProvider : AppWidgetProvider() {
                         if (file.length() > 200 * 1024) file.writeText("[$timestamp] (log reset)\n")
                         return
                     }
-                } catch (e: Exception) { Log.e(TAG, "Write to ExternalFiles failed: ${e.message}") }
-                try {
-                    val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
-                    if (downloadDir != null) {
-                        if (!downloadDir.exists()) downloadDir.mkdirs()
-                        val file = File(downloadDir, "roster_widget_debug.txt")
-                        file.appendText(line)
-                        return
-                    }
-                } catch (e: Exception) { Log.e(TAG, "Write to Download failed: ${e.message}") }
-                try { val file = File(context.filesDir, "roster_widget_debug.txt"); file.appendText(line) } catch (e: Exception) { Log.e(TAG, "Write to filesDir failed: ${e.message}") }
-            } catch (e: Exception) { Log.e(TAG, "writeDebugLog fatal error: ${e.message}") }
+                } catch (_: Exception) {}
+                try { val file = File(context.filesDir, "roster_widget_debug.txt"); file.appendText(line) } catch (_: Exception) {}
+            } catch (_: Exception) {}
         }
 
         private fun getValueAsDouble(sp: SharedPreferences, key: String, def: Double): Double {
-            return try { val v = sp.all[key]; when (v) { null -> def; is Double -> v; is Float -> v.toDouble(); is Long -> v.toDouble(); is Int -> v.toDouble(); is String -> v.toDoubleOrNull() ?: def; else -> def } } catch (e: Exception) { def }
+            return try {
+                val v = sp.all[key]
+                when (v) {
+                    null -> def
+                    is Double -> v
+                    is Float -> v.toDouble()
+                    is Long -> v.toDouble()
+                    is Int -> v.toDouble()
+                    is String -> v.toDoubleOrNull() ?: def
+                    else -> def
+                }
+            } catch (_: Exception) { def }
         }
 
         private fun getFontSizeSafe(sp: SharedPreferences, key: String, def: Double): Double {
@@ -107,34 +103,18 @@ class RosterWidgetProvider : AppWidgetProvider() {
             return def
         }
 
-        // 【關鍵修復】將顏色上限從 Int.MAX_VALUE 改為 4294967296.0 (2^32)
-        // 並優先解碼 double（home_widget 把 double 存成 rawBits 的 Long）
+        // 【關鍵修復】支援 Int / Long / String / Double 多種型別
         private fun getColorSafe(sp: SharedPreferences, key: String, def: Int): Int {
             val raw = sp.all[key] ?: return def
-            val candidates = mutableListOf<Long>()
-            when (raw) {
-                is Int -> candidates.add(raw.toLong())
-                is Long -> {
-                    // 先嘗試將 raw 解碼為 double（home_widget 把 double 存成 rawBits 的 Long）
-                    try {
-                        val decoded = java.lang.Double.longBitsToDouble(raw)
-                        if (decoded > 0 && decoded < 4294967296.0) {
-                            candidates.add(0, decoded.toLong())
-                        }
-                    } catch (_: Exception) {}
-                    candidates.add(raw)
-                }
-                is Double -> {
-                    if (raw > 0 && raw < 4294967296.0) candidates.add(raw.toLong())
-                }
-                is Float -> candidates.add(raw.toLong())
-                is String -> raw.toLongOrNull()?.let { candidates.add(it) }
+            val result = when (raw) {
+                is Int -> raw
+                is Long -> raw.toInt()
+                is String -> raw.toLongOrNull()?.toInt() ?: def
+                is Double -> raw.toInt()
+                is Float -> raw.toInt()
+                else -> def
             }
-            for (c in candidates) {
-                val i = c.toInt()
-                if ((i ushr 24) != 0) return i
-            }
-            return def
+            return if ((result ushr 24) != 0) result else def
         }
 
         private fun isDarkColor(c: Int): Boolean {
@@ -157,16 +137,14 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 val cal = Calendar.getInstance()
                 val year = widgetPrefs.getInt("year", cal.get(Calendar.YEAR))
                 val month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH))
-                val monthNames = arrayOf("1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月")
+                val monthNames = arrayOf("1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月")
 
                 var fontSize = getFontSizeSafe(homeWidgetPrefs, "widgetFontSize", 0.0)
                 if (fontSize <= 0.0 || fontSize.isNaN()) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widgetFontSize", 0.0)
-                if (fontSize <= 0.0 || fontSize.isNaN()) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widget_font_size", 0.0)
                 if (fontSize <= 0.0 || fontSize.isNaN()) fontSize = 14.0
 
                 var textColor = getColorSafe(homeWidgetPrefs, "widgetTextColor", 0)
                 if (textColor == 0) textColor = getColorSafe(flutterPrefs, "flutter.widgetTextColor", 0)
-                if (textColor == 0) textColor = getColorSafe(flutterPrefs, "flutter.widget_text_color", 0)
                 if (textColor == 0) textColor = 0xFF333333.toInt()
 
                 var bgColor = getColorSafe(homeWidgetPrefs, "widgetBgColor", 0)
@@ -175,9 +153,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
 
                 var todayBgColor = getColorSafe(homeWidgetPrefs, "today_bg", 0)
                 if (todayBgColor == 0) todayBgColor = getColorSafe(flutterPrefs, "flutter.today_bg", 0)
-                if (todayBgColor == 0 || isDarkColor(todayBgColor)) {
-                    todayBgColor = 0xFFBBDEFB.toInt()
-                }
+                if (todayBgColor == 0 || isDarkColor(todayBgColor)) todayBgColor = 0xFFBBDEFB.toInt()
 
                 var rosterJsonStr = homeWidgetPrefs.getString("roster_json", "") ?: ""
                 if (rosterJsonStr.isEmpty()) rosterJsonStr = flutterPrefs.getString("flutter.roster_json", "{}") ?: "{}"
@@ -186,9 +162,9 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 var lunarJsonStr = homeWidgetPrefs.getString("lunar_json", "") ?: ""
                 if (lunarJsonStr.isEmpty()) lunarJsonStr = flutterPrefs.getString("flutter.lunar_json", "{}") ?: "{}"
 
-                val rosterJson = try { JSONObject(rosterJsonStr) } catch (e: Exception) { JSONObject() }
-                val defsJson = try { JSONObject(defsJsonStr) } catch (e: Exception) { JSONObject() }
-                val lunarJson = try { JSONObject(lunarJsonStr) } catch (e: Exception) { JSONObject() }
+                val rosterJson = try { JSONObject(rosterJsonStr) } catch (_: Exception) { JSONObject() }
+                val defsJson = try { JSONObject(defsJsonStr) } catch (_: Exception) { JSONObject() }
+                val lunarJson = try { JSONObject(lunarJsonStr) } catch (_: Exception) { JSONObject() }
 
                 writeDebugLog(context, "FontSize=$fontSize TextColor=0x${Integer.toHexString(textColor)} BgColor=0x${Integer.toHexString(bgColor)} TodayBg=0x${Integer.toHexString(todayBgColor)}")
 
@@ -233,44 +209,35 @@ class RosterWidgetProvider : AppWidgetProvider() {
 
                         if (cellId != 0) {
                             if (dateStr == todayStr && isCurrMonth && todayDrawableId != 0) {
-                                try { views.setInt(cellId, "setBackgroundResource", todayDrawableId) } catch (e: Exception) {
-                                    try { views.setInt(cellId, "setBackgroundColor", todayBgColor) } catch (e2: Exception) {}
-                                }
-                            } else {
-                                try { views.setInt(cellId, "setBackgroundColor", bgColor) } catch (e: Exception) {}
-                            }
+                                try { views.setInt(cellId, "setBackgroundResource", todayDrawableId) }
+                                catch (_: Exception) { try { views.setInt(cellId, "setBackgroundColor", todayBgColor) } catch (_: Exception) {} }
+                            } else try { views.setInt(cellId, "setBackgroundColor", bgColor) } catch (_: Exception) {}
                         } else {
-                            if (dateStr == todayStr && isCurrMonth) {
-                                try { views.setInt(dayTvId, "setBackgroundColor", todayBgColor) } catch (e: Exception) {}
-                            } else {
-                                try { views.setInt(dayTvId, "setBackgroundColor", bgColor) } catch (e: Exception) {}
-                            }
+                            if (dateStr == todayStr && isCurrMonth) try { views.setInt(dayTvId, "setBackgroundColor", todayBgColor) } catch (_: Exception) {}
+                            else try { views.setInt(dayTvId, "setBackgroundColor", bgColor) } catch (_: Exception) {}
                         }
 
                         if (shiftTvId != 0) {
                             if (shiftCode.isNotEmpty()) {
                                 views.setTextViewText(shiftTvId, shiftCode)
-                                
                                 var chipColor = 0xFF4CAF50.toInt()
                                 val defObj = defsJson.optJSONObject(shiftCode)
                                 if (defObj != null) {
                                     val c = defObj.optLong("color", 0).toInt()
                                     if (c != 0) chipColor = c
                                 }
-
                                 val r = (chipColor shr 16) and 0xFF
                                 val g = (chipColor shr 8) and 0xFF
                                 val b = chipColor and 0xFF
                                 val luminance = 0.299 * r + 0.587 * g + 0.114 * b
                                 val textColorForShift = if (luminance > 150) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
-
                                 views.setTextColor(shiftTvId, textColorForShift)
                                 views.setTextViewTextSize(shiftTvId, TypedValue.COMPLEX_UNIT_SP, (fontSize * 0.7).toFloat())
-                                try { views.setInt(shiftTvId, "setBackgroundColor", chipColor) } catch (e: Exception) {}
+                                try { views.setInt(shiftTvId, "setBackgroundColor", chipColor) } catch (_: Exception) {}
                                 views.setViewVisibility(shiftTvId, View.VISIBLE)
                             } else {
                                 views.setTextViewText(shiftTvId, "")
-                                try { views.setInt(shiftTvId, "setBackgroundColor", Color.TRANSPARENT) } catch (e: Exception) {}
+                                try { views.setInt(shiftTvId, "setBackgroundColor", Color.TRANSPARENT) } catch (_: Exception) {}
                                 views.setViewVisibility(shiftTvId, View.INVISIBLE)
                             }
                         }
@@ -291,48 +258,37 @@ class RosterWidgetProvider : AppWidgetProvider() {
                         intent.putExtra("selected_date", dateStr)
                         intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                         views.setOnClickPendingIntent(dayTvId, PendingIntent.getActivity(context, appWidgetId * 1000 + i, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
-                    } catch (e: Exception) {
-                        writeDebugLog(context, "cell $i error: ${e.message}")
-                    }
+                    } catch (e: Exception) { writeDebugLog(context, "cell $i error: ${e.message}") }
                 }
 
                 for (row in 0 until 6) {
                     var rowHasCurrentMonth = false
                     for (col in 0 until 7) {
-                        val idx = row * 7 + col
-                        val dayIndex = idx - startOffset + 1
+                        val dayIndex = row * 7 + col - startOffset + 1
                         if (dayIndex in 1..maxDaysInMonth) { rowHasCurrentMonth = true; break }
                     }
                     val rowId = context.resources.getIdentifier("row$row", "id", context.packageName)
-                    if (rowId != 0) {
-                        views.setViewVisibility(rowId, if (rowHasCurrentMonth) View.VISIBLE else View.GONE)
-                    }
+                    if (rowId != 0) views.setViewVisibility(rowId, if (rowHasCurrentMonth) View.VISIBLE else View.GONE)
                     if (rowHasCurrentMonth) {
                         val weekTvId = context.resources.getIdentifier("week$row", "id", context.packageName)
                         if (weekTvId != 0) {
                             val rowFirstDayCal = Calendar.getInstance()
                             rowFirstDayCal.set(year, month, 1)
                             rowFirstDayCal.add(Calendar.DAY_OF_MONTH, row * 7 - startOffset)
-                            val weekStr = weekFormat.format(rowFirstDayCal.time)
-                            views.setTextViewText(weekTvId, "W$weekStr")
+                            views.setTextViewText(weekTvId, "W${weekFormat.format(rowFirstDayCal.time)}")
                             views.setTextColor(weekTvId, 0xFF673AB7.toInt())
                         }
                     }
                 }
 
-                try { views.setInt(R.id.widget_root, "setBackgroundColor", bgColor) } catch (e: Exception) {}
+                try { views.setInt(R.id.widget_root, "setBackgroundColor", bgColor) } catch (_: Exception) {}
 
-                val prevIntent = Intent(context, RosterWidgetProvider::class.java).setAction("PREV_MONTH")
-                views.setOnClickPendingIntent(R.id.btn_prev, PendingIntent.getBroadcast(context, 0, prevIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
-                val nextIntent = Intent(context, RosterWidgetProvider::class.java).setAction("NEXT_MONTH")
-                views.setOnClickPendingIntent(R.id.btn_next, PendingIntent.getBroadcast(context, 1, nextIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
-                val refreshIntent = Intent(context, RosterWidgetProvider::class.java).setAction("REFRESH_WIDGET")
-                views.setOnClickPendingIntent(R.id.btn_refresh, PendingIntent.getBroadcast(context, 2, refreshIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+                views.setOnClickPendingIntent(R.id.btn_prev, PendingIntent.getBroadcast(context, 0, Intent(context, RosterWidgetProvider::class.java).setAction("PREV_MONTH"), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+                views.setOnClickPendingIntent(R.id.btn_next, PendingIntent.getBroadcast(context, 1, Intent(context, RosterWidgetProvider::class.java).setAction("NEXT_MONTH"), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+                views.setOnClickPendingIntent(R.id.btn_refresh, PendingIntent.getBroadcast(context, 2, Intent(context, RosterWidgetProvider::class.java).setAction("REFRESH_WIDGET"), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
 
                 writeDebugLog(context, "✅ Widget 渲染成功 id=$appWidgetId")
-            } catch (e: Exception) {
-                writeDebugLog(context, "❌ updateAppWidget error: ${e.message}")
-            }
+            } catch (e: Exception) { writeDebugLog(context, "❌ updateAppWidget error: ${e.message}") }
             appWidgetManager.updateAppWidget(appWidgetId, views)
         }
     }
