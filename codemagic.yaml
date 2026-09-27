@@ -312,7 +312,7 @@ workflows:
                   <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="日" android:textAlignment="center" android:textSize="10sp" android:textStyle="bold" android:textColor="#D32F2F" />
               </LinearLayout>
 
-              <GridLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:columnCount="8" android:rowCount="6" android:layout_marginTop="1dp">
+              <GridLayout android:id="@+id/grid_days" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:columnCount="8" android:rowCount="6" android:layout_marginTop="1dp">
                   <TextView android:id="@+id/week0" android:layout_width="24dp" android:layout_height="0dp" android:layout_rowWeight="1" android:gravity="center" android:textSize="9sp" android:textColor="#555555" android:maxLines="1" />
                   <TextView android:id="@+id/day0" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
                   <TextView android:id="@+id/day1" android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" android:layout_rowWeight="1" android:gravity="center" android:textSize="10sp" android:padding="1dp" android:maxLines="3" android:ellipsize="none" />
@@ -461,7 +461,6 @@ workflows:
                       } catch (e: Exception) { Log.e(TAG, "writeDebugLog fatal error: ${e.message}") }
                   }
 
-                  // 【關鍵修復】支援解碼 longBitsToDouble，避免讀取到 rawBits 天文數字
                   private fun getValueAsDouble(sp: SharedPreferences, key: String, def: Double): Double {
                       return try {
                           val v = sp.all[key]
@@ -546,26 +545,47 @@ workflows:
                           val startOffset = if (firstDayOfWeek == Calendar.SUNDAY) 6 else firstDayOfWeek - 2
                           val maxDaysInMonth = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
                           val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                          val paleTextColor = 0xFFB0B0B0.toInt()
 
                           val weekFormat = SimpleDateFormat("ww", Locale.UK)
 
+                          // 計算需要幾週
+                          val neededCells = startOffset + maxDaysInMonth
+                          val totalWeeks = Math.ceil(neededCells / 7.0).toInt()
+
                           for (i in 0 until 42) {
-                              val dayIndex = i - startOffset + 1
                               val tvId = context.resources.getIdentifier("day$i", "id", context.packageName)
                               if (tvId == 0) continue
                               try {
-                                  if (dayIndex in 1..maxDaysInMonth) {
-                                      val dateStr = String.format("%04d-%02d-%02d", year, month + 1, dayIndex)
+                                  val row = i / 7
+                                  // 超過實際週數的行，隱藏
+                                  if (row >= totalWeeks) {
+                                      views.setTextViewText(tvId, "")
+                                      views.setViewVisibility(tvId, View.GONE)
+                                  } else {
+                                      // 用 Calendar 計算每個格子的實際日期（含跨月）
+                                      val cellCal = Calendar.getInstance()
+                                      cellCal.set(year, month, 1)
+                                      cellCal.add(Calendar.DAY_OF_MONTH, i - startOffset)
+                                      val cellYear = cellCal.get(Calendar.YEAR)
+                                      val cellMonth = cellCal.get(Calendar.MONTH)
+                                      val cellDay = cellCal.get(Calendar.DAY_OF_MONTH)
+                                      val isCurrMonth = (cellMonth == month && cellYear == year)
+
+                                      val dateStr = String.format("%04d-%02d-%02d", cellYear, cellMonth + 1, cellDay)
                                       val shiftCode = rosterJson.optString(dateStr, "")
-                                      var displayText = dayIndex.toString()
-                                      if (shiftCode.isNotEmpty()) displayText = "$dayIndex\n$shiftCode"
+                                      var displayText = cellDay.toString()
+                                      if (shiftCode.isNotEmpty()) displayText = "$cellDay\n$shiftCode"
                                       views.setTextViewText(tvId, displayText)
-                                      views.setTextColor(tvId, textColor)
+
+                                      // 非本月日期用淺灰色
+                                      val displayColor = if (isCurrMonth) textColor else paleTextColor
+                                      views.setTextColor(tvId, displayColor)
                                       views.setTextViewTextSize(tvId, TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat())
                                       views.setViewVisibility(tvId, View.VISIBLE)
 
                                       var bg = bgColor
-                                      if (shiftCode.isNotEmpty()) {
+                                      if (isCurrMonth && shiftCode.isNotEmpty()) {
                                           val defObj = defsJson.optJSONObject(shiftCode)
                                           if (defObj != null) {
                                               val c = defObj.optLong("color", 0).toInt()
@@ -577,23 +597,23 @@ workflows:
                                               }
                                           }
                                       }
-                                      if (dateStr == todayStr) bg = todayBgColor
+                                      if (dateStr == todayStr && isCurrMonth) bg = todayBgColor
                                       try { views.setInt(tvId, "setBackgroundColor", bg) } catch (e: Exception) {}
 
                                       val intent = Intent(context, MainActivity::class.java)
                                       intent.putExtra("selected_date", dateStr)
                                       views.setOnClickPendingIntent(tvId, PendingIntent.getActivity(context, appWidgetId * 1000 + i, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
-                                  } else {
-                                      views.setTextViewText(tvId, "")
-                                      views.setViewVisibility(tvId, View.INVISIBLE)
                                   }
 
+                                  // 每行的第一格顯示該週的週數
                                   if (i % 7 == 0) {
                                       val weekTvId = context.resources.getIdentifier("week${i / 7}", "id", context.packageName)
                                       if (weekTvId != 0) {
-                                          val rowFirstDay = DateTimeUtils.getDateOfIndex(year, month, i, startOffset)
-                                          if (rowFirstDay != null) {
-                                              val weekStr = weekFormat.format(rowFirstDay)
+                                          if (row < totalWeeks) {
+                                              val rowFirstDayCal = Calendar.getInstance()
+                                              rowFirstDayCal.set(year, month, 1)
+                                              rowFirstDayCal.add(Calendar.DAY_OF_MONTH, i - startOffset)
+                                              val weekStr = weekFormat.format(rowFirstDayCal.time)
                                               views.setTextViewText(weekTvId, "W$weekStr")
                                               views.setTextColor(weekTvId, textColor)
                                               views.setViewVisibility(weekTvId, View.VISIBLE)
