@@ -30,11 +30,8 @@ class MainActivity : FlutterActivity() {
                 "updateWidget" -> handleUpdateWidget(result)
                 "deleteAllEventsInCalendar" -> {
                     val calendarId = call.argument<String>("calendarId")
-                    if (calendarId == null) {
-                        result.error("NO_CAL_ID", "Calendar ID is null", null)
-                    } else {
-                        handleDeleteAllEvents(calendarId, result)
-                    }
+                    if (calendarId == null) result.error("NO_CAL_ID", "Calendar ID is null", null)
+                    else handleDeleteAllEvents(calendarId, result)
                 }
                 else -> result.notImplemented()
             }
@@ -57,18 +54,16 @@ class MainActivity : FlutterActivity() {
 
     private fun handleGetCalendars(result: MethodChannel.Result) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
-            result.error("PERMISSION", "No calendar permission", null)
-            return
+            result.error("PERMISSION", "No calendar permission", null); return
         }
         val calendars = mutableListOf<Map<String, Any?>>()
-        val uri = CalendarContract.Calendars.CONTENT_URI
         val projection = arrayOf(
             CalendarContract.Calendars._ID,
             CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
             CalendarContract.Calendars.ACCOUNT_NAME,
             CalendarContract.Calendars.ACCOUNT_TYPE
         )
-        val cursor = contentResolver.query(uri, projection, null, null, null)
+        val cursor = contentResolver.query(CalendarContract.Calendars.CONTENT_URI, projection, null, null, null)
         cursor?.use {
             while (it.moveToNext()) {
                 val id = it.getLong(0).toString()
@@ -77,10 +72,8 @@ class MainActivity : FlutterActivity() {
                 val accountType = it.getString(3) ?: ""
                 val isGoogle = accountName.contains("gmail") || accountType.contains("google") || accountName.contains("google")
                 calendars.add(mapOf(
-                    "id" to id,
-                    "displayName" to displayName,
-                    "accountName" to accountName,
-                    "accountType" to accountType,
+                    "id" to id, "displayName" to displayName,
+                    "accountName" to accountName, "accountType" to accountType,
                     "isGoogle" to isGoogle
                 ))
             }
@@ -93,7 +86,9 @@ class MainActivity : FlutterActivity() {
         try {
             val file = File(path)
             if (!file.exists()) { result.error("NO_FILE", "File does not exist: $path", null); return }
-            MediaScannerConnection.scanFile(applicationContext, arrayOf(file.absolutePath), arrayOf("image/jpeg", "image/jpg", "image/png")) { _, uri -> result.success(uri?.toString() ?: path) }
+            MediaScannerConnection.scanFile(applicationContext, arrayOf(file.absolutePath), arrayOf("image/jpeg", "image/jpg", "image/png")) { _, uri ->
+                result.success(uri?.toString() ?: path)
+            }
         } catch (e: Exception) { result.error("SCAN_FAIL", e.message, null) }
     }
 
@@ -108,29 +103,21 @@ class MainActivity : FlutterActivity() {
                     return
                 }
                 result.success(true)
-            } else { result.success(true) }
+            } else result.success(true)
         } catch (e: Exception) { result.error("STORAGE_FAIL", e.message, null) }
     }
 
     private fun handleDeleteAllEvents(calendarId: String, result: MethodChannel.Result) {
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
-                result.error("PERMISSION", "No write calendar permission", null)
-                return
+                result.error("PERMISSION", "No write calendar permission", null); return
             }
-
-            val uri = CalendarContract.Events.CONTENT_URI
             val projection = arrayOf(CalendarContract.Events._ID)
             val selection = "${CalendarContract.Events.CALENDAR_ID} = ?"
             val selectionArgs = arrayOf(calendarId)
-
-            val cursor = contentResolver.query(uri, projection, selection, selectionArgs, null)
+            val cursor = contentResolver.query(CalendarContract.Events.CONTENT_URI, projection, selection, selectionArgs, null)
             val eventIds = mutableListOf<Long>()
-            cursor?.use {
-                while (it.moveToNext()) {
-                    eventIds.add(it.getLong(0))
-                }
-            }
+            cursor?.use { while (it.moveToNext()) eventIds.add(it.getLong(0)) }
 
             val batchSize = 10
             var deleted = 0
@@ -139,20 +126,12 @@ class MainActivity : FlutterActivity() {
                 val end = minOf(index + batchSize, eventIds.size)
                 for (i in index until end) {
                     val eventUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventIds[i])
-                    try {
-                        contentResolver.delete(eventUri, null, null)
-                        deleted++
-                    } catch (e: Exception) { }
+                    try { contentResolver.delete(eventUri, null, null); deleted++ } catch (_: Exception) {}
                 }
                 index = end
-                if (index < eventIds.size) {
-                    try { Thread.sleep(200) } catch (_: InterruptedException) {}
-                }
+                if (index < eventIds.size) try { Thread.sleep(200) } catch (_: InterruptedException) {}
             }
-
             result.success(deleted)
-        } catch (e: Exception) {
-            result.error("DELETE_FAIL", e.message, null)
-        }
+        } catch (e: Exception) { result.error("DELETE_FAIL", e.message, null) }
     }
 }
