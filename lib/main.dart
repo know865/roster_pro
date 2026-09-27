@@ -184,7 +184,7 @@ class MainPageState extends State<MainPage> {
   DateTime focused = DateTime.now();
   DateTime selectedDay = DateTime.now();
   Map<String, String> roster = {};
-  Map<String, String> rosterNote = {}; // 修正此處：加入 String 型別
+  Map<String, String> rosterNote = {};
   Map<String, String> rosterExtraType = {};
   Map<String, double> rosterOt = {};
   Map<String, double> rosterExtra = {};
@@ -1202,6 +1202,177 @@ Future<void> showBackupList() async {
   });
 }
 
+// 【新增】匯出清單管理對話框
+Future<void> showExportListManager() async {
+  final dirPath = await _getBackupDir();
+  final dir = Directory(dirPath);
+  if (!await dir.exists()) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('沒有匯出檔案'))); return; }
+  List<FileSystemEntity> entities = dir.listSync();
+  List<File> files = entities.whereType<File>().where((f) => f.path.endsWith('.csv') || f.path.endsWith('.json')).toList();
+  files.sort((a, b) => b.path.compareTo(a.path));
+  if (files.isEmpty) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('沒有匯出檔案'))); return; }
+
+  // 分類
+  Map<String, List<File>> categorized = {};
+  for (var f in files) {
+    String name = f.path.split('/').last;
+    String cat = '其他';
+    if (name.startsWith('report_')) cat = '報表';
+    else if (name.startsWith('leaves_')) cat = '假期清單';
+    else if (name.startsWith('notes_')) cat = '記事清單';
+    else if (name.startsWith('roster_pro_')) cat = '備份檔案';
+    categorized.putIfAbsent(cat, () => []).add(f);
+  }
+
+  Set<String> selectedPaths = <String>{};
+  bool multiSelectMode = false;
+  await showDialog(context: context, builder: (ctx) {
+    return StatefulBuilder(builder: (ctx2, setD) {
+      return AlertDialog(
+        title: Text(multiSelectMode ? '已選 ${selectedPaths.length} 個' : '匯出清單管理 (${files.length})'),
+        content: SizedBox(width: 550, height: 550, child: Column(children: [
+          Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: Text('目錄: $dirPath', style: const TextStyle(fontSize: 10))),
+          const SizedBox(height: 8),
+          Expanded(child: ListView(
+            children: categorized.entries.map((entry) {
+              return ExpansionTile(
+                title: Text('${entry.key} (${entry.value.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
+                initiallyExpanded: true,
+                children: entry.value.map((f) {
+                  final name = f.path.split('/').last;
+                  final sizeKB = (f.statSync().size / 1024).toStringAsFixed(1);
+                  final isSelected = selectedPaths.contains(f.path);
+                  return ListTile(
+                    dense: true,
+                    leading: multiSelectMode ? Checkbox(value: isSelected, onChanged: (v) { setD(() { if (v == true) selectedPaths.add(f.path); else selectedPaths.remove(f.path); }); }) : const Icon(Icons.insert_drive_file, size: 20),
+                    title: Text(name, style: const TextStyle(fontSize: 12)),
+                    subtitle: Text('${sizeKB} KB', style: const TextStyle(fontSize: 10)),
+                    onTap: () async {
+                      if (multiSelectMode) {
+                        setD(() { if (isSelected) selectedPaths.remove(f.path); else selectedPaths.add(f.path); });
+                      } else {
+                        // 直接開啟檔案 (使用預設程式開啟)
+                        try {
+                          await Share.shareXFiles([XFile(f.path)], text: '開啟檔案: $name');
+                        } catch (e) {
+                          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('無法開啟檔案: $e')));
+                        }
+                      }
+                    },
+                    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                      IconButton(
+                        icon: const Icon(Icons.share, size: 18, color: Colors.blue),
+                        onPressed: () async {
+                          try {
+                            await Share.shareXFiles([XFile(f.path)], text: '分享檔案: $name');
+                          } catch (e) {
+                            if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('分享失敗: $e')));
+                          }
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                        onPressed: () async {
+                          bool? c = await showDialog<bool>(context: context, builder: (c2) => AlertDialog(
+                            title: const Text('確認刪除'),
+                            content: Text('刪除 $name ？'),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(c2, false), child: const Text('取消')),
+                              FilledButton(onPressed: () => Navigator.pop(c2, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('刪除')),
+                            ],
+                          ));
+                          if (c == true) {
+                            try { await f.delete(); setD(() { files.remove(f); }); } catch (_) {}
+                            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已刪除')));
+                          }
+                        },
+                      ),
+                    ]),
+                  );
+                }).toList(),
+              );
+            }).toList(),
+          )),
+        ])),
+        actions: [
+          if (!multiSelectMode) TextButton(onPressed: () => setD(() => multiSelectMode = true), child: const Text('多選')),
+          if (multiSelectMode) TextButton(
+            onPressed: () async {
+              if (selectedPaths.isEmpty) return;
+              bool? c = await showDialog<bool>(context: context, builder: (c2) => AlertDialog(
+                title: const Text('確認刪除'),
+                content: Text('刪除 ${selectedPaths.length} 個檔案？'),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(c2, false), child: const Text('取消')),
+                  FilledButton(onPressed: () => Navigator.pop(c2, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('刪除')),
+                ],
+              ));
+              if (c == true) {
+                int deleted = 0;
+                for (var p in selectedPaths) { try { await File(p).delete(); deleted++; } catch (_) {} }
+                if (mounted) { Navigator.pop(ctx2); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已刪除 $deleted 個檔案'))); }
+              }
+            },
+            child: const Text('刪除選中', style: TextStyle(color: Colors.red)),
+          ),
+          if (multiSelectMode) TextButton(
+            onPressed: () async {
+              if (selectedPaths.isEmpty) return;
+              List<XFile> xFiles = selectedPaths.map((p) => XFile(p)).toList();
+              try {
+                await Share.shareXFiles(xFiles, text: '批量分享檔案');
+              } catch (e) {
+                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('分享失敗: $e')));
+              }
+            },
+            child: const Text('批量分享', style: TextStyle(color: Colors.blue)),
+          ),
+          TextButton(onPressed: () { if (multiSelectMode) { setD(() { multiSelectMode = false; selectedPaths.clear(); }); } else { Navigator.pop(ctx2); } }, child: Text(multiSelectMode ? '取消多選' : '關閉')),
+        ],
+      );
+    });
+  });
+}
+
+// 【新增】顯示匯出完成對話框
+Future<void> _showExportResultDialog(String path) async {
+  String fileName = path.split('/').last;
+  await showDialog(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Row(
+        children: [
+          Icon(Icons.check_circle, color: Colors.green),
+          SizedBox(width: 8),
+          Text('已完成匯出'),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('檔案已成功匯出至：', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
+            child: SelectableText(path, style: const TextStyle(fontSize: 12, color: Colors.blue)),
+          ),
+          const SizedBox(height: 8),
+          Text('檔名：$fileName', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('關閉')),
+        FilledButton(onPressed: () async {
+          Navigator.pop(ctx);
+          await Share.shareXFiles([XFile(path)], text: '分享檔案: $fileName');
+        }, child: const Text('分享檔案')),
+      ],
+    ),
+  );
+}
+
 Future<void> showWidgetDebugLog() async {
   await _writeDebugLog('=== 手動觸發調試日誌 ===');
   String content = '';
@@ -1276,7 +1447,10 @@ Future<void> backupAnywhere() async {
     await f.writeAsString(jsonEncode(backup));
     setState(() => _lastBackupPath = '$dirPath/$fileName');
     await save();
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已備份: $fileName'), duration: const Duration(seconds: 3)));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已備份: $fileName'), duration: const Duration(seconds: 3)));
+      await _showExportResultDialog('$dirPath/$fileName');
+    }
   } catch (e) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('備份失敗 $e')));
   }
@@ -1400,16 +1574,26 @@ Future<void> exportReport() async {
         }
         hrs += (rosterExtraHrs[k] ?? 0);
       }
-      sb.writeln('${focused.year}年${focused.month}月 報表');
-      sb.writeln('班次統計:');
-      shiftCount.forEach((k, v) => sb.writeln('$k, $v次'));
-      if (extraByType.isNotEmpty) { sb.writeln('津貼類別:'); extraByType.forEach((t, a) => sb.writeln('$t, \$$a')); }
-      sb.writeln('總工時, $hrs');
-      sb.writeln('OT, $ot');
-      sb.writeln('津貼, ${allow + ot * overtimeRate}');
+      
+      // 詳細報表內容
+      sb.writeln('========================================');
+      sb.writeln('       ${focused.year}年${focused.month}月 排更報表');
+      sb.writeln('========================================');
       sb.writeln('');
-      sb.writeln('每週工時統計:');
-      sb.writeln('週次, 工時, 標準, 承上, 差額');
+      sb.writeln('【一、班次統計】');
+      sb.writeln('班次代號, 班次名稱, 次數, 總工時');
+      double totalShiftHours = 0;
+      shiftCount.forEach((k, v) {
+        var d = defs[k];
+        double h = (d?.hours ?? 0) * v;
+        totalShiftHours += h;
+        sb.writeln('$k, ${d?.label ?? k}, $v次, ${h.toStringAsFixed(1)}h');
+      });
+      sb.writeln('小計, , ${shiftCount.values.fold(0, (a, b) => a + b)}次, ${totalShiftHours.toStringAsFixed(1)}h');
+      sb.writeln('');
+      
+      sb.writeln('【二、每週工時統計】');
+      sb.writeln('週次, 本週工時, 標準工時, 承上餘額, 累計差額');
       List<int> sortedWeeks = weeklyHours.keys.toList()..sort();
       double lastCarryExport = carry;
       for (var week in sortedWeeks) {
@@ -1418,8 +1602,43 @@ Future<void> exportReport() async {
         sb.writeln('W$week, ${weekHours.toStringAsFixed(1)}h, ${standardWeeklyHours}h, ${lastCarryExport.toStringAsFixed(1)}h, ${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}h');
         lastCarryExport = diff;
       }
+      sb.writeln('');
+      
+      sb.writeln('【三、津貼類別統計】');
+      sb.writeln('類別, 金額');
+      double totalExtra = 0;
+      if (extraByType.isNotEmpty) {
+        extraByType.forEach((t, a) {
+          sb.writeln('$t, \$${a.toStringAsFixed(1)}');
+          totalExtra += a;
+        });
+      } else {
+        sb.writeln('無, \$0.0');
+      }
+      sb.writeln('小計, \$${totalExtra.toStringAsFixed(1)}');
+      sb.writeln('');
+      
+      sb.writeln('【四、OT 統計】');
+      sb.writeln('OT 總時數, $ot h');
+      sb.writeln('OT 時薪, \$${overtimeRate.toStringAsFixed(0)}/h');
+      sb.writeln('OT 總金額, \$${(ot * overtimeRate).toStringAsFixed(1)}');
+      sb.writeln('');
+      
+      sb.writeln('【五、總計】');
+      sb.writeln('總工時, ${hrs.toStringAsFixed(1)}h');
+      sb.writeln('班次津貼+單日額外, \$${allow.toStringAsFixed(1)}');
+      sb.writeln('OT 津貼, \$${(ot * overtimeRate).toStringAsFixed(1)}');
+      sb.writeln('津貼總額, \$${(allow + ot * overtimeRate).toStringAsFixed(1)}');
+      sb.writeln('');
+      
     } else {
-      sb.writeln('${focused.year}年 全年統計');
+      sb.writeln('========================================');
+      sb.writeln('       ${focused.year}年 全年排更報表');
+      sb.writeln('========================================');
+      sb.writeln('');
+      sb.writeln('【每月工時統計】');
+      sb.writeln('月份, 總工時');
+      double totalYearHrs = 0;
       for (int mon = 1; mon <= 12; mon++) {
         int dim = DateTime(focused.year, mon + 1, 0).day;
         double hrs = 0;
@@ -1431,16 +1650,23 @@ Future<void> exportReport() async {
           var def = defs[c];
           if (def != null) hrs += def.hours;
         }
-        sb.writeln('$mon月, ${hrs}h');
+        sb.writeln('$mon月, ${hrs.toStringAsFixed(1)}h');
+        totalYearHrs += hrs;
       }
+      sb.writeln('');
+      sb.writeln('全年總工時, ${totalYearHrs.toStringAsFixed(1)}h');
     }
-    // 修改：不再使用 FilePicker 選擇資料夾，直接存入預設備份路徑
+    
+    // 直接存入預設路徑
     String dir = await _getBackupDir();
     String fileName = 'report_${isYearReport ? 'year${focused.year}' : '${focused.year}${focused.month.toString().padLeft(2, '0')}'}.csv';
     String path = '$dir/$fileName';
     final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(sb.toString())];
     await File(path).writeAsBytes(bytes);
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已匯出 $path')));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已匯出 $path')));
+      await _showExportResultDialog(path);
+    }
   } catch (e) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('匯出失敗 $e')));
   }
@@ -1505,12 +1731,16 @@ Future<void> showNotesListDialog() async {
               StringBuffer sb = StringBuffer();
               sb.writeln('日期,記事');
               for (var n in notes) sb.writeln('${n.key},"${n.value.replaceAll('"', '""')}"');
-              // 修改：直接存入預設路徑
+              // 直接存入預設路徑
               String dir = await _getBackupDir();
               String path = '$dir/notes_${queryYear}${yearMode ? '' : queryMonth.toString().padLeft(2, '0')}.csv';
               final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(sb.toString())];
               await File(path).writeAsBytes(bytes);
-              if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已匯出 $path')));
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已匯出 $path')));
+                Navigator.pop(ctx2);
+                await _showExportResultDialog(path);
+              }
             } catch (_) {}
           }, child: const Text('匯出CSV')),
         ]
@@ -2038,27 +2268,45 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
             const SizedBox(height: 12),
             Column(
               children: [
-                // 【修改】AL SH GH WB 核實格子，改為互斥，並解決文字出界問題
-                Wrap(
-                  spacing: 4.0,
-                  runSpacing: 4.0,
+                // 【修改】AL SH GH WB 核實格子，改為4個一行排列，並解決文字出界問題
+                Row(
                   children: [
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      Checkbox(value: hasAL, onChanged: (v) => setS(() { hasAL = v ?? false; if (hasAL) { hasSH = false; hasGH = false; hasWB = false; } })),
-                      const Text('AL', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ]),
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      Checkbox(value: hasSH, onChanged: (v) => setS(() { hasSH = v ?? false; if (hasSH) { hasAL = false; hasGH = false; hasWB = false; } })),
-                      const Text('SH', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ]),
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      Checkbox(value: hasGH, onChanged: (v) => setS(() { hasGH = v ?? false; if (hasGH) { hasAL = false; hasSH = false; hasWB = false; } })),
-                      const Text('GH', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ]),
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      Checkbox(value: hasWB, onChanged: (v) => setS(() { hasWB = v ?? false; if (hasWB) { hasAL = false; hasSH = false; hasGH = false; } })),
-                      const Text('WB', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ]),
+                    Expanded(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Checkbox(value: hasAL, onChanged: (v) => setS(() { hasAL = v ?? false; if (hasAL) { hasSH = false; hasGH = false; hasWB = false; } })),
+                          const Flexible(child: Text('AL', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Checkbox(value: hasSH, onChanged: (v) => setS(() { hasSH = v ?? false; if (hasSH) { hasAL = false; hasGH = false; hasWB = false; } })),
+                          const Flexible(child: Text('SH', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Checkbox(value: hasGH, onChanged: (v) => setS(() { hasGH = v ?? false; if (hasGH) { hasAL = false; hasSH = false; hasWB = false; } })),
+                          const Flexible(child: Text('GH', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Checkbox(value: hasWB, onChanged: (v) => setS(() { hasWB = v ?? false; if (hasWB) { hasAL = false; hasSH = false; hasGH = false; } })),
+                          const Flexible(child: Text('WB', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -2253,7 +2501,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                 children: [
                   Text('$queryYear年假期餘額結算', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                   const SizedBox(height: 4),
-                  // 顯示已用和結餘天數
+                  // 【修改】顯示已用和結餘天數，刪除括號後綴，並使用 Flexible 解決文字出界問題
                   ...leaveDefs.map((leave) {
                     double used = yearUsed[leave.name] ?? 0.0;
                     var rec = leaveRecords['$queryYear']?[leave.name] ?? {'total': 0.0, 'adjust': 0.0, 'carry': 0.0};
@@ -2263,9 +2511,13 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                       padding: const EdgeInsets.symmetric(vertical: 2),
                       child: Row(
                         children: [
-                          Text('${leave.name} (${leave.fullName})', style: TextStyle(fontWeight: FontWeight.bold, color: leave.color)),
-                          const Spacer(),
-                          Text('已用: ${used.toStringAsFixed(1)} 天 / 結餘: ${balance.toStringAsFixed(1)} 天', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          Flexible(
+                            child: Text(leave.name, style: TextStyle(fontWeight: FontWeight.bold, color: leave.color), overflow: TextOverflow.ellipsis),
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text('已用: ${used.toStringAsFixed(1)} 天 / 結餘: ${balance.toStringAsFixed(1)} 天', style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                          ),
                         ],
                       ),
                     );
@@ -2297,7 +2549,11 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                 String path = '$dir/leaves_${queryYear}${yearMode ? '' : queryMonth.toString().padLeft(2, '0')}.csv';
                 final bytes = <int>[0xEF, 0xBB, 0xBF, ...utf8.encode(sb.toString())];
                 await File(path).writeAsBytes(bytes);
-                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已匯出 $path')));
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已匯出 $path')));
+                  Navigator.pop(ctx2);
+                  await _showExportResultDialog(path);
+                }
               } catch (_) {}
             }, child: const Text('匯出CSV')),
           ]
@@ -2757,6 +3013,14 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
           icon: const Icon(Icons.beach_access),
           label: const Text('開啟假期數據管理'),
           onPressed: showLeaveManagementDialog,
+        )),
+        const SizedBox(height: 8),
+        // 【新增】匯出清單管理按鈕
+        SizedBox(width: double.infinity, child: FilledButton.icon(
+          icon: const Icon(Icons.folder_open),
+          label: const Text('匯出清單管理'),
+          onPressed: showExportListManager,
+          style: FilledButton.styleFrom(backgroundColor: Colors.blueGrey),
         )),
       ]))),
       const SizedBox(height: 16),
@@ -3372,7 +3636,7 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
 
                 Text('4. 設定與同步', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
-                Text('• 「假期數據管理」：可設定每年的假期天數、微調、承上，並新增自訂假期。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：刪除 Google 日曆上所有 [RosterPro] 事件並重新建立。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
+                Text('• 「假期數據管理」：可設定每年的假期天數、微調、承上，並新增自訂假期。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：刪除 Google 日曆上所有 [RosterPro] 事件並重新建立。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
                 SizedBox(height: 16),
 
                 Text('5. 常見問題', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
