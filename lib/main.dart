@@ -19,7 +19,7 @@ import 'package:home_widget/home_widget.dart';
 import 'package:image/image.dart' as img;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:open_filex/open_filex.dart'; // 新增依賴，請在 pubspec.yaml 加入 open_filex: ^4.3.4
+import 'package:open_filex/open_filex.dart'; // 依賴已加入 pubspec.yaml
 
 void main() {
   tzData.initializeTimeZones();
@@ -2271,15 +2271,20 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
             const SizedBox(height: 12),
             Column(
               children: [
-                // 【修改】AL SH GH WB 核實格子，改為一行排列，並確保文字顯示
+                // 【修改】AL SH GH WB 核實格子，改為一行排列，並解決文字出界問題
                 Row(
                   children: [
                     Expanded(
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Checkbox(value: hasAL, onChanged: (v) => setS(() { hasAL = v ?? false; if (hasAL) { hasSH = false; hasGH = false; hasWB = false; } })),
-                          const Text('AL', style: TextStyle(fontWeight: FontWeight.bold)),
+                          Checkbox(
+                            value: hasAL,
+                            onChanged: (v) => setS(() { hasAL = v ?? false; if (hasAL) { hasSH = false; hasGH = false; hasWB = false; } }),
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          const Flexible(child: Text('AL', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                         ],
                       ),
                     ),
@@ -2287,8 +2292,13 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Checkbox(value: hasSH, onChanged: (v) => setS(() { hasSH = v ?? false; if (hasSH) { hasAL = false; hasGH = false; hasWB = false; } })),
-                          const Text('SH', style: TextStyle(fontWeight: FontWeight.bold)),
+                          Checkbox(
+                            value: hasSH,
+                            onChanged: (v) => setS(() { hasSH = v ?? false; if (hasSH) { hasAL = false; hasGH = false; hasWB = false; } }),
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          const Flexible(child: Text('SH', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                         ],
                       ),
                     ),
@@ -2296,8 +2306,13 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Checkbox(value: hasGH, onChanged: (v) => setS(() { hasGH = v ?? false; if (hasGH) { hasAL = false; hasSH = false; hasWB = false; } })),
-                          const Text('GH', style: TextStyle(fontWeight: FontWeight.bold)),
+                          Checkbox(
+                            value: hasGH,
+                            onChanged: (v) => setS(() { hasGH = v ?? false; if (hasGH) { hasAL = false; hasSH = false; hasWB = false; } }),
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          const Flexible(child: Text('GH', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                         ],
                       ),
                     ),
@@ -2305,8 +2320,13 @@ void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.m
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Checkbox(value: hasWB, onChanged: (v) => setS(() { hasWB = v ?? false; if (hasWB) { hasAL = false; hasSH = false; hasGH = false; } })),
-                          const Text('WB', style: TextStyle(fontWeight: FontWeight.bold)),
+                          Checkbox(
+                            value: hasWB,
+                            onChanged: (v) => setS(() { hasWB = v ?? false; if (hasWB) { hasAL = false; hasSH = false; hasGH = false; } }),
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          const Flexible(child: Text('WB', style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                         ],
                       ),
                     ),
