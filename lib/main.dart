@@ -1793,257 +1793,235 @@ class MainPageState extends State<MainPage> {
     DateTime today = DateTime.now();
 
     return SafeArea(
-      child: Stack(
+      child: Column(
         children: [
-          // 背景日曆區域
-          Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-                child: Row(children: [
-                  Flexible(flex: 2, child: InkWell(onTap: () => quickJumpMonth(), child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text('${focused.year}年${focused.month}月', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)))),
-                    const Icon(Icons.arrow_drop_down)
-                  ]))),
-                  const Spacer(),
-                  IconButton(icon: const Icon(Icons.list_alt), tooltip: '記事查詢', onPressed: showNotesListDialog, visualDensity: VisualDensity.compact),
-                  IconButton(icon: const Icon(Icons.beach_access), tooltip: '假期清單', onPressed: showLeaveListDialog, visualDensity: VisualDensity.compact),
-                  IconButton(icon: const Icon(Icons.camera_alt_outlined), tooltip: '整月截圖分享', onPressed: shareScreenshotDialog, visualDensity: VisualDensity.compact),
-                  IconButton(icon: const Icon(Icons.chevron_left), onPressed: _goToPrevMonth, visualDensity: VisualDensity.compact),
-                  IconButton(icon: const Icon(Icons.chevron_right), onPressed: _goToNextMonth, visualDensity: VisualDensity.compact),
-                  FilledButton.tonal(
-                    onPressed: () { setState(() { focused = DateTime(today.year, today.month, 1); selectedDay = DateTime(today.year, today.month, today.day); }); },
-                    style: FilledButton.styleFrom(minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 8)),
-                    child: const Text('今天', style: TextStyle(fontSize: 12)),
-                  ),
-                ]),
+          // 顶部栏
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+            child: Row(children: [
+              Flexible(flex: 2, child: InkWell(onTap: () => quickJumpMonth(), child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text('${focused.year}年${focused.month}月', style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold)))),
+                const Icon(Icons.arrow_drop_down, size: 30),
+              ]))),
+              const Spacer(),
+              IconButton(icon: const Icon(Icons.list_alt), tooltip: '記事查詢', onPressed: showNotesListDialog, visualDensity: VisualDensity.compact),
+              IconButton(icon: const Icon(Icons.beach_access), tooltip: '假期清單', onPressed: showLeaveListDialog, visualDensity: VisualDensity.compact),
+              IconButton(icon: const Icon(Icons.camera_alt_outlined), tooltip: '整月截圖分享', onPressed: shareScreenshotDialog, visualDensity: VisualDensity.compact),
+              IconButton(icon: const Icon(Icons.chevron_left), onPressed: _goToPrevMonth, visualDensity: VisualDensity.compact),
+              IconButton(icon: const Icon(Icons.chevron_right), onPressed: _goToNextMonth, visualDensity: VisualDensity.compact),
+              FilledButton.tonal(
+                onPressed: () { setState(() { focused = DateTime(today.year, today.month, 1); selectedDay = DateTime(today.year, today.month, today.day); }); },
+                style: FilledButton.styleFrom(minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 8)),
+                child: const Text('今天', style: TextStyle(fontSize: 12)),
               ),
-              Expanded(
-                child: GestureDetector(
-                  onHorizontalDragEnd: (details) {
-                    if (details.primaryVelocity == null) return;
-                    if (details.primaryVelocity! < -100) _goToNextMonth();
-                    else if (details.primaryVelocity! > 100) _goToPrevMonth();
-                  },
-                  behavior: HitTestBehavior.opaque,
-                  child: RepaintBoundary(
-                    key: calKey,
-                    child: SingleChildScrollView(
-                      child: Column(children: [
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          child: Row(children: [
-                            Container(width: 32, child: const Text('週', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.deepPurple))),
-                            Expanded(child: Row(children: ["一", "二", "三", "四", "五", "六", "日"].map((w) => Expanded(child: Text(w, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11)))).toList()))
-                          ]),
-                        ),
-                        ...List.generate(weeks, (row) {
-                          return Row(children: [
-                            Container(width: 32, alignment: Alignment.center, child: Text('W${isoWeek(days[row * 7])}', style: const TextStyle(fontSize: 11, color: Colors.deepPurple, fontWeight: FontWeight.bold))),
-                            Expanded(
-                              child: GridView.builder(
-                                shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), padding: const EdgeInsets.all(2),
-                                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: 7, 
-                                  childAspectRatio: 0.65, 
-                                  mainAxisSpacing: 2, 
-                                  crossAxisSpacing: 2
-                                ),
-                                itemCount: 7,
-                                itemBuilder: (ctx2, col) {
-                                  int idx = row * 7 + col;
-                                  DateTime day = days[idx];
-                                  bool inM = day.month == focused.month;
-                                  String k = DateFormat('yyyy-MM-dd').format(day);
-                                  String? code = roster[k];
-                                  var def = code != null ? defs[code] : null;
-                                  String? leaveCode;
-                                  if (def != null) {
-                                    if (def.hasAL) leaveCode = 'AL';
-                                    else if (def.hasSH) leaveCode = 'SH';
-                                    else if (def.hasGH) leaveCode = 'GH';
-                                    else if (def.hasWB) leaveCode = 'WB';
-                                    else if (def.hasCustomLeave && def.customLeaveCode != null && def.customLeaveCode!.isNotEmpty) leaveCode = def.customLeaveCode;
-                                  }
-                                  var leaveDef = leaveCode != null ? leaveDefs.firstWhere((e) => e.name == leaveCode, orElse: () => LeaveDef('', '', Colors.grey)) : null;
-                                  bool sel = k == selKey;
-                                  bool isToday = day.year == today.year && day.month == today.month && day.day == today.day;
-                                  bool hasNote = rosterNote.containsKey(k) && rosterNote[k]!.isNotEmpty;
-                                  bool isHol = isHoliday(day);
-                                  String lunarText = showLunar ? LunarHelper.getLunarDayText(day) : '';
-                                  Color bg;
-                                  if (isToday) bg = todayBgColor;
-                                  else if (!inM) bg = const Color(0xFFF5F5F0);
-                                  else if (sel) bg = Colors.white;
-                                  else if (def != null) bg = def.color.withOpacity(0.18);
-                                  else bg = const Color(0xFFFFF0D0);
-
-                                  return GestureDetector(
-                                    onTap: () { setState(() => selectedDay = day); },
-                                    onLongPress: () { setState(() => selectedDay = day); showDetail(day); },
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: bg, borderRadius: BorderRadius.circular(10),
-                                        border: isToday ? Border.all(width: 2.5, color: todayBorderColor) : sel ? Border.all(width: 2, color: Colors.deepPurple) : null
-                                      ),
-                                      child: Column(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-                                        FittedBox(fit: BoxFit.scaleDown, child: Text('${day.day}', style: TextStyle(fontWeight: isToday ? FontWeight.w900 : FontWeight.bold, fontSize: calendarFontSize, color: inM ? Colors.black : Colors.grey))),
-                                        if (code != null)
-                                          FittedBox(fit: BoxFit.scaleDown, child: Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: def?.color ?? Colors.orange, borderRadius: BorderRadius.circular(4)), child: Text(code, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold))))
-                                        else if (leaveDef != null)
-                                          FittedBox(fit: BoxFit.scaleDown, child: Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: leaveDef.color, borderRadius: BorderRadius.circular(4)), child: Text(leaveDef.name, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold))))
-                                        else const SizedBox(height: 14),
-                                        if (showLunar && lunarText.isNotEmpty && inM)
-                                          FittedBox(fit: BoxFit.scaleDown, child: Text(lunarText, style: TextStyle(fontSize: 9, color: Colors.grey[700])))
-                                        else const SizedBox(height: 10),
-                                        SizedBox(height: 6, child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                                          if (isHol) Container(width: 5, height: 5, margin: const EdgeInsets.symmetric(horizontal: 0.5), decoration: BoxDecoration(color: holidayDotColor, shape: BoxShape.circle)),
-                                          if (hasNote) Container(width: 5, height: 5, margin: const EdgeInsets.symmetric(horizontal: 0.5), decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle)),
-                                        ])),
-                                      ])
-                                    )
-                                  );
-                                }
-                              )
-                            )
-                          ]);
-                        })
-                      ])
-                    )
-                  )
-                )
-              ),
-            ],
+            ]),
           ),
-          
-          // 可上下拉動的白色詳細卡片
-          DraggableScrollableSheet(
-            initialChildSize: 0.35,
-            minChildSize: 0.1,
-            maxChildSize: 0.85,
-            builder: (context, scrollController) {
-              return Container(
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                  boxShadow: [
-                    BoxShadow(color: Colors.black26, blurRadius: 10, spreadRadius: 2, offset: Offset(0, -2))
-                  ]
-                ),
-                child: Column(
-                  children: [
-                    // 拖拽手柄
-                    Container(
-                      margin: const EdgeInsets.only(top: 8, bottom: 4),
-                      width: 40, height: 5,
-                      decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(3)),
+          // 日历区域（占据剩余空间）
+          Expanded(
+            child: GestureDetector(
+              onHorizontalDragEnd: (details) {
+                if (details.primaryVelocity == null) return;
+                if (details.primaryVelocity! < -100) _goToNextMonth();
+                else if (details.primaryVelocity! > 100) _goToPrevMonth();
+              },
+              behavior: HitTestBehavior.opaque,
+              child: RepaintBoundary(
+                key: calKey,
+                child: SingleChildScrollView(
+                  child: Column(children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: Row(children: [
+                        Container(width: 32, child: const Text('週', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.deepPurple))),
+                        Expanded(child: Row(children: ["一", "二", "三", "四", "五", "六", "日"].map((w) => Expanded(child: Text(w, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11)))).toList()))
+                      ]),
                     ),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        controller: scrollController,
-                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                    ...List.generate(weeks, (row) {
+                      return Row(children: [
+                        Container(width: 32, alignment: Alignment.center, child: Text('W${isoWeek(days[row * 7])}', style: const TextStyle(fontSize: 11, color: Colors.deepPurple, fontWeight: FontWeight.bold))),
+                        Expanded(
+                          child: GridView.builder(
+                            shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), padding: const EdgeInsets.all(2),
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 7, 
+                              childAspectRatio: 0.65, 
+                              mainAxisSpacing: 2, 
+                              crossAxisSpacing: 2
+                            ),
+                            itemCount: 7,
+                            itemBuilder: (ctx2, col) {
+                              int idx = row * 7 + col;
+                              DateTime day = days[idx];
+                              bool inM = day.month == focused.month;
+                              String k = DateFormat('yyyy-MM-dd').format(day);
+                              String? code = roster[k];
+                              var def = code != null ? defs[code] : null;
+                              String? leaveCode;
+                              if (def != null) {
+                                if (def.hasAL) leaveCode = 'AL';
+                                else if (def.hasSH) leaveCode = 'SH';
+                                else if (def.hasGH) leaveCode = 'GH';
+                                else if (def.hasWB) leaveCode = 'WB';
+                                else if (def.hasCustomLeave && def.customLeaveCode != null && def.customLeaveCode!.isNotEmpty) leaveCode = def.customLeaveCode;
+                              }
+                              var leaveDef = leaveCode != null ? leaveDefs.firstWhere((e) => e.name == leaveCode, orElse: () => LeaveDef('', '', Colors.grey)) : null;
+                              bool sel = k == selKey;
+                              bool isToday = day.year == today.year && day.month == today.month && day.day == today.day;
+                              bool hasNote = rosterNote.containsKey(k) && rosterNote[k]!.isNotEmpty;
+                              bool isHol = isHoliday(day);
+                              String lunarText = showLunar ? LunarHelper.getLunarDayText(day) : '';
+                              Color bg;
+                              if (isToday) bg = todayBgColor;
+                              else if (!inM) bg = const Color(0xFFF5F5F0);
+                              else if (sel) bg = Colors.white;
+                              else if (def != null) bg = def.color.withOpacity(0.18);
+                              else bg = const Color(0xFFFFF0D0);
+
+                              return GestureDetector(
+                                onTap: () { setState(() => selectedDay = day); },
+                                onLongPress: () { setState(() => selectedDay = day); showDetail(day); },
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: bg, borderRadius: BorderRadius.circular(10),
+                                    border: isToday ? Border.all(width: 2.5, color: todayBorderColor) : sel ? Border.all(width: 2, color: Colors.deepPurple) : null
+                                  ),
+                                  child: Column(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                                    FittedBox(fit: BoxFit.scaleDown, child: Text('${day.day}', style: TextStyle(fontWeight: isToday ? FontWeight.w900 : FontWeight.bold, fontSize: calendarFontSize, color: inM ? Colors.black : Colors.grey))),
+                                    if (code != null)
+                                      FittedBox(fit: BoxFit.scaleDown, child: Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: def?.color ?? Colors.orange, borderRadius: BorderRadius.circular(4)), child: Text(code, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold))))
+                                    else if (leaveDef != null)
+                                      FittedBox(fit: BoxFit.scaleDown, child: Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: leaveDef.color, borderRadius: BorderRadius.circular(4)), child: Text(leaveDef.name, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold))))
+                                    else const SizedBox(height: 14),
+                                    if (showLunar && lunarText.isNotEmpty && inM)
+                                      FittedBox(fit: BoxFit.scaleDown, child: Text(lunarText, style: TextStyle(fontSize: 9, color: Colors.grey[700])))
+                                    else const SizedBox(height: 10),
+                                    SizedBox(height: 6, child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                                      if (isHol) Container(width: 5, height: 5, margin: const EdgeInsets.symmetric(horizontal: 0.5), decoration: BoxDecoration(color: holidayDotColor, shape: BoxShape.circle)),
+                                      if (hasNote) Container(width: 5, height: 5, margin: const EdgeInsets.symmetric(horizontal: 0.5), decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle)),
+                                    ])),
+                                  ])
+                                )
+                              );
+                            }
+                          )
+                        )
+                      ]);
+                    })
+                  ])
+                )
+              )
+            )
+          ),
+          // 固定高度的白色详细卡（内容可滚动）
+          Container(
+            height: MediaQuery.of(context).size.height * 0.33,
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              boxShadow: [
+                BoxShadow(color: Colors.black12, blurRadius: 10, spreadRadius: 2, offset: Offset(0, -5))
+              ]
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Text(DateFormat('yyyy年M月d日').format(selectedDay), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
-                                          if (showLunar) ...[
-                                            const SizedBox(width: 4),
-                                            Text(' ' + LunarHelper.getFullLunarText(selectedDay), style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                                          ]
-                                        ],
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Row(
-                                        children: [
-                                          if (selDef != null)
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                              decoration: BoxDecoration(color: selDef.color, borderRadius: BorderRadius.circular(6)),
-                                              child: Text('${selDef.code} ${selDef.label}', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                                            )
-                                          else if (selLeave != null)
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                              decoration: BoxDecoration(color: selLeave.color, borderRadius: BorderRadius.circular(6)),
-                                              child: Text('${selLeave.name} ${selLeave.fullName}', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                                            )
-                                          else
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                              decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(6)),
-                                              child: const Text('未排班', style: TextStyle(color: Colors.black54, fontSize: 12, fontWeight: FontWeight.bold)),
-                                            ),
-                                          const SizedBox(width: 8),
-                                          if (extraType.isNotEmpty)
-                                            Text('[$extraType]', style: const TextStyle(fontSize: 12, color: Colors.deepPurple, fontWeight: FontWeight.bold)),
-                                        ],
-                                      )
-                                    ],
-                                  ),
-                                ),
-                                Row(
-                                  children: [
-                                    Container(
-                                      decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.blue.shade200)),
-                                      child: IconButton(
-                                        icon: const Icon(Icons.date_range, size: 18, color: Colors.blue),
-                                        tooltip: '範圍同步',
-                                        onPressed: googleSyncEnabled ? syncDateRange : null,
-                                        visualDensity: VisualDensity.compact,
-                                        padding: EdgeInsets.zero,
-                                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    FilledButton.tonalIcon(
-                                      onPressed: () { showDetail(selectedDay); },
-                                      icon: const Icon(Icons.edit, size: 16),
-                                      label: const Text('編輯', style: TextStyle(fontSize: 12)),
-                                      style: FilledButton.styleFrom(minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 12)),
-                                    ),
-                                  ],
-                                )
+                                Text(DateFormat('yyyy年M月d日').format(selectedDay), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                                if (showLunar) ...[
+                                  const SizedBox(width: 4),
+                                  Text(' ' + LunarHelper.getFullLunarText(selectedDay), style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                                ]
                               ],
                             ),
-                            const SizedBox(height: 12),
-                            Container(
-                              width: double.infinity, padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(8)),
-                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Text('1. 班次：${selDef != null ? '(${selDef.code}) ${selDef.label}' : ''} ${isHoliday(selectedDay) ? '[${holidayName(selectedDay)}]' : ''}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                                const SizedBox(height: 4),
-                                Text('2. 時間：${selDef != null ? (selDef.isAllDay ? '全天' : '${selDef.start}-${selDef.end}') : ''} | 工時：${selDef?.hours ?? 0}h', style: const TextStyle(fontSize: 12)),
-                                const SizedBox(height: 4),
-                                Text('3. 班次津貼：${selDef != null ? ((selDef.hasMorningAllow ? '早/夜班 \$${morningAllowance.toStringAsFixed(0)} ' : '') + (selDef.hasNightAllow ? '通宵 \$${(nightAllowance * selDef.hours).toStringAsFixed(0)} ' : '') + (selDef.hasMealAllow ? '膳食 \$${mealAllowance.toStringAsFixed(0)}' : '')).trim() : '無'} | 午飯時間：${selDef != null && selDef.hasLunch ? '有 (已扣1h)' : '無'}', style: const TextStyle(fontSize: 12)),
-                                const SizedBox(height: 4),
-                                Text('4. 額外津貼名稱：${extraType.isNotEmpty ? extraType : '無'}  金額：\$${(rosterExtra[selKey] ?? 0).toStringAsFixed(1)}', style: const TextStyle(fontSize: 12, color: Colors.deepPurple, fontWeight: FontWeight.w600)),
-                                const SizedBox(height: 4),
-                                Text('5. OT：${(rosterOt[selKey] ?? 0).toStringAsFixed(1)}h | 額外工時：${(rosterExtraHrs[selKey] ?? 0).toStringAsFixed(1)}h', style: const TextStyle(fontSize: 12)),
-                                const SizedBox(height: 4),
-                                Text('6. 記事：${note.isEmpty ? '無' : note}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.deepPurple)),
-                                if (selLeave != null) ...[
-                                  const SizedBox(height: 4),
-                                  Text('7. 假期：${selLeave.fullName} (${selLeave.name})', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: selLeave.color)),
-                                ]
-                              ])
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                if (selDef != null)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(color: selDef.color, borderRadius: BorderRadius.circular(6)),
+                                    child: Text('${selDef.code} ${selDef.label}', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                                  )
+                                else if (selLeave != null)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(color: selLeave.color, borderRadius: BorderRadius.circular(6)),
+                                    child: Text('${selLeave.name} ${selLeave.fullName}', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                                  )
+                                else
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(6)),
+                                    child: const Text('未排班', style: TextStyle(color: Colors.black54, fontSize: 12, fontWeight: FontWeight.bold)),
+                                  ),
+                                const SizedBox(width: 8),
+                                if (extraType.isNotEmpty)
+                                  Text('[$extraType]', style: const TextStyle(fontSize: 12, color: Colors.deepPurple, fontWeight: FontWeight.bold)),
+                              ],
                             )
                           ],
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              );
-            },
+                      Row(
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.blue.shade200)),
+                            child: IconButton(
+                              icon: const Icon(Icons.date_range, size: 18, color: Colors.blue),
+                              tooltip: '範圍同步',
+                              onPressed: googleSyncEnabled ? syncDateRange : null,
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          FilledButton.tonalIcon(
+                            onPressed: () { showDetail(selectedDay); },
+                            icon: const Icon(Icons.edit, size: 16),
+                            label: const Text('編輯', style: TextStyle(fontSize: 12)),
+                            style: FilledButton.styleFrom(minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 12)),
+                          ),
+                        ],
+                      )
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity, padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: const Color(0xFFF5F5F5), borderRadius: BorderRadius.circular(8)),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('1. 班次：${selDef != null ? '(${selDef.code}) ${selDef.label}' : ''} ${isHoliday(selectedDay) ? '[${holidayName(selectedDay)}]' : ''}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      Text('2. 時間：${selDef != null ? (selDef.isAllDay ? '全天' : '${selDef.start}-${selDef.end}') : ''} | 工時：${selDef?.hours ?? 0}h', style: const TextStyle(fontSize: 12)),
+                      const SizedBox(height: 4),
+                      Text('3. 班次津貼：${selDef != null ? ((selDef.hasMorningAllow ? '早/夜班 \$${morningAllowance.toStringAsFixed(0)} ' : '') + (selDef.hasNightAllow ? '通宵 \$${(nightAllowance * selDef.hours).toStringAsFixed(0)} ' : '') + (selDef.hasMealAllow ? '膳食 \$${mealAllowance.toStringAsFixed(0)}' : '')).trim() : '無'} | 午飯時間：${selDef != null && selDef.hasLunch ? '有 (已扣1h)' : '無'}', style: const TextStyle(fontSize: 12)),
+                      const SizedBox(height: 4),
+                      Text('4. 額外津貼名稱：${extraType.isNotEmpty ? extraType : '無'}  金額：\$${(rosterExtra[selKey] ?? 0).toStringAsFixed(1)}', style: const TextStyle(fontSize: 12, color: Colors.deepPurple, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 4),
+                      Text('5. OT：${(rosterOt[selKey] ?? 0).toStringAsFixed(1)}h | 額外工時：${(rosterExtraHrs[selKey] ?? 0).toStringAsFixed(1)}h', style: const TextStyle(fontSize: 12)),
+                      const SizedBox(height: 4),
+                      Text('6. 記事：${note.isEmpty ? '無' : note}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.deepPurple)),
+                      if (selLeave != null) ...[
+                        const SizedBox(height: 4),
+                        Text('7. 假期：${selLeave.fullName} (${selLeave.name})', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: selLeave.color)),
+                      ]
+                    ])
+                  )
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -3453,6 +3431,7 @@ class MainPageState extends State<MainPage> {
     return Scaffold(
       body: [calTab(), patternTab(), reportTab(), settingsTab()][tab],
       bottomNavigationBar: NavigationBar(
+        height: 55, // 調矮底部導航欄
         selectedIndex: tab,
         onDestinationSelected: (i) => setState(() => tab = i),
         destinations: const [
