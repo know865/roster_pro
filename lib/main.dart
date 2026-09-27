@@ -2024,6 +2024,7 @@ class MainPageState extends State<MainPage> {
                               int idx = row * 7 + col;
                               DateTime day = days[idx];
                               bool inM = day.month == focused.month;
+                              
                               String k = DateFormat('yyyy-MM-dd').format(day);
                               String? code = roster[k];
                               var def = code != null ? defs[code] : null;
@@ -2043,7 +2044,7 @@ class MainPageState extends State<MainPage> {
                               String lunarText = showLunar ? LunarHelper.getLunarDayText(day) : '';
                               Color bg;
                               if (isToday) bg = todayBgColor;
-                              else if (!inM) bg = const Color(0xFFF5F5F0);
+                              else if (!inM) bg = const Color(0xFFF5F5F0); // 跨月背景色
                               else if (sel) bg = Colors.white;
                               else if (def != null) bg = def.color.withOpacity(0.18);
                               else bg = const Color(0xFFFFF0D0);
@@ -2063,7 +2064,7 @@ class MainPageState extends State<MainPage> {
                                     else if (leaveDef != null)
                                       FittedBox(fit: BoxFit.scaleDown, child: Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1), decoration: BoxDecoration(color: leaveDef.color, borderRadius: BorderRadius.circular(4)), child: Text(leaveDef.name, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold))))
                                     else const SizedBox(height: 14),
-                                    if (showLunar && lunarText.isNotEmpty && inM)
+                                    if (showLunar && lunarText.isNotEmpty)
                                       FittedBox(fit: BoxFit.scaleDown, child: Text(lunarText, style: TextStyle(fontSize: 9, color: Colors.grey[700])))
                                     else const SizedBox(height: 10),
                                     SizedBox(height: 6, child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
