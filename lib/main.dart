@@ -294,6 +294,7 @@ class MainPageState extends State<MainPage> {
     return r == true;
   }
 
+  // 【關鍵修復】顏色值改用 int 型別儲存 + 呼叫原生 updateWidget 強制立即刷新
   Future<void> updateWidget() async {
     try {
       String todayKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -303,8 +304,9 @@ class MainPageState extends State<MainPage> {
       try { await HomeWidget.saveWidgetData<String>('tomorrow_code', roster[tomorrowKey] ?? 'O'); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('note', rosterNote[todayKey] ?? ''); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('extraType', rosterExtraType[todayKey] ?? ''); } catch (_) {}
-      try { await HomeWidget.saveWidgetData<double>('today_bg', todayBgColor.value.toDouble()); } catch (_) {}
-      try { await HomeWidget.saveWidgetData<double>('today_border', todayBorderColor.value.toDouble()); } catch (_) {}
+      // 顏色改用 int 儲存，避免 double rawBits 造成顏色誤判
+      try { await HomeWidget.saveWidgetData<int>('today_bg', todayBgColor.value); } catch (_) {}
+      try { await HomeWidget.saveWidgetData<int>('today_border', todayBorderColor.value); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('roster_json', jsonEncode(roster)); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson())))); } catch (_) {}
       try {
@@ -319,12 +321,12 @@ class MainPageState extends State<MainPage> {
       try {
         await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
       } catch (e) { await _writeDebugLog('寫入 widgetFontSize 失敗: $e'); }
+      // 顏色改用 int 儲存
       try {
-        await HomeWidget.saveWidgetData<double>('widgetTextColor', widgetTextColor.toDouble());
+        await HomeWidget.saveWidgetData<int>('widgetTextColor', widgetTextColor);
       } catch (e) { await _writeDebugLog('寫入 widgetTextColor 失敗: $e'); }
-      // 【修改】保存 widgetBgColor，確保 Android 端能讀取到正確的背景色
       try {
-        await HomeWidget.saveWidgetData<double>('widgetBgColor', widgetBgColor.toDouble());
+        await HomeWidget.saveWidgetData<int>('widgetBgColor', widgetBgColor);
       } catch (e) { await _writeDebugLog('寫入 widgetBgColor 失敗: $e'); }
       DateTime now = DateTime.now();
       try { await HomeWidget.saveWidgetData<int>('initial_year', now.year); } catch (_) {}
@@ -341,7 +343,7 @@ class MainPageState extends State<MainPage> {
         await _writeDebugLog('觸發 HomeWidget 更新失敗: $e');
       }
       
-      // 【修改】透過原生 MethodChannel 強制立即刷新 Widget
+      // 透過原生 MethodChannel 強制立即刷新 Widget
       try {
         await _realChannel.invokeMethod('updateWidget');
         await _writeDebugLog('觸發原生強制更新 OK');
