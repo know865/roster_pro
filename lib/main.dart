@@ -806,6 +806,8 @@ class MainPageState extends State<MainPage> {
     await sp.setStringList('dirtyDates', _dirtyDates.toList());
   }
 
+  // 【核心修改】增量同步邏輯：對於每個要同步的日期，先刪除該日期所有 [RosterPro] 事件，然後重新建立。
+  // 這樣可徹底避免重複。
   Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) async {
     if (!googleSyncEnabled && !silent) {
       bool? en = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
@@ -859,37 +861,6 @@ class MainPageState extends State<MainPage> {
         _googleEventIdMap.clear();
         await Future.delayed(const Duration(seconds: 3));
 
-        int retry = 0;
-        bool hasRemaining = true;
-        while (hasRemaining && retry < 5) {
-          hasRemaining = false;
-          DateTime current = _calcScanStart();
-          DateTime scanEnd = _calcScanEnd();
-          while (current.isBefore(scanEnd)) {
-            DateTime next = DateTime(current.year, current.month + 1, 1);
-            if (next.isAfter(scanEnd)) next = scanEnd;
-            try {
-              var events = await _calendarPlugin.retrieveEvents(
-                _rosterCalendarId!,
-                RetrieveEventsParams(startDate: current, endDate: next),
-              );
-              if ((events.data ?? []).isNotEmpty) {
-                hasRemaining = true;
-                for (var e in events.data!) {
-                  if (e.eventId != null) {
-                    try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.eventId!); } catch (_) {}
-                  }
-                }
-              }
-            } catch (_) {}
-            current = next;
-          }
-          if (hasRemaining) {
-            retry++;
-            await Future.delayed(const Duration(seconds: 2));
-          }
-        }
-
         for (var entry in roster.entries) {
           final added = await _buildAndInsertEvent(entry.key, entry.value, offset);
           if (added) add++;
@@ -902,7 +873,7 @@ class MainPageState extends State<MainPage> {
         
         // 1. 如果 _googleEventIdMap 為空（例如卸載重裝App後），先掃描重建映射
         if (_googleEventIdMap.isEmpty) {
-          await _writeDebugLog('檢測到 googleEventIdMap 為空（可能重裝App），開始掃描日曆重建對應...');
+          await _writeDebugLog('檢測到 googleEventIdMap 為空，開始掃描日曆重建對應...');
           DateTime scanStart = _calcScanStart();
           DateTime scanEnd = _calcScanEnd();
           try {
@@ -929,7 +900,6 @@ class MainPageState extends State<MainPage> {
         }
 
         final datesToSync = List<String>.from(_dirtyDates);
-        // 按日期排序，方便處理
         datesToSync.sort();
 
         for (var dateKey in datesToSync) {
@@ -937,7 +907,7 @@ class MainPageState extends State<MainPage> {
           DateTime startOfDay = DateTime(date.year, date.month, date.day, 0, 0, 0);
           DateTime endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59);
 
-          // 2. 查詢該日期的所有事件，進行「防重複清理」
+          // 2. 查詢該日期的所有事件，**直接全部刪除**，以防重複
           List<Event> eventsOnDay = [];
           try {
             var res = await _calendarPlugin.retrieveEvents(
@@ -949,43 +919,24 @@ class MainPageState extends State<MainPage> {
             await _writeDebugLog('查詢日期 $dateKey 事件失敗: $e');
           }
 
-          // 3. 找出所有帶有 [RosterPro] 的事件
           List<Event> rosterEvents = eventsOnDay.where((e) => e.description != null && e.description!.contains('[RosterPro]')).toList();
           
-          String? existingId;
-          if (rosterEvents.isNotEmpty) {
-            existingId = rosterEvents.first.eventId;
-            // 如果發現多個重複的事件，刪除多餘的，只保留第一個
-            for (int i = 1; i < rosterEvents.length; i++) {
-              try { 
-                await _calendarPlugin.deleteEvent(_rosterCalendarId!, rosterEvents[i].eventId!); 
+          // 刪除所有舊事件，不管它是不是重複的
+          for (var e in rosterEvents) {
+            if (e.eventId != null) {
+              try {
+                await _calendarPlugin.deleteEvent(_rosterCalendarId!, e.eventId!);
                 del++;
-                await _writeDebugLog('清理重複事件: $dateKey, ID: ${rosterEvents[i].eventId}');
+                await _writeDebugLog('刪除舊事件: $dateKey, ID: ${e.eventId}');
               } catch (_) {}
             }
           }
+          _googleEventIdMap.remove(dateKey);
 
-          // 更新本地映射
-          if (existingId != null) {
-            _googleEventIdMap[dateKey] = existingId;
-          } else {
-            _googleEventIdMap.remove(dateKey);
-          }
-
-          // 4. 根據最新狀態進行更新或刪除
+          // 3. 根據最新狀態重新建立事件
           if (roster.containsKey(dateKey)) {
-            // 如果該日期有排班，帶入 existingEventId 進行原地更新；如果沒有則新建。
-            final added = await _buildAndInsertEvent(dateKey, roster[dateKey]!, offset, existingEventId: existingId);
+            final added = await _buildAndInsertEvent(dateKey, roster[dateKey]!, offset, existingEventId: null);
             if (added) { add++; upd++; }
-          } else {
-            // 如果該日期已無排班，才去刪除原有事件
-            if (existingId != null) {
-              try { 
-                await _calendarPlugin.deleteEvent(_rosterCalendarId!, existingId); 
-                del++; 
-              } catch (_) {}
-              _googleEventIdMap.remove(dateKey);
-            }
           }
           _dirtyDates.remove(dateKey);
         }
@@ -1031,49 +982,43 @@ class MainPageState extends State<MainPage> {
 
     int cleaned = 0;
     try {
+      // 掃描全部範圍
       DateTime scanStart = _calcScanStart();
       DateTime scanEnd = _calcScanEnd();
-      DateTime current = scanStart;
       
-      while (current.isBefore(scanEnd)) {
-        DateTime next = DateTime(current.year, current.month + 1, 1);
-        if (next.isAfter(scanEnd)) next = scanEnd;
-
-        // 查詢這個月的事件
-        var res = await _calendarPlugin.retrieveEvents(
-          _rosterCalendarId!,
-          RetrieveEventsParams(startDate: current, endDate: next),
-        );
-        
-        if (res.data != null && res.data!.isNotEmpty) {
-          // 按日期分組帶有 [RosterPro] 的事件
-          Map<String, List<Event>> eventsByDate = {};
-          for (var e in res.data!) {
-            if (e.description != null && e.description!.contains('[RosterPro]')) {
-              RegExp regExp = RegExp(r'\[RosterPro\](\d{4}-\d{2}-\d{2})');
-              var match = regExp.firstMatch(e.description!);
-              if (match != null) {
-                String dateKey = match.group(1)!;
-                eventsByDate.putIfAbsent(dateKey, () => []).add(e);
-              }
-            }
-          }
-
-          // 清理同一天的重複事件
-          for (var entry in eventsByDate.entries) {
-            if (entry.value.length > 1) {
-              // 保留第一個（假設是最新的），刪除其他的
-              for (int i = 1; i < entry.value.length; i++) {
-                try {
-                  await _calendarPlugin.deleteEvent(_rosterCalendarId!, entry.value[i].eventId!);
-                  cleaned++;
-                  _writeDebugLog('強制清理重複: ${entry.key}, 刪除 ID: ${entry.value[i].eventId}');
-                } catch (_) {}
-              }
+      // 直接掃描整個範圍
+      var res = await _calendarPlugin.retrieveEvents(
+        _rosterCalendarId!,
+        RetrieveEventsParams(startDate: scanStart, endDate: scanEnd),
+      );
+      
+      if (res.data != null && res.data!.isNotEmpty) {
+        // 按日期分組帶有 [RosterPro] 的事件
+        Map<String, List<Event>> eventsByDate = {};
+        for (var e in res.data!) {
+          if (e.description != null && e.description!.contains('[RosterPro]')) {
+            RegExp regExp = RegExp(r'\[RosterPro\](\d{4}-\d{2}-\d{2})');
+            var match = regExp.firstMatch(e.description!);
+            if (match != null) {
+              String dateKey = match.group(1)!;
+              eventsByDate.putIfAbsent(dateKey, () => []).add(e);
             }
           }
         }
-        current = next;
+
+        // 清理同一天的重複事件
+        for (var entry in eventsByDate.entries) {
+          if (entry.value.length > 1) {
+            // 保留第一個，刪除其他的
+            for (int i = 1; i < entry.value.length; i++) {
+              try {
+                await _calendarPlugin.deleteEvent(_rosterCalendarId!, entry.value[i].eventId!);
+                cleaned++;
+                _writeDebugLog('強制清理重複: ${entry.key}, 刪除 ID: ${entry.value[i].eventId}');
+              } catch (_) {}
+            }
+          }
+        }
       }
 
       _needsFullSync = false; // 清理後不需要全清重建
@@ -1121,6 +1066,7 @@ class MainPageState extends State<MainPage> {
     }
   }
 
+  // 還原後，強制先清理一次舊的日曆事件（因為可能已經有重複），再進行同步
   Future<void> restoreFromFile(String path) async {
     try {
       String c = await File(path).readAsString();
