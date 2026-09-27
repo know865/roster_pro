@@ -22,7 +22,6 @@ class RosterWidgetProvider : AppWidgetProvider() {
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         writeDebugLog(context, "=== onUpdate: ${appWidgetIds.size} widgets ===")
-        // 【問題1 修復】延遲 500ms 再渲染，避免初始添加時 PendingIntent 未就緒導致字體膨脹
         Handler(Looper.getMainLooper()).postDelayed({
             for (appWidgetId in appWidgetIds) {
                 try { updateAppWidget(context, appWidgetManager, appWidgetId) } catch (e: Exception) {
@@ -99,11 +98,11 @@ class RosterWidgetProvider : AppWidgetProvider() {
 
         private fun getFontSizeSafe(sp: SharedPreferences, key: String, def: Double): Double {
             val raw = getValueAsDouble(sp, key, def)
-            if (raw <= 0.0) return def
-            if (raw <= 500.0) return raw
+            if (raw <= 0.0 || raw.isNaN()) return def
+            if (raw in 8.0..30.0) return raw
             try {
                 val decoded = java.lang.Double.longBitsToDouble(raw.toLong())
-                if (decoded > 0.0 && decoded <= 500.0) return decoded
+                if (decoded in 8.0..30.0) return decoded
             } catch (_: Exception) {}
             return def
         }
@@ -159,11 +158,10 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 val month = widgetPrefs.getInt("month", cal.get(Calendar.MONTH))
                 val monthNames = arrayOf("1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月")
 
-                // 【問題1 修復】讀取字體大小，若為空或異常則預設為 14.0
                 var fontSize = getFontSizeSafe(homeWidgetPrefs, "widgetFontSize", 0.0)
-                if (fontSize <= 0.0) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widgetFontSize", 0.0)
-                if (fontSize <= 0.0) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widget_font_size", 0.0)
-                if (fontSize <= 0.0) fontSize = 14.0
+                if (fontSize <= 0.0 || fontSize.isNaN()) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widgetFontSize", 0.0)
+                if (fontSize <= 0.0 || fontSize.isNaN()) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widget_font_size", 0.0)
+                if (fontSize <= 0.0 || fontSize.isNaN()) fontSize = 14.0
 
                 var textColor = getColorSafe(homeWidgetPrefs, "widgetTextColor", 0)
                 if (textColor == 0) textColor = getColorSafe(flutterPrefs, "flutter.widgetTextColor", 0)
@@ -195,7 +193,6 @@ class RosterWidgetProvider : AppWidgetProvider() {
 
                 views.setTextViewText(R.id.tv_month_title, "${year}年${monthNames[month]}")
                 views.setTextColor(R.id.tv_month_title, textColor)
-                // 【問題1 修復】標題字體改為 fontSize * 1.5，避免過大
                 views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, (fontSize * 1.5).toFloat())
 
                 val calendar = Calendar.getInstance()
@@ -209,13 +206,15 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 val todayDrawableId = context.resources.getIdentifier("cell_bg_today", "drawable", context.packageName)
 
                 for (i in 0 until 42) {
-                    val dayIndex = i - startOffset + 1
-                    val dayTvId = context.resources.getIdentifier("day$i", "id", context.packageName)
-                    val shiftTvId = context.resources.getIdentifier("shift$i", "id", context.packageName)
-                    val lunarTvId = context.resources.getIdentifier("lunar$i", "id", context.packageName)
-                    val cellId = context.resources.getIdentifier("cell$i", "id", context.packageName)
-                    if (dayTvId == 0) continue
+                    // 【修改】單獨 try-catch 保護每個格子的渲染，防止一個格子出錯導致整個 Widget 崩潰
                     try {
+                        val dayIndex = i - startOffset + 1
+                        val dayTvId = context.resources.getIdentifier("day$i", "id", context.packageName)
+                        val shiftTvId = context.resources.getIdentifier("shift$i", "id", context.packageName)
+                        val lunarTvId = context.resources.getIdentifier("lunar$i", "id", context.packageName)
+                        val cellId = context.resources.getIdentifier("cell$i", "id", context.packageName)
+                        if (dayTvId == 0) continue
+
                         val cellCal = Calendar.getInstance()
                         cellCal.set(year, month, dayIndex)
                         val cellYear = cellCal.get(Calendar.YEAR)
@@ -239,8 +238,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
                                     try { views.setInt(cellId, "setBackgroundColor", todayBgColor) } catch (e2: Exception) {}
                                 }
                             } else {
-                                val cellBg = bgColor
-                                try { views.setInt(cellId, "setBackgroundColor", cellBg) } catch (e: Exception) {}
+                                try { views.setInt(cellId, "setBackgroundColor", bgColor) } catch (e: Exception) {}
                             }
                         } else {
                             if (dateStr == todayStr && isCurrMonth) {
@@ -250,18 +248,27 @@ class RosterWidgetProvider : AppWidgetProvider() {
                             }
                         }
 
-                        // 顯示班次 (非本月日期也顯示)
+                        // 顯示班次
                         if (shiftTvId != 0) {
                             if (shiftCode.isNotEmpty()) {
                                 views.setTextViewText(shiftTvId, shiftCode)
-                                views.setTextColor(shiftTvId, 0xFFFFFFFF.toInt())
-                                views.setTextViewTextSize(shiftTvId, TypedValue.COMPLEX_UNIT_SP, (fontSize * 0.7).toFloat())
+                                
                                 var chipColor = 0xFF4CAF50.toInt()
                                 val defObj = defsJson.optJSONObject(shiftCode)
                                 if (defObj != null) {
                                     val c = defObj.optLong("color", 0).toInt()
                                     if (c != 0) chipColor = c
                                 }
+
+                                // 【修改】動態計算文字顏色，確保與背景對比清晰
+                                val r = (chipColor shr 16) and 0xFF
+                                val g = (chipColor shr 8) and 0xFF
+                                val b = chipColor and 0xFF
+                                val luminance = 0.299 * r + 0.587 * g + 0.114 * b
+                                val textColorForShift = if (luminance > 150) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
+
+                                views.setTextColor(shiftTvId, textColorForShift)
+                                views.setTextViewTextSize(shiftTvId, TypedValue.COMPLEX_UNIT_SP, (fontSize * 0.7).toFloat())
                                 try { views.setInt(shiftTvId, "setBackgroundColor", chipColor) } catch (e: Exception) {}
                                 views.setViewVisibility(shiftTvId, View.VISIBLE)
                             } else {
@@ -288,7 +295,9 @@ class RosterWidgetProvider : AppWidgetProvider() {
                         intent.putExtra("selected_date", dateStr)
                         intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                         views.setOnClickPendingIntent(dayTvId, PendingIntent.getActivity(context, appWidgetId * 1000 + i, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
-                    } catch (e: Exception) { writeDebugLog(context, "cell $i error: ${e.message}") }
+                    } catch (e: Exception) {
+                        writeDebugLog(context, "cell $i error: ${e.message}")
+                    }
                 }
 
                 for (row in 0 until 6) {
