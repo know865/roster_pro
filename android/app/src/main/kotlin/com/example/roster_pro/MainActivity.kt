@@ -1,6 +1,7 @@
 package com.example.roster_pro
 
 import android.Manifest
+import android.appwidget.AppWidgetManager
 import android.content.ContentUris
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -26,6 +27,7 @@ class MainActivity : FlutterActivity() {
                 "getCalendars" -> handleGetCalendars(result)
                 "scanImage" -> handleScanImage(call.argument<String>("path"), result)
                 "requestManageStorage" -> handleRequestManageStorage(result)
+                "updateWidget" -> handleUpdateWidget(result) // 新增：立即更新 Widget
                 "deleteAllEventsInCalendar" -> {
                     val calendarId = call.argument<String>("calendarId")
                     if (calendarId == null) {
@@ -36,6 +38,21 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    // 新增：強制刷新 Widget
+    private fun handleUpdateWidget(result: MethodChannel.Result) {
+        try {
+            val appWidgetManager = AppWidgetManager.getInstance(this)
+            val thisWidget = android.content.ComponentName(this, RosterWidgetProvider::class.java)
+            val allWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget)
+            for (appWidgetId in allWidgetIds) {
+                RosterWidgetProvider.updateAppWidget(this, appWidgetManager, appWidgetId)
+            }
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("UPDATE_FAIL", e.message, null)
         }
     }
 
@@ -96,7 +113,6 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) { result.error("STORAGE_FAIL", e.message, null) }
     }
 
-    // 【核心】分批删除，每批 10 条，绕过 Android 系统的批量删除安全限制
     private fun handleDeleteAllEvents(calendarId: String, result: MethodChannel.Result) {
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
