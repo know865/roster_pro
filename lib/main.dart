@@ -21,10 +21,10 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   tzData.initializeTimeZones();
   tz.setLocalLocation(tz.getLocation('Asia/Hong_Kong'));
-  WidgetsFlutterBinding.ensureInitialized();
   HomeWidget.setAppGroupId('group.rosterPro');
   runApp(const RosterApp());
 }
@@ -338,6 +338,10 @@ class MainPageState extends State<MainPage> {
     nameCtrl.text = customName;
     _loadVersion();
     _requestStoragePermission();
+    
+    // 初始化小工具事件回調，解決點擊無反應的問題
+    HomeWidget.registerInteractivityCallback(backgroundCallback);
+    
     load().then((_) async {
       await Future.delayed(const Duration(milliseconds: 500));
       bool ok = await handleCalendarPermission(silent: false);
@@ -348,11 +352,18 @@ class MainPageState extends State<MainPage> {
       await updateWidget();
       if (googleSyncEnabled) {
         Future.delayed(const Duration(seconds: 2), () {
-          // 【修改】首次同步只做增量，不強制完整同步
           if (mounted) { _syncToGoogle(silent: true, forceFullSync: false); }
         });
       }
     });
+  }
+
+  @pragma('vm:entry-point')
+  static Future<void> backgroundCallback(Uri? uri) async {
+    // 小工具點擊進入App的處理邏輯
+    if (uri != null) {
+      debugPrint('小工具點擊: $uri');
+    }
   }
 
   Future<void> _loadVersion() async {
@@ -396,8 +407,8 @@ class MainPageState extends State<MainPage> {
 
     var ddList = sp.getStringList('dirtyDates');
     if (ddList != null) _dirtyDates = ddList.toSet();
-    // 【修改】預設改為 false，首次安裝不觸發全刪重建
     _needsFullSync = sp.getBool('needsFullSync') ?? false;
+    
     setState(() {
       carry = sp.getDouble('carry') ?? 0;
       customName = sp.getString('cName') ?? '我的排更-專屬日曆';
@@ -708,7 +719,7 @@ class MainPageState extends State<MainPage> {
     return DateTime(maxYear, 12, 31);
   }
 
-  Future<bool> _buildAndInsertEvent(String dateKey, String code, Duration offset) async {
+  Future<bool> _buildAndInsertEvent(String dateKey, String code, Duration offset, {String? existingEventId}) async {
     final def = defs[code];
     if (def == null) return false;
     final date = DateTime.parse(dateKey);
@@ -727,7 +738,7 @@ class MainPageState extends State<MainPage> {
 
     Event ev;
     if (allDayFlag) {
-      ev = Event(_rosterCalendarId!, title: title, description: desc,
+      ev = Event(_rosterCalendarId!, eventId: existingEventId, title: title, description: desc,
         start: tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0),
         end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59),
         allDay: true);
@@ -739,7 +750,7 @@ class MainPageState extends State<MainPage> {
       if (!eLocal.isAfter(sLocal)) eLocal = eLocal.add(const Duration(days: 1));
       DateTime sUtc = sLocal.subtract(offset);
       DateTime eUtc = eLocal.subtract(offset);
-      ev = Event(_rosterCalendarId!, title: title, description: desc,
+      ev = Event(_rosterCalendarId!, eventId: existingEventId, title: title, description: desc,
         start: tz.TZDateTime.utc(sUtc.year, sUtc.month, sUtc.day, sUtc.hour, sUtc.minute),
         end: tz.TZDateTime.utc(eUtc.year, eUtc.month, eUtc.day, eUtc.hour, eUtc.minute),
         allDay: false);
@@ -793,7 +804,6 @@ class MainPageState extends State<MainPage> {
     await sp.setStringList('dirtyDates', _dirtyDates.toList());
   }
 
-  // 【修改】_syncToGoogle：移除 _googleEventIdMap.isEmpty 自動完整同步
   Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) async {
     if (!googleSyncEnabled && !silent) {
       bool? en = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
@@ -808,7 +818,6 @@ class MainPageState extends State<MainPage> {
     }
     if (_isSyncing) return;
 
-    // 只有當 forceFullSync 明確為 true，或 _needsFullSync 為 true 時才做完整同步
     bool needFull = forceFullSync || _needsFullSync;
 
     if (!needFull && _dirtyDates.isEmpty) {
@@ -887,16 +896,24 @@ class MainPageState extends State<MainPage> {
         _needsFullSync = false;
         _dirtyDates.clear();
       } else {
-        // ===== 增量同步 =====
+        // ===== 增量同步 (修正重複同步問題) =====
         final datesToSync = List<String>.from(_dirtyDates);
         for (var dateKey in datesToSync) {
-          if (_googleEventIdMap.containsKey(dateKey)) {
-            try { await _calendarPlugin.deleteEvent(_rosterCalendarId!, _googleEventIdMap[dateKey]!); del++; } catch (_) {}
-            _googleEventIdMap.remove(dateKey);
-          }
+          String? existingId = _googleEventIdMap[dateKey];
+          
           if (roster.containsKey(dateKey)) {
-            final added = await _buildAndInsertEvent(dateKey, roster[dateKey]!, offset);
+            // 如果該日期有排班，直接帶入 eventId 更新，避免先刪後建造成的重複
+            final added = await _buildAndInsertEvent(dateKey, roster[dateKey]!, offset, existingEventId: existingId);
             if (added) { add++; upd++; }
+          } else {
+            // 如果該日期已無排班，才去刪除原有事件
+            if (existingId != null) {
+              try { 
+                await _calendarPlugin.deleteEvent(_rosterCalendarId!, existingId); 
+                del++; 
+              } catch (_) {}
+              _googleEventIdMap.remove(dateKey);
+            }
           }
           _dirtyDates.remove(dateKey);
         }
@@ -953,7 +970,6 @@ class MainPageState extends State<MainPage> {
     }
   }
 
-  // 【修改】restoreFromFile：保留 googleEventIdMap，走增量同步
   Future<void> restoreFromFile(String path) async {
     try {
       String c = await File(path).readAsString();
@@ -979,7 +995,6 @@ class MainPageState extends State<MainPage> {
         if (j['rosterCalId'] != null) _rosterCalendarId = j['rosterCalId'];
         if (j['rosterCalName'] != null) _rosterCalendarName = j['rosterCalName'];
         if (j['rosterAccName'] != null) _rosterAccountName = j['rosterAccName'];
-        // 【關鍵】保留 Google Event ID 對應表，讓增量同步能正確比對與更新
         if (j['googleEventIdMap'] != null) _googleEventIdMap = Map<String, String>.from(j['googleEventIdMap']);
         if (j['gSync'] != null) googleSyncEnabled = j['gSync'];
         if (j['gAuto'] != null) autoSync = j['gAuto'];
@@ -998,10 +1013,8 @@ class MainPageState extends State<MainPage> {
         if (j['rosterLeave'] != null) rosterLeave = Map<String, String>.from(j['rosterLeave']);
       });
 
-      // 【關鍵】還原後不觸發完整同步，走增量路徑
       _needsFullSync = false;
 
-      // 把所有還原的排班日期加入 dirtyDates，讓增量同步逐筆比對
       _dirtyDates.clear();
       for (var key in roster.keys) {
         _dirtyDates.add(key);
@@ -1017,7 +1030,6 @@ class MainPageState extends State<MainPage> {
           ));
         }
         await Future.delayed(const Duration(milliseconds: 800));
-        // 【關鍵】forceFullSync: false，走增量路徑
         await _syncToGoogle(forceFullSync: false, silent: false);
       } else {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('還原成功')));
@@ -2253,9 +2265,9 @@ class MainPageState extends State<MainPage> {
                   const SizedBox(height: 4),
                   ...leaveDefs.map((leave) {
                     double used = yearUsed[leave.name] ?? 0.0;
-                    var rec = leaveRecords['$queryYear']?[leave.name] ?? {'total': 0.0, 'adjust': 0.0, 'carry': 0.0};
-                    double totalDays = (rec['total'] as num).toDouble() + (rec['adjust'] as num).toDouble() + (rec['carry'] as num).toDouble();
-                    double balance = totalDays - used;
+                    // 修改點：結餘公式 = 設定內餘額欄(carry) - 已用天數
+                    var rec = leaveRecords['$queryYear']?[leave.name] ?? {'carry': 0.0};
+                    double balance = (rec['carry'] as num).toDouble() - used;
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 2),
                       child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -2278,9 +2290,9 @@ class MainPageState extends State<MainPage> {
                 for (var n in leaveEntries) {
                   var leave = leaveDefs.firstWhere((e) => e.name == n.value, orElse: () => LeaveDef('', '', Colors.grey));
                   double used = yearUsed[leave.name] ?? 0.0;
-                  var rec = yrRecords[leave.name] ?? {'total': 0.0, 'adjust': 0.0, 'carry': 0.0};
-                  double totalDays = (rec['total'] as num).toDouble() + (rec['adjust'] as num).toDouble() + (rec['carry'] as num).toDouble();
-                  double balance = totalDays - used;
+                  // 修改點：導出CSV亦使用相同公式
+                  var rec = yrRecords[leave.name] ?? {'carry': 0.0};
+                  double balance = (rec['carry'] as num).toDouble() - used;
                   String dateStr = n.key;
                   String yearStr = dateStr.substring(0, 4);
                   String monthStr = dateStr.substring(5, 7);
@@ -2312,6 +2324,19 @@ class MainPageState extends State<MainPage> {
         for (var def in leaveDefs) {
           if (!yearRecords.containsKey(def.name)) yearRecords[def.name] = {'total': 0.0, 'adjust': 0.0, 'carry': 0.0};
         }
+        
+        // 自動計算並更新目前選中年份的餘額
+        for (var def in leaveDefs) {
+          var record = yearRecords[def.name]!;
+          double prevCarry = 0.0;
+          if (selectedYear > 2000) {
+            prevCarry = (leaveRecords['${selectedYear - 1}']?[def.name]?['carry'] as num?)?.toDouble() ?? 0.0;
+          }
+          double total = (record['total'] as num?)?.toDouble() ?? 0.0;
+          double adjust = (record['adjust'] as num?)?.toDouble() ?? 0.0;
+          record['carry'] = prevCarry + total + adjust;
+        }
+
         return AlertDialog(
           title: Text('假期數據管理 - $selectedYear年'),
           content: SizedBox(width: 600, height: 500, child: Column(children: [
@@ -2326,16 +2351,47 @@ class MainPageState extends State<MainPage> {
                 var record = yearRecords[leave.name]!;
                 var totalCtrl = TextEditingController(text: (record['total'] ?? 0.0).toString());
                 var adjustCtrl = TextEditingController(text: (record['adjust'] ?? 0.0).toString());
-                var carryCtrl = TextEditingController(text: (record['carry'] ?? 0.0).toString());
+                
+                // 自動計算出的 carry
+                double prevCarry = 0.0;
+                if (selectedYear > 2000) {
+                  prevCarry = (leaveRecords['${selectedYear - 1}']?[leave.name]?['carry'] as num?)?.toDouble() ?? 0.0;
+                }
+                double total = (record['total'] as num?)?.toDouble() ?? 0.0;
+                double adjust = (record['adjust'] as num?)?.toDouble() ?? 0.0;
+                double autoCarry = prevCarry + total + adjust;
+
                 return Card(margin: const EdgeInsets.symmetric(vertical: 4), child: Padding(padding: const EdgeInsets.all(8.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text('${leave.name} (${leave.fullName})', style: TextStyle(fontWeight: FontWeight.bold, color: leave.color)),
                   const SizedBox(height: 4),
                   Row(children: [
-                    Expanded(child: TextField(controller: totalCtrl, decoration: const InputDecoration(labelText: '天數', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (v) => record['total'] = double.tryParse(v) ?? 0.0)),
+                    Expanded(child: TextField(
+                      controller: totalCtrl, 
+                      decoration: const InputDecoration(labelText: '天數', isDense: true, border: OutlineInputBorder()), 
+                      keyboardType: TextInputType.number, 
+                      onChanged: (v) { 
+                        record['total'] = double.tryParse(v) ?? 0.0; 
+                        setD(() {}); 
+                      }
+                    )),
                     const SizedBox(width: 8),
-                    Expanded(child: TextField(controller: adjustCtrl, decoration: const InputDecoration(labelText: '微調 +/-', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (v) => record['adjust'] = double.tryParse(v) ?? 0.0)),
+                    Expanded(child: TextField(
+                      controller: adjustCtrl, 
+                      decoration: const InputDecoration(labelText: '微調 +/-', isDense: true, border: OutlineInputBorder()), 
+                      keyboardType: TextInputType.number, 
+                      onChanged: (v) { 
+                        record['adjust'] = double.tryParse(v) ?? 0.0; 
+                        setD(() {}); 
+                      }
+                    )),
                     const SizedBox(width: 8),
-                    Expanded(child: TextField(controller: carryCtrl, decoration: const InputDecoration(labelText: '餘額', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (v) => record['carry'] = double.tryParse(v) ?? 0.0)),
+                    Expanded(child: AbsorbPointer(
+                      child: TextField(
+                        controller: TextEditingController(text: autoCarry.toStringAsFixed(1)),
+                        enabled: false,
+                        decoration: const InputDecoration(labelText: '餘額 (自動計算)', isDense: true, border: OutlineInputBorder(), filled: true, fillColor: Color(0xFFEEEEEE)),
+                      ),
+                    )),
                   ]),
                 ])));
               }),
@@ -2347,6 +2403,15 @@ class MainPageState extends State<MainPage> {
                 var adjustCtrl = TextEditingController(text: (record['adjust'] ?? 0.0).toString());
                 var nameCtrl = TextEditingController(text: leave.name);
                 var fullNameCtrl = TextEditingController(text: leave.fullName);
+                
+                double prevCarry = 0.0;
+                if (selectedYear > 2000) {
+                  prevCarry = (leaveRecords['${selectedYear - 1}']?[leave.name]?['carry'] as num?)?.toDouble() ?? 0.0;
+                }
+                double total = (record['total'] as num?)?.toDouble() ?? 0.0;
+                double adjust = (record['adjust'] as num?)?.toDouble() ?? 0.0;
+                double autoCarry = prevCarry + total + adjust;
+
                 return Card(margin: const EdgeInsets.symmetric(vertical: 4), child: Padding(padding: const EdgeInsets.all(8.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(children: [
                     Expanded(child: TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: '代號', isDense: true, border: OutlineInputBorder()), onChanged: (v) { leave.name = v; })),
@@ -2356,9 +2421,27 @@ class MainPageState extends State<MainPage> {
                   ]),
                   const SizedBox(height: 4),
                   Row(children: [
-                    Expanded(child: TextField(controller: totalCtrl, decoration: const InputDecoration(labelText: '天數', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (v) => record['total'] = double.tryParse(v) ?? 0.0)),
+                    Expanded(child: TextField(
+                      controller: totalCtrl, 
+                      decoration: const InputDecoration(labelText: '天數', isDense: true, border: OutlineInputBorder()), 
+                      keyboardType: TextInputType.number, 
+                      onChanged: (v) { record['total'] = double.tryParse(v) ?? 0.0; setD(() {}); }
+                    )),
                     const SizedBox(width: 8),
-                    Expanded(child: TextField(controller: adjustCtrl, decoration: const InputDecoration(labelText: '微調 +/-', isDense: true, border: OutlineInputBorder()), keyboardType: TextInputType.number, onChanged: (v) => record['adjust'] = double.tryParse(v) ?? 0.0)),
+                    Expanded(child: TextField(
+                      controller: adjustCtrl, 
+                      decoration: const InputDecoration(labelText: '微調 +/-', isDense: true, border: OutlineInputBorder()), 
+                      keyboardType: TextInputType.number, 
+                      onChanged: (v) { record['adjust'] = double.tryParse(v) ?? 0.0; setD(() {}); }
+                    )),
+                    const SizedBox(width: 8),
+                    Expanded(child: AbsorbPointer(
+                      child: TextField(
+                        controller: TextEditingController(text: autoCarry.toStringAsFixed(1)),
+                        enabled: false,
+                        decoration: const InputDecoration(labelText: '餘額 (自動計算)', isDense: true, border: OutlineInputBorder(), filled: true, fillColor: Color(0xFFEEEEEE)),
+                      ),
+                    )),
                   ]),
                 ])));
               }),
@@ -3075,7 +3158,7 @@ class MainPageState extends State<MainPage> {
                 SizedBox(height: 16),
                 Text('4. 設定與同步', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
-                Text('• 「假期數據管理」：可設定每年的假期天數、微調、餘額，並自動計算。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：刪除 Google 日曆上所有 [RosterPro] 事件並重新建立。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
+                Text('• 「假期數據管理」：可設定每年的假期天數、微調，系統會自動計算餘額。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：刪除 Google 日曆上所有 [RosterPro] 事件並重新建立。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
                 SizedBox(height: 16),
                 Text('5. 常見問題', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
