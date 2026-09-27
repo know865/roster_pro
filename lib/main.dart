@@ -339,7 +339,6 @@ class MainPageState extends State<MainPage> {
     _loadVersion();
     _requestStoragePermission();
     
-    // 初始化小工具事件回調，解決點擊無反應的問題
     HomeWidget.registerInteractivityCallback(backgroundCallback);
     
     load().then((_) async {
@@ -360,7 +359,6 @@ class MainPageState extends State<MainPage> {
 
   @pragma('vm:entry-point')
   static Future<void> backgroundCallback(Uri? uri) async {
-    // 小工具點擊進入App的處理邏輯
     if (uri != null) {
       debugPrint('小工具點擊: $uri');
     }
@@ -896,13 +894,43 @@ class MainPageState extends State<MainPage> {
         _needsFullSync = false;
         _dirtyDates.clear();
       } else {
-        // ===== 增量同步 (修正重複同步問題) =====
+        // ===== 增量同步 =====
+        
+        // 【新增】如果 _googleEventIdMap 為空（例如卸載重裝App後），先掃描 Google 日曆上帶有 [RosterPro] 的事件，重建對應關係。
+        // 這樣可以避免重複建立相同班次。
+        if (_googleEventIdMap.isEmpty) {
+          await _writeDebugLog('檢測到 googleEventIdMap 為空（可能重裝App），開始掃描日曆重建對應...');
+          DateTime scanStart = _calcScanStart();
+          DateTime scanEnd = _calcScanEnd();
+          try {
+            var existingEvents = await _calendarPlugin.retrieveEvents(
+              _rosterCalendarId!,
+              RetrieveEventsParams(startDate: scanStart, endDate: scanEnd),
+            );
+            if (existingEvents.data != null) {
+              for (var e in existingEvents.data!) {
+                if (e.description != null && e.description!.contains('[RosterPro]')) {
+                  RegExp regExp = RegExp(r'\[RosterPro\](\d{4}-\d{2}-\d{2})');
+                  var match = regExp.firstMatch(e.description!);
+                  if (match != null && e.eventId != null) {
+                    String dateKey = match.group(1)!;
+                    _googleEventIdMap[dateKey] = e.eventId!;
+                  }
+                }
+              }
+            }
+            await _writeDebugLog('掃描完成，共找到 ${_googleEventIdMap.length} 條現有事件');
+          } catch (e) {
+            await _writeDebugLog('掃描重建失敗: $e');
+          }
+        }
+
         final datesToSync = List<String>.from(_dirtyDates);
         for (var dateKey in datesToSync) {
           String? existingId = _googleEventIdMap[dateKey];
           
           if (roster.containsKey(dateKey)) {
-            // 如果該日期有排班，直接帶入 eventId 更新，避免先刪後建造成的重複
+            // 如果該日期有排班，帶入 existingEventId 進行原地更新；如果沒有則新建。
             final added = await _buildAndInsertEvent(dateKey, roster[dateKey]!, offset, existingEventId: existingId);
             if (added) { add++; upd++; }
           } else {
@@ -2265,7 +2293,7 @@ class MainPageState extends State<MainPage> {
                   const SizedBox(height: 4),
                   ...leaveDefs.map((leave) {
                     double used = yearUsed[leave.name] ?? 0.0;
-                    // 修改點：結餘公式 = 設定內餘額欄(carry) - 已用天數
+                    // 結餘公式 = 設定內餘額欄(carry) - 已用天數
                     var rec = leaveRecords['$queryYear']?[leave.name] ?? {'carry': 0.0};
                     double balance = (rec['carry'] as num).toDouble() - used;
                     return Padding(
@@ -2290,7 +2318,7 @@ class MainPageState extends State<MainPage> {
                 for (var n in leaveEntries) {
                   var leave = leaveDefs.firstWhere((e) => e.name == n.value, orElse: () => LeaveDef('', '', Colors.grey));
                   double used = yearUsed[leave.name] ?? 0.0;
-                  // 修改點：導出CSV亦使用相同公式
+                  // 導出CSV亦使用相同公式
                   var rec = yrRecords[leave.name] ?? {'carry': 0.0};
                   double balance = (rec['carry'] as num).toDouble() - used;
                   String dateStr = n.key;
