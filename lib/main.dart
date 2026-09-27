@@ -294,7 +294,7 @@ class MainPageState extends State<MainPage> {
     return r == true;
   }
 
-  // 【關鍵修復】顏色值改用 int 型別儲存 + 呼叫原生 updateWidget 強制立即刷新
+  // 【關鍵修復】顏色改用 String 儲存（避免 int/Long 型別轉換錯誤）
   Future<void> updateWidget() async {
     try {
       String todayKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -304,9 +304,9 @@ class MainPageState extends State<MainPage> {
       try { await HomeWidget.saveWidgetData<String>('tomorrow_code', roster[tomorrowKey] ?? 'O'); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('note', rosterNote[todayKey] ?? ''); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('extraType', rosterExtraType[todayKey] ?? ''); } catch (_) {}
-      // 顏色改用 int 儲存，避免 double rawBits 造成顏色誤判
-      try { await HomeWidget.saveWidgetData<int>('today_bg', todayBgColor.value); } catch (_) {}
-      try { await HomeWidget.saveWidgetData<int>('today_border', todayBorderColor.value); } catch (_) {}
+      // 【修復】顏色改用 String 儲存
+      try { await HomeWidget.saveWidgetData<String>('today_bg', todayBgColor.value.toString()); } catch (e) { await _writeDebugLog('today_bg err: $e'); }
+      try { await HomeWidget.saveWidgetData<String>('today_border', todayBorderColor.value.toString()); } catch (e) { await _writeDebugLog('today_border err: $e'); }
       try { await HomeWidget.saveWidgetData<String>('roster_json', jsonEncode(roster)); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson())))); } catch (_) {}
       try {
@@ -321,21 +321,19 @@ class MainPageState extends State<MainPage> {
       try {
         await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize);
       } catch (e) { await _writeDebugLog('寫入 widgetFontSize 失敗: $e'); }
-      // 顏色改用 int 儲存
+      // 【修復】顏色改用 String 儲存
       try {
-        await HomeWidget.saveWidgetData<int>('widgetTextColor', widgetTextColor);
+        await HomeWidget.saveWidgetData<String>('widgetTextColor', widgetTextColor.toString());
       } catch (e) { await _writeDebugLog('寫入 widgetTextColor 失敗: $e'); }
       try {
-        await HomeWidget.saveWidgetData<int>('widgetBgColor', widgetBgColor);
+        await HomeWidget.saveWidgetData<String>('widgetBgColor', widgetBgColor.toString());
       } catch (e) { await _writeDebugLog('寫入 widgetBgColor 失敗: $e'); }
       DateTime now = DateTime.now();
       try { await HomeWidget.saveWidgetData<int>('initial_year', now.year); } catch (_) {}
       try { await HomeWidget.saveWidgetData<int>('initial_month', now.month); } catch (_) {}
       
-      // 等待數據完全寫入 SharedPreferences
       await Future.delayed(const Duration(milliseconds: 300));
       
-      // 原本的 HomeWidget 更新（發送廣播）
       try {
         await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider');
         await _writeDebugLog('觸發 HomeWidget 更新 OK');
@@ -343,7 +341,6 @@ class MainPageState extends State<MainPage> {
         await _writeDebugLog('觸發 HomeWidget 更新失敗: $e');
       }
       
-      // 透過原生 MethodChannel 強制立即刷新 Widget
       try {
         await _realChannel.invokeMethod('updateWidget');
         await _writeDebugLog('觸發原生強制更新 OK');
