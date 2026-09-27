@@ -723,22 +723,8 @@ class MainPageState extends State<MainPage> {
 
   /// ✅ 從事件解析班次 (code, start, end)
   /// 優先從 description 解析，若為空或格式不符，改用 title fallback
-  /// description 範例：
-  ///   [RosterPro]2026-09-15
-  ///   Hing
-  ///   班次: U 碼頭中更
-  ///   時間: 15:30-01:30
-  /// 全天：
-  ///   班次: O 休
-  ///   類型: 全天
-  /// title 範例：
-  ///   U 15:30-01:30
-  ///   U 15:30-01:30 | 記事
-  ///   O
-  ///   O | 記事
   Map<String, String>? _parseShiftFromDesc(String? desc, {String? title}) {
     try {
-      // ===== 優先從 description 解析 =====
       if (desc != null && desc.isNotEmpty) {
         final shiftMatch = RegExp(r'班次:\s*(\S+)').firstMatch(desc);
         if (shiftMatch != null) {
@@ -759,14 +745,13 @@ class MainPageState extends State<MainPage> {
         }
       }
 
-      // ===== Fallback：從 title 解析 =====
       if (title != null && title.trim().isNotEmpty) {
         String t = title.trim();
         final pipeIdx = t.indexOf(' | ');
         if (pipeIdx >= 0) t = t.substring(0, pipeIdx).trim();
 
-        // 帶時間：U 15:30-01:30
-        final m = RegExp(r'^(\S+)\s+(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$').firstMatch(t);
+        // 帶時間：U 15:30-01:30 或 U 15:30-01:30 (第 1 天，共 2 天)
+        final m = RegExp(r'^(\S+)\s+(\d{1,2}:\d{2})-(\d{1,2}:\d{2})').firstMatch(t);
         if (m != null) {
           return {
             'code': m.group(1)!,
@@ -785,7 +770,6 @@ class MainPageState extends State<MainPage> {
     return null;
   }
 
-  /// 將 "9:30" 補成 "09:30"
   String _padTime(String t) {
     final parts = t.split(':');
     if (parts.length != 2) return t;
@@ -879,7 +863,6 @@ class MainPageState extends State<MainPage> {
     await sp.setStringList('dirtyDates', _dirtyDates.toList());
   }
 
-  // 【核心】增量同步：用 (班次代號 + 開始時間 + 結束時間) 匹配既有事件
   Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) async {
     if (!googleSyncEnabled && !silent) {
       bool? en = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
@@ -1061,7 +1044,6 @@ class MainPageState extends State<MainPage> {
             return m != null && m.group(1) == dateKey;
           }).toList();
 
-          // 情境 A：該日期無排班 → 全部刪除
           if (!roster.containsKey(dateKey)) {
             for (var e in rosterEvents) {
               if (e.eventId != null) {
@@ -1076,7 +1058,6 @@ class MainPageState extends State<MainPage> {
             continue;
           }
 
-          // 情境 B：用 (code + start + end) 匹配
           final newCode = roster[dateKey]!;
           final newDef = defs[newCode];
           if (newDef == null) { _dirtyDates.remove(dateKey); continue; }
@@ -1139,7 +1120,7 @@ class MainPageState extends State<MainPage> {
     }
   }
 
-  /// ✅ 強制清理重複：逐日掃描 + title fallback + 詳細 log
+  /// ✅ 強制清理重複：逐日掃描 + 智能分組 + 保守清理未解析事件
   Future<void> _forceCleanDuplicates() async {
     if (_isSyncing) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在同步中，請稍候...')));
@@ -1151,7 +1132,7 @@ class MainPageState extends State<MainPage> {
     }
     bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
       title: const Text('⚠️ 強制清理重複事件'),
-      content: const Text('這會逐日掃描 [RosterPro] 事件，並把同一日期、同一班次（代號+開始+結束）的重複事件刪除。\n\n確定要執行嗎？'),
+      content: const Text('這會逐日掃描 [RosterPro] 事件：\n• 可解析的：按（代號+開始+結束）分組，每組保留 1 條\n• 無法解析的殘留：若該日已有可解析事件，全部刪除\n\n確定要執行嗎？'),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
         FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('確定清理'))
@@ -1232,12 +1213,7 @@ class MainPageState extends State<MainPage> {
           scannedDates++;
 
           DateTime date;
-          try {
-            date = DateTime.parse(dateKey);
-          } catch (_) {
-            continue;
-          }
-          // 往前推一天，確保跨天事件（如 15:30→次日 01:30）能被查到
+          try { date = DateTime.parse(dateKey); } catch (_) { continue; }
           DateTime startOfDay = DateTime(date.year, date.month, date.day, 0, 0, 0)
               .subtract(const Duration(hours: 24));
           DateTime endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59);
@@ -1258,29 +1234,34 @@ class MainPageState extends State<MainPage> {
             final desc = e.description ?? '';
             if (!desc.contains('[RosterPro]')) return false;
             final m = RegExp(r'\[RosterPro\](\d{4}-\d{2}-\d{2})').firstMatch(desc);
-            return m != null && m.group(1) == dateKey;
+            return m == null || m.group(1) == dateKey;
           }).toList();
 
-          if (rosterEvents.isEmpty) continue;
+          if (rosterEvents.length <= 1) continue;
 
           await _writeDebugLog('【$dateKey】查到 ${rosterEvents.length} 條 [RosterPro] 事件');
 
           Map<String, List<Event>> byKey = {};
+          List<Event> unparsed = [];
           for (var e in rosterEvents) {
             final parsed = _parseShiftFromDesc(e.description, title: e.title);
             if (parsed == null) {
+              unparsed.add(e);
               final descStr = e.description ?? '';
               final shortDesc = descStr.length > 80 ? descStr.substring(0, 80) : descStr;
               await _writeDebugLog('  ❌ 無法解析: id=${e.eventId}, title=${e.title}, desc=${shortDesc.replaceAll("\n", "\\n")}');
-              continue;
+            } else {
+              final key = '${parsed['code']}|${parsed['start']}|${parsed['end']}';
+              byKey.putIfAbsent(key, () => []).add(e);
+              await _writeDebugLog('  ✅ 解析: id=${e.eventId}, key=$key');
             }
-            final key = '${parsed['code']}|${parsed['start']}|${parsed['end']}';
-            byKey.putIfAbsent(key, () => []).add(e);
-            await _writeDebugLog('  ✅ 解析: id=${e.eventId}, key=$key');
           }
 
           bool hadDup = false;
+          int parsedGroupCount = 0;
+
           for (var entry in byKey.entries) {
+            parsedGroupCount++;
             if (entry.value.length <= 1) continue;
             hadDup = true;
             await _writeDebugLog('  ⚠️ 發現重複 key=${entry.key}, 共 ${entry.value.length} 條');
@@ -1297,6 +1278,39 @@ class MainPageState extends State<MainPage> {
               }
             }
           }
+
+          if (unparsed.isNotEmpty) {
+            await _writeDebugLog('  ⚠️ 該日有 ${unparsed.length} 條無法解析事件, 可解析組數=$parsedGroupCount');
+            if (parsedGroupCount > 0) {
+              for (var ev in unparsed) {
+                if (ev.eventId != null) {
+                  try {
+                    await _calendarPlugin.deleteEvent(_rosterCalendarId!, ev.eventId!);
+                    cleaned++;
+                    hadDup = true;
+                    await _writeDebugLog('  🗑️ 刪除殘留事件: id=${ev.eventId}');
+                  } catch (e) {
+                    await _writeDebugLog('  ❌ 刪除失敗: id=${ev.eventId}, err=$e');
+                  }
+                }
+              }
+            } else if (unparsed.length > 1) {
+              for (int i = 1; i < unparsed.length; i++) {
+                final ev = unparsed[i];
+                if (ev.eventId != null) {
+                  try {
+                    await _calendarPlugin.deleteEvent(_rosterCalendarId!, ev.eventId!);
+                    cleaned++;
+                    hadDup = true;
+                    await _writeDebugLog('  🗑️ 刪除重複（未解析）: id=${ev.eventId}');
+                  } catch (e) {
+                    await _writeDebugLog('  ❌ 刪除失敗: id=${ev.eventId}, err=$e');
+                  }
+                }
+              }
+            }
+          }
+
           if (hadDup) matchedDatesWithDup++;
         }
 
@@ -1317,6 +1331,179 @@ class MainPageState extends State<MainPage> {
     } catch (e) {
       await _writeDebugLog('強制清理失敗: $e');
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('清理失敗 $e')));
+    } finally {
+      _isSyncing = false;
+      final ctx = loadingCtx;
+      if (ctx != null && ctx.mounted) {
+        Navigator.pop(ctx);
+      }
+    }
+  }
+
+  /// ✅ 新增：按日期範圍清除所有 [RosterPro] 事件（無條件，不看解析、不看 roster）
+  Future<void> _purgeRosterProInRange() async {
+    if (_isSyncing) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在同步中，請稍候...')));
+      return;
+    }
+    if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('尚未選擇日曆')));
+      return;
+    }
+
+    DateTimeRange? range = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(DateTime.now().year + 30, 12, 31),
+      helpText: '選擇要清除 [RosterPro] 事件的日期範圍',
+    );
+    if (range == null) return;
+
+    bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('⚠️ 清除範圍內所有排班事件'),
+      content: Text('這會刪除 ${DateFormat('yyyy-MM-dd').format(range.start)} ~ ${DateFormat('yyyy-MM-dd').format(range.end)} 範圍內所有帶 [RosterPro] 標籤的事件（不管格式、不管是否重複）。\n\n✅ App 排班資料不受影響\n✅ 之後會自動重新同步\n\n確定要執行嗎？'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('確定清除'))
+      ]
+    ));
+    if (confirm != true) return;
+    if (_isSyncing) return;
+    if (!await _confirmAction()) return;
+
+    _isSyncing = true;
+
+    final ValueNotifier<double> progressNotifier = ValueNotifier(0.0);
+    final ValueNotifier<String> statusNotifier = ValueNotifier('正在準備掃描...');
+
+    BuildContext? loadingCtx;
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) {
+          loadingCtx = ctx;
+          return PopScope(
+            canPop: false,
+            child: AlertDialog(
+              title: const Text('清除進行中'),
+              content: ValueListenableBuilder<double>(
+                valueListenable: progressNotifier,
+                builder: (context, progress, child) {
+                  return ValueListenableBuilder<String>(
+                    valueListenable: statusNotifier,
+                    builder: (context, status, child) {
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          LinearProgressIndicator(value: progress <= 0 ? null : progress),
+                          const SizedBox(height: 16),
+                          Text(status, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                          if (progress > 0)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text('${(progress * 100).toStringAsFixed(1)}%', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                            ),
+                        ],
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          );
+        },
+      );
+    }
+
+    int deletedCount = 0;
+    int scannedDates = 0;
+    try {
+      await _writeDebugLog('===== 開始按範圍清除 [RosterPro] 事件 =====');
+      await _writeDebugLog('範圍: ${DateFormat('yyyy-MM-dd').format(range.start)} ~ ${DateFormat('yyyy-MM-dd').format(range.end)}');
+
+      List<String> dateKeys = [];
+      DateTime cur = DateTime(range.start.year, range.start.month, range.start.day);
+      DateTime last = DateTime(range.end.year, range.end.month, range.end.day);
+      while (!cur.isAfter(last)) {
+        dateKeys.add(DateFormat('yyyy-MM-dd').format(cur));
+        cur = cur.add(const Duration(days: 1));
+      }
+
+      int total = dateKeys.length;
+      int current = 0;
+      final Set<String> alreadyDeletedIds = <String>{};
+
+      for (var dateKey in dateKeys) {
+        current++;
+        progressNotifier.value = current / total;
+        statusNotifier.value = '正在掃描 ($current/$total)：$dateKey';
+        scannedDates++;
+
+        DateTime date;
+        try { date = DateTime.parse(dateKey); } catch (_) { continue; }
+        DateTime startOfDay = DateTime(date.year, date.month, date.day, 0, 0, 0)
+            .subtract(const Duration(hours: 24));
+        DateTime endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59);
+
+        List<Event> eventsOnDay = [];
+        try {
+          var res = await _calendarPlugin.retrieveEvents(
+            _rosterCalendarId!,
+            RetrieveEventsParams(startDate: startOfDay, endDate: endOfDay),
+          );
+          eventsOnDay = res.data ?? [];
+        } catch (e) {
+          await _writeDebugLog('查詢 $dateKey 失敗: $e');
+          continue;
+        }
+
+        final Map<String, Event> toDelete = {};
+        for (var e in eventsOnDay) {
+          final desc = e.description ?? '';
+          if (!desc.contains('[RosterPro]')) continue;
+          if (e.eventId == null) continue;
+          if (alreadyDeletedIds.contains(e.eventId)) continue;
+
+          final m = RegExp(r'\[RosterPro\](\d{4}-\d{2}-\d{2})').firstMatch(desc);
+          if (m != null && m.group(1) != dateKey) continue;
+
+          toDelete[e.eventId!] = e;
+        }
+
+        for (var ev in toDelete.values) {
+          try {
+            await _calendarPlugin.deleteEvent(_rosterCalendarId!, ev.eventId!);
+            alreadyDeletedIds.add(ev.eventId!);
+            deletedCount++;
+            await _writeDebugLog('  🗑️ 刪除: $dateKey, id=${ev.eventId}, title=${ev.title}');
+          } catch (e) {
+            await _writeDebugLog('  ❌ 刪除失敗: id=${ev.eventId}, err=$e');
+          }
+        }
+      }
+
+      await _writeDebugLog('===== 完成: 掃描 $scannedDates 天, 共刪 $deletedCount 條 =====');
+
+      _googleEventIdMap.clear();
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
+
+      statusNotifier.value = '清除完成，正在重新同步...';
+      progressNotifier.value = 1.0;
+
+      await _syncToGoogle(silent: true, forceFullSync: false);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('清除完成：掃描 $scannedDates 天，共刪除 $deletedCount 條 [RosterPro] 事件'),
+          duration: const Duration(seconds: 5),
+        ));
+      }
+    } catch (e) {
+      await _writeDebugLog('清除失敗: $e');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('清除失敗 $e')));
     } finally {
       _isSyncing = false;
       final ctx = loadingCtx;
@@ -3523,6 +3710,13 @@ class MainPageState extends State<MainPage> {
               style: FilledButton.styleFrom(backgroundColor: Colors.orange),
             )),
             const SizedBox(height: 8),
+            SizedBox(width: double.infinity, child: FilledButton.icon(
+              onPressed: (googleSyncEnabled && !_isSyncing) ? _purgeRosterProInRange : null,
+              icon: _isSyncing ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.delete_forever, size: 18),
+              label: Text(_isSyncing ? '正在清除中...' : '按範圍清除所有排班事件'),
+              style: FilledButton.styleFrom(backgroundColor: Colors.deepOrange),
+            )),
+            const SizedBox(height: 8),
             SizedBox(width: double.infinity, child: OutlinedButton.icon(
               onPressed: () async {
                 final calId = _rosterCalendarId;
@@ -3774,7 +3968,7 @@ class MainPageState extends State<MainPage> {
       const SizedBox(height: 16),
       const Text('桌面小工具設定 (Widget)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       Card(color: const Color(0xFFE8F5E9), child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
-        const Text('字體大小與顏色已自動優化至最佳狀態（不溢出格子）', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 13)),
+        const Text('字體大小與顏色已自動優化至最佳狀態（不溢出格子）', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 13)),
         const SizedBox(height: 8),
         SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: () { save(); }, icon: const Icon(Icons.refresh), label: const Text('強制刷新小工具'))),
       ]))),
