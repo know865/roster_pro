@@ -895,7 +895,10 @@ String _padTime(String t) {
 Future<bool> _buildAndInsertEvent(String dateKey, String code, Duration offset, {String? existingEventId}) async {
   final calId = _requireCalendarId();
   final def = defs[code];
-  if (def == null) return false;
+  if (def == null) {
+    await _writeDebugLog('[createEvent] ❌ 找不到班次定義: $code');
+    return false;
+  }
   final date = DateTime.parse(dateKey);
   final note = rosterNote[dateKey] ?? '';
   final tag = '[RosterPro]$dateKey';
@@ -932,15 +935,23 @@ Future<bool> _buildAndInsertEvent(String dateKey, String code, Duration offset, 
 
   try {
     final res = await _calendarPlugin.createOrUpdateEvent(ev);
-    if (res != null && res.isSuccess && res.data != null) {
-      _googleEventIdMap[dateKey] = res.data!;
-      await _writeDebugLog('[createOrUpdateEvent] calId=$calId dateKey=$dateKey existing=$existingEventId new=${res.data}');
-      return true;
+    if (res == null) {
+      await _writeDebugLog('[createEvent] ❌ $dateKey res 為 null');
+      return false;
     }
-    await _writeDebugLog('[createOrUpdateEvent] calId=$calId dateKey=$dateKey 失敗');
-    return false;
+    if (!res.isSuccess) {
+      await _writeDebugLog('[createEvent] ❌ $dateKey 失敗: ${res.errorMessage}');
+      return false;
+    }
+    if (res.data == null) {
+      await _writeDebugLog('[createEvent] ❌ $dateKey 成功但 eventId 為 null');
+      return false;
+    }
+    _googleEventIdMap[dateKey] = res.data!;
+    await _writeDebugLog('[createEvent] ✅ $dateKey → eventId=${res.data} (existing=$existingEventId)');
+    return true;
   } catch (e) {
-    await _writeDebugLog('[createOrUpdateEvent] calId=$calId dateKey=$dateKey 例外: $e');
+    await _writeDebugLog('[createEvent] ❌ $dateKey 例外: $e');
     return false;
   }
 }
@@ -985,8 +996,9 @@ Future<void> syncDateRange() async {
   await sp.setStringList('dirtyDates', _dirtyDates.toList());
 }
 
-// ✅ 同步完全在背景靜默進行，不彈出對話框（避免快閃）
-// 只有完整同步（全清重建）完成後才顯示 SnackBar 結果
+// ✅ 同步在背景進行，完成後顯示輕量提示
+// ✅ 核心修復：增量同步時會驗證 _googleEventIdMap 記錄的 eventId 是否還存在於日曆中
+//     若不存在（被用戶手動刪除），會清除記錄並改為新建事件，解決 eventId 僵屍問題
 Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) async {
   if (!googleSyncEnabled && !silent) {
     bool? en = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
@@ -999,19 +1011,24 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
     ));
     if (en == true) setState(() => googleSyncEnabled = true); else return;
   }
-  if (_isSyncing) return;
+  if (_isSyncing) {
+    await _writeDebugLog('[同步] 已在同步中，略過此次請求');
+    return;
+  }
 
   if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) {
-    if (!silent) await _ensureCalendar();
-    if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) {
-      if (mounted && !silent) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('尚未選擇日曆')));
-      return;
+    await _writeDebugLog('[同步] 尚未選擇日曆，中止');
+    if (mounted && !silent) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('❌ 尚未選擇日曆')));
     }
+    if (!silent) await _ensureCalendar();
+    if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) return;
   }
 
   bool needFull = forceFullSync || _needsFullSync;
 
   if (!needFull && _dirtyDates.isEmpty) {
+    await _writeDebugLog('[同步] 沒有變更 (dirtyDates 為空)');
     if (!silent && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('沒有變更需要同步'), duration: Duration(seconds: 2)));
     }
@@ -1020,18 +1037,18 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
 
   _isSyncing = true;
   _autoSyncTimer?.cancel();
-  // ✅ 不再顯示「開始同步」的 SnackBar，完全靜默
+  await _writeDebugLog('[同步] ====== 開始同步 ====== calId=$_rosterCalendarId needFull=$needFull dirtyCount=${_dirtyDates.length}');
 
   try {
     final calId = _requireCalendarId();
-    await _writeDebugLog('=== 開始同步，日曆ID: $calId, 名稱: $_rosterCalendarName, needFull=$needFull ===');
-
     final sp = await SharedPreferences.getInstance();
     final offset = DateTime.now().timeZoneOffset;
     int del = 0, delFailed = 0, add = 0, upd = 0;
+    int zombieFixed = 0;
 
     if (needFull) {
-      await _writeDebugLog('=== 全量重建：分批掃描清理 [RosterPro] calId=$calId ===');
+      // ===== 全量重建 =====
+      await _writeDebugLog('[同步] 全量重建：分批掃描清理 [RosterPro]');
 
       final Set<String> deletedIds = <String>{};
       for (int year = 2000; year <= 2100; year++) {
@@ -1042,7 +1059,7 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
         try {
           events = await _safeRetrieveEvents(startScan, endScan);
         } catch (e) {
-          await _writeDebugLog('掃描 $year 年失敗: $e');
+          await _writeDebugLog('[同步] 掃描 $year 年失敗: $e');
         }
 
         for (var e in events) {
@@ -1052,12 +1069,7 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
           if (deletedIds.contains(e.eventId)) continue;
           
           final ok = await _safeDeleteEvent(e.eventId!);
-          if (ok) { 
-            deletedIds.add(e.eventId!); 
-            del++; 
-          } else { 
-            delFailed++; 
-          }
+          if (ok) { deletedIds.add(e.eventId!); del++; } else { delFailed++; }
         }
       }
 
@@ -1076,19 +1088,20 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
       await sp.setBool('needsFullSync', _needsFullSync);
       updateWidget();
 
-      await _writeDebugLog('=== 全量重建完成 calId=$calId del=$del delFailed=$delFailed add=$add ===');
+      await _writeDebugLog('[同步] ====== 全量重建完成 del=$del delFailed=$delFailed add=$add ======');
 
-      // ✅ 只在完整同步（用戶手動觸發）時顯示 SnackBar 結果
-      if (!silent && mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('完整同步完成：刪除舊事件 $del / 失敗 $delFailed / 建立新事件 $add'),
+          content: Text('✅ 完整同步完成：刪 $del / 失敗 $delFailed / 建立 $add'),
           duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
         ));
       }
       return;
     } else {
+      // ===== 增量同步 =====
       if (_googleEventIdMap.isEmpty) {
-        await _writeDebugLog('檢測到 googleEventIdMap 為空，開始掃描日曆重建對應...');
+        await _writeDebugLog('[同步] googleEventIdMap 為空，開始掃描現有日曆事件');
         DateTime scanStart = _calcScanStart();
         DateTime scanEnd = _calcScanEnd();
         try {
@@ -1099,27 +1112,25 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
                 RegExp regExp = RegExp(r'\[RosterPro\](\d{4}-\d{2}-\d{2})');
                 var match = regExp.firstMatch(e.description!);
                 if (match != null && e.eventId != null) {
-                  String dateKey = match.group(1)!;
-                  _googleEventIdMap[dateKey] = e.eventId!;
+                  _googleEventIdMap[match.group(1)!] = e.eventId!;
                 }
               }
             }
           }
-          await _writeDebugLog('掃描完成，共找到 ${_googleEventIdMap.length} 條現有事件');
+          await _writeDebugLog('[同步] 掃描完成，共找到 ${_googleEventIdMap.length} 條現有事件');
         } catch (e) {
-          await _writeDebugLog('掃描重建失敗: $e');
+          await _writeDebugLog('[同步] 掃描重建失敗: $e');
         }
       }
 
       final datesToSync = List<String>.from(_dirtyDates);
       datesToSync.sort();
+      await _writeDebugLog('[同步] 增量同步：待處理 ${datesToSync.length} 天 → $datesToSync');
 
       for (var dateKey in datesToSync) {
         DateTime date = DateTime.parse(dateKey);
-        DateTime queryStart = DateTime(date.year, date.month, date.day, 0, 0, 0)
-            .subtract(const Duration(hours: 24));
-        DateTime queryEnd = DateTime(date.year, date.month, date.day, 23, 59, 59)
-            .add(const Duration(hours: 24));
+        DateTime queryStart = DateTime(date.year, date.month, date.day, 0, 0, 0).subtract(const Duration(hours: 24));
+        DateTime queryEnd = DateTime(date.year, date.month, date.day, 23, 59, 59).add(const Duration(hours: 24));
 
         final eventsInRange = await _safeRetrieveEvents(queryStart, queryEnd);
 
@@ -1155,28 +1166,34 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
         final newStart = isAllDayNow ? '全天' : newDef.start;
         final newEnd = isAllDayNow ? '全天' : newDef.end;
 
+        // ✅ ============================================================
+        // ✅ 核心修復：驗證 _googleEventIdMap 記錄的 eventId 是否還存在於日曆中
+        // ✅ 若不存在（被用戶手動刪除），清除記錄並改為新建事件
+        // ✅ 徹底解決 eventId 僵屍問題
+        // ✅ ============================================================
         String? matchedEventId = _googleEventIdMap[dateKey];
+        if (matchedEventId != null) {
+          final stillExists = rosterEvents.any((e) => e.eventId == matchedEventId);
+          if (!stillExists) {
+            await _writeDebugLog('[同步] ⚠️ eventId=$matchedEventId 已被外部刪除 (dateKey=$dateKey)，清除記錄並改為新建');
+            _googleEventIdMap.remove(dateKey);
+            matchedEventId = null;
+            zombieFixed++;
+          }
+        }
 
         for (var e in rosterEvents) {
           if (e.eventId == null) continue;
           if (e.eventId == matchedEventId) continue;
 
           final parsed = _parseShiftFromDesc(e.description, title: e.title);
-          final isMatch = parsed != null &&
-              parsed['code'] == newCode &&
-              parsed['start'] == newStart &&
-              parsed['end'] == newEnd;
+          final isMatch = parsed != null && parsed['code'] == newCode && parsed['start'] == newStart && parsed['end'] == newEnd;
 
           if (isMatch && matchedEventId == null) {
             matchedEventId = e.eventId;
           } else {
             final ok = await _safeDeleteEvent(e.eventId!);
-            if (ok) {
-              del++;
-              await _writeDebugLog('刪除${isMatch ? "重複" : "舊"}事件: calId=$calId dateKey=$dateKey eventId=${e.eventId}');
-            } else {
-              delFailed++;
-            }
+            if (ok) del++; else delFailed++;
           }
         }
 
@@ -1200,27 +1217,36 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
     await sp.setBool('needsFullSync', _needsFullSync);
     updateWidget();
 
-    await _writeDebugLog('=== 同步完成 calId=$calId del=$del delFailed=$delFailed add=$add upd=$upd ===');
+    await _writeDebugLog('[同步] ====== 同步完成 del=$del delFailed=$delFailed add=$add upd=$upd zombieFixed=$zombieFixed ======');
 
-    // ✅ 增量同步完全靜默，不顯示任何提示（避免打擾用戶）
-    // 如果希望顯示輕量提示，可取消以下註解：
-    // if (!silent && mounted && (del > 0 || add > 0 || upd > 0)) {
-    //   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-    //     content: Text('已同步：刪$del / 更新$upd / 建$add'),
-    //     duration: const Duration(seconds: 2),
-    //   ));
-    // }
+    if (mounted) {
+      String msg = needFull
+          ? '✅ 完整同步完成：刪 $del / 失敗 $delFailed / 建立 $add'
+          : '✅ 已同步：刪 $del / 失敗 $delFailed / 更新 $upd / 建立 $add';
+      if (zombieFixed > 0) {
+        msg += ' / 修復僵屍 $zombieFixed';
+      }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(msg),
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
   } catch (e) {
-    await _writeDebugLog('同步失敗: $e');
-    if (!mounted) return;
-    if (!silent) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('同步失敗 $e')));
+    await _writeDebugLog('[同步] ❌ 同步失敗: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('❌ 同步失敗：$e'),
+        duration: const Duration(seconds: 5),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.red,
+      ));
+    }
   } finally {
     _isSyncing = false;
-    // ✅ 不再需要 Navigator.pop，因為沒有對話框
   }
 }
-  // ✅ 救援操作：保留進度對話框（用戶主動觸發，執行時間長，需要知道進度）
-Future<void> _forceCleanDuplicates() async {
+  Future<void> _forceCleanDuplicates() async {
   if (_isSyncing) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在同步中，請稍候...')));
     return;
@@ -1407,7 +1433,6 @@ Future<void> _forceCleanDuplicates() async {
   }
 }
 
-// ✅ 救援操作：保留進度對話框
 Future<void> _purgeRosterProInRange() async {
   if (_isSyncing) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在同步中，請稍候...')));
@@ -1567,7 +1592,6 @@ Future<void> _purgeRosterProInRange() async {
   }
 }
 
-// ✅ 救援操作：保留進度對話框
 Future<void> _forceFullResync() async {
   if (_isSyncing) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在同步中，請稍候...')));
