@@ -1845,6 +1845,13 @@ Future<void> restoreFromFile(String path) async {
       if (j['cName'] != null) { customName = j['cName']; nameCtrl.text = customName; }
       if (j['stdWeek'] != null) standardWeeklyHours = (j['stdWeek'] as num).toDouble();
       if (j['otRate'] != null) overtimeRate = (j['otRate'] as num).toDouble();
+      if (j['monthlySalary'] != null) monthlySalary = (j['monthlySalary'] as num).toDouble();
+      if (j['hourlyDivisor'] != null) hourlyDivisor = (j['hourlyDivisor'] as num).toDouble();
+      if (j['otMultiplier'] != null) otMultiplier = (j['otMultiplier'] as num).toDouble();
+      if (j['morningAllow'] != null) morningAllowance = (j['morningAllow'] as num).toDouble();
+      if (j['nightAllow'] != null) nightAllowance = (j['nightAllow'] as num).toDouble();
+      if (j['mealAllow'] != null) mealAllowance = (j['mealAllow'] as num).toDouble();
+      if (j['nightAllowMultiplier'] != null) nightAllowMultiplier = (j['nightAllowMultiplier'] as num).toDouble();
       if (j['extraNewV36'] != null) extraAllowances = (j['extraNewV36'] as List).map((e) => ExtraAllowance.fromJson(Map<String, dynamic>.from(e as Map))).toList();
       if (j['calFont'] != null) calendarFontSize = (j['calFont'] as num).toDouble();
       if (j['savedPatterns'] != null) savedPatterns = (j['savedPatterns'] as List).map((e) => SavedPattern.fromJson(Map<String, dynamic>.from(e as Map))).toList();
@@ -1862,10 +1869,6 @@ Future<void> restoreFromFile(String path) async {
       if (j['widgetFontSize'] != null) widgetFontSize = (j['widgetFontSize'] as num).toDouble();
       if (j['widgetTextColor'] != null) widgetTextColor = j['widgetTextColor'];
       if (j['iconIndex'] != null) iconIndex = j['iconIndex'];
-      if (j['morningAllow'] != null) morningAllowance = (j['morningAllow'] as num).toDouble();
-      if (j['nightAllow'] != null) nightAllowance = (j['nightAllow'] as num).toDouble();
-      if (j['mealAllow'] != null) mealAllowance = (j['mealAllow'] as num).toDouble();
-      if (j['nightAllowMultiplier'] != null) nightAllowMultiplier = (j['nightAllowMultiplier'] as num).toDouble();
       if (j['leaveDefs'] != null) leaveDefs = (j['leaveDefs'] as List).map((e) => LeaveDef.fromJson(Map<String, dynamic>.from(e as Map))).toList();
       if (j['leaveRecords'] != null) leaveRecords = Map<String, Map<String, dynamic>>.from((j['leaveRecords'] as Map).map((k, v) => MapEntry(k as String, Map<String, dynamic>.from(v as Map))));
       if (j['rosterLeave'] != null) rosterLeave = Map<String, String>.from(j['rosterLeave']);
