@@ -9,7 +9,6 @@ import android.content.SharedPreferences
 import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
@@ -103,7 +102,6 @@ class RosterWidgetProvider : AppWidgetProvider() {
             return def
         }
 
-        // 【關鍵修復】支援 Int / Long / String / Double 多種型別
         private fun getColorSafe(sp: SharedPreferences, key: String, def: Int): Int {
             val raw = sp.all[key] ?: return def
             val result = when (raw) {
@@ -254,10 +252,20 @@ class RosterWidgetProvider : AppWidgetProvider() {
                             }
                         }
 
-                        val intent = Intent(context, MainActivity::class.java)
-                        intent.putExtra("selected_date", dateStr)
-                        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        views.setOnClickPendingIntent(dayTvId, PendingIntent.getActivity(context, appWidgetId * 1000 + i, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+                        // ✅ 修復：使用唯一 action + 安全 requestCode
+                        val intent = Intent(context, MainActivity::class.java).apply {
+                            action = "com.example.roster_pro.OPEN_DATE_${appWidgetId}_$i"
+                            putExtra("selected_date", dateStr)
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        }
+                        val requestCode = (appWidgetId % 10000) * 100 + i
+                        val pi = PendingIntent.getActivity(
+                            context, requestCode, intent,
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                        )
+                        views.setOnClickPendingIntent(dayTvId, pi)
                     } catch (e: Exception) { writeDebugLog(context, "cell $i error: ${e.message}") }
                 }
 
@@ -282,6 +290,23 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 }
 
                 try { views.setInt(R.id.widget_root, "setBackgroundColor", bgColor) } catch (_: Exception) {}
+
+                // ✅ 根布局點擊 → 打開 app
+                try {
+                    val rootIntent = Intent(context, MainActivity::class.java).apply {
+                        action = "com.example.roster_pro.OPEN_FROM_WIDGET_$appWidgetId"
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    }
+                    views.setOnClickPendingIntent(
+                        R.id.widget_root,
+                        PendingIntent.getActivity(
+                            context, appWidgetId, rootIntent,
+                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                        )
+                    )
+                } catch (_: Exception) {}
 
                 views.setOnClickPendingIntent(R.id.btn_prev, PendingIntent.getBroadcast(context, 0, Intent(context, RosterWidgetProvider::class.java).setAction("PREV_MONTH"), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
                 views.setOnClickPendingIntent(R.id.btn_next, PendingIntent.getBroadcast(context, 1, Intent(context, RosterWidgetProvider::class.java).setAction("NEXT_MONTH"), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
