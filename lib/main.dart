@@ -44,12 +44,16 @@ class ShiftDef {
   bool hasMorningAllow; bool hasNightAllow; bool hasMealAllow; bool isAllDay; bool hasLunch;
   bool hasAL; bool hasSH; bool hasGH; bool hasWB;
   bool hasCustomLeave; String? customLeaveCode;
+  bool alarmEnabled;
+  int alarmMinutesBefore;
   ShiftDef(this.code, this.label, this.hours, this.color, {
     this.ot = 0, this.start = '07:00', this.end = '15:30',
     this.hasMorningAllow = false, this.hasNightAllow = false, this.hasMealAllow = false,
     this.isAllDay = false, this.hasLunch = false,
     this.hasAL = false, this.hasSH = false, this.hasGH = false, this.hasWB = false,
-    this.hasCustomLeave = false, this.customLeaveCode
+    this.hasCustomLeave = false, this.customLeaveCode,
+    this.alarmEnabled = false,
+    this.alarmMinutesBefore = 30,
   });
   Map<String, dynamic> toJson() => {
     'code': code, 'label': label, 'hours': hours, 'ot': ot, 'color': color.value,
@@ -57,7 +61,9 @@ class ShiftDef {
     'hasMorningAllow': hasMorningAllow, 'hasNightAllow': hasNightAllow, 'hasMealAllow': hasMealAllow,
     'isAllDay': isAllDay, 'hasLunch': hasLunch,
     'hasAL': hasAL, 'hasSH': hasSH, 'hasGH': hasGH, 'hasWB': hasWB,
-    'hasCustomLeave': hasCustomLeave, 'customLeaveCode': customLeaveCode
+    'hasCustomLeave': hasCustomLeave, 'customLeaveCode': customLeaveCode,
+    'alarmEnabled': alarmEnabled,
+    'alarmMinutesBefore': alarmMinutesBefore,
   };
   factory ShiftDef.fromJson(Map<String, dynamic> j) => ShiftDef(
     j['code'], j['label'] ?? j['code'], (j['hours'] ?? 8).toDouble(), Color(j['color'] ?? 0xFFFF9800),
@@ -65,7 +71,9 @@ class ShiftDef {
     hasMorningAllow: j['hasMorningAllow'] ?? false, hasNightAllow: j['hasNightAllow'] ?? false,
     hasMealAllow: j['hasMealAllow'] ?? false, isAllDay: j['isAllDay'] ?? false, hasLunch: j['hasLunch'] ?? false,
     hasAL: j['hasAL'] ?? false, hasSH: j['hasSH'] ?? false, hasGH: j['hasGH'] ?? false, hasWB: j['hasWB'] ?? false,
-    hasCustomLeave: j['hasCustomLeave'] ?? false, customLeaveCode: j['customLeaveCode']
+    hasCustomLeave: j['hasCustomLeave'] ?? false, customLeaveCode: j['customLeaveCode'],
+    alarmEnabled: j['alarmEnabled'] ?? false,
+    alarmMinutesBefore: j['alarmMinutesBefore'] ?? 30,
   );
   String get detailTime => isAllDay ? '全天 ${hours.toStringAsFixed(1)}h' : '${start}-${end} ${hours.toStringAsFixed(1)}h';
 }
@@ -333,6 +341,70 @@ class MainPageState extends State<MainPage> {
     } catch (_) {}
   }
 
+  String _calcAlarmTimeText(String startStr, int minutesBefore) {
+    try {
+      final parts = startStr.split(':');
+      if (parts.length != 2) return '--:--';
+      int h = int.parse(parts[0]);
+      int m = int.parse(parts[1]);
+      int total = h * 60 + m - minutesBefore;
+      while (total < 0) total += 24 * 60;
+      int ah = total ~/ 60;
+      int am = total % 60;
+      return '${ah.toString().padLeft(2, '0')}:${am.toString().padLeft(2, '0')}';
+    } catch (_) { return '--:--'; }
+  }
+
+  Future<void> _rescheduleAllAlarms() async {
+    try {
+      await _realChannel.invokeMethod('cancelAllAlarms');
+    } catch (e) {
+      await _writeDebugLog('[鬧鐘] 取消全部鬧鐘失敗: $e');
+    }
+
+    DateTime now = DateTime.now();
+    DateTime today = DateTime(now.year, now.month, now.day);
+    int count = 0;
+    int skipped = 0;
+
+    for (var entry in roster.entries) {
+      final dateKey = entry.key;
+      final code = entry.value;
+      final def = defs[code];
+      if (def == null || !def.alarmEnabled) continue;
+      if (def.isAllDay) { skipped++; continue; }
+
+      DateTime date;
+      try { date = DateTime.parse(dateKey); } catch (_) { continue; }
+      if (date.isBefore(today)) continue;
+
+      final parts = def.start.split(':');
+      if (parts.length != 2) continue;
+      final startH = int.tryParse(parts[0]);
+      final startM = int.tryParse(parts[1]);
+      if (startH == null || startM == null) continue;
+
+      DateTime alarmTime = DateTime(date.year, date.month, date.day, startH, startM)
+          .subtract(Duration(minutes: def.alarmMinutesBefore));
+
+      if (alarmTime.isBefore(now)) { skipped++; continue; }
+
+      int requestCode = dateKey.hashCode & 0x7FFFFFFF;
+      try {
+        await _realChannel.invokeMethod('scheduleAlarm', {
+          'alarmMillis': alarmTime.millisecondsSinceEpoch,
+          'requestCode': requestCode,
+          'title': '上班提醒：${def.code} ${def.label}',
+          'body': '${def.start} 上班，還有 ${def.alarmMinutesBefore} 分鐘',
+        });
+        count++;
+      } catch (e) {
+        await _writeDebugLog('[鬧鐘] 排程失敗 $dateKey: $e');
+      }
+    }
+    await _writeDebugLog('[鬧鐘] 已排程 $count 個、跳過 $skipped 個');
+  }
+
   Future<bool> _confirmAction() async {
     bool? r = await showDialog<bool>(
       context: context,
@@ -552,6 +624,7 @@ Future<void> load() async {
     iconIndex = sp.getInt('iconIndex') ?? 0;
   });
   _ensureAnchorWeek();
+  Future.microtask(() => _rescheduleAllAlarms());
   updateWidget();
 }
 
@@ -612,6 +685,7 @@ Future<void> save() async {
       if (!_isSyncing && autoSync && googleSyncEnabled) { _syncToGoogle(silent: true); }
     });
   }
+  Future.microtask(() => _rescheduleAllAlarms());
 }
 
 int isoWeek(DateTime date) {
@@ -1132,7 +1206,7 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
           if (!desc.contains('[RosterPro]')) continue;
           if (e.eventId == null) continue;
           if (deletedIds.contains(e.eventId)) continue;
-          
+
           final ok = await _safeDeleteEvent(e.eventId!);
           if (ok) { deletedIds.add(e.eventId!); del++; } else { delFailed++; }
         }
@@ -1147,7 +1221,7 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
 
       _needsFullSync = false;
       _dirtyDates.clear();
-      
+
       sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
       await sp.setStringList('dirtyDates', _dirtyDates.toList());
       await sp.setBool('needsFullSync', _needsFullSync);
@@ -2725,6 +2799,8 @@ void editShiftDialog({ShiftDef? oldDef}) {
   bool hasWB = oldDef?.hasWB ?? false;
   bool hasCustomLeave = oldDef?.hasCustomLeave ?? false;
   String? customLeaveCode = oldDef?.customLeaveCode;
+  bool alarmEnabled = oldDef?.alarmEnabled ?? false;
+  int alarmMinutesBefore = oldDef?.alarmMinutesBefore ?? 30;
 
   Color picked = oldDef?.color ?? Colors.orange;
   String oldKey = oldDef?.code ?? '';
@@ -2837,6 +2913,55 @@ void editShiftDialog({ShiftDef? oldDef}) {
             ],
           ),
           const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.pink.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.pink.shade200),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  const Icon(Icons.alarm, color: Colors.pink, size: 18),
+                  const SizedBox(width: 6),
+                  const Text('上班鬧鐘提醒', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const Spacer(),
+                  Switch(value: alarmEnabled, onChanged: (v) => setS(() => alarmEnabled = v)),
+                ]),
+                if (alarmEnabled) ...[
+                  const SizedBox(height: 4),
+                  Row(children: [
+                    const Text('提前', style: TextStyle(fontSize: 12)),
+                    Expanded(
+                      child: Slider(
+                        value: alarmMinutesBefore.toDouble().clamp(5, 120),
+                        min: 5, max: 120, divisions: 23,
+                        label: '$alarmMinutesBefore 分鐘',
+                        onChanged: (v) => setS(() => alarmMinutesBefore = v.round()),
+                      ),
+                    ),
+                    SizedBox(width: 60, child: Text('$alarmMinutesBefore 分', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                  ]),
+                  if (!isAllDay)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        '鬧鐘觸發時間：${_calcAlarmTimeText(startCtrl.text, alarmMinutesBefore)}（依目前開始時間）',
+                        style: const TextStyle(fontSize: 11, color: Colors.pink),
+                      ),
+                    ),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text('💡 全天班次不會觸發鬧鐘；排班有變動會自動重新排程',
+                      style: TextStyle(fontSize: 10, color: Colors.grey)),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
           const Text('自定班次顏色', style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           Wrap(spacing: 8, runSpacing: 8, children: palette.map((c) => GestureDetector(onTap: () => setS(() => picked = c), child: Container(width: 36, height: 36, decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: picked == c ? Border.all(width: 3, color: Colors.black) : null), child: picked == c ? const Icon(Icons.check, color: Colors.white, size: 18) : null))).toList()),
@@ -2864,7 +2989,8 @@ void editShiftDialog({ShiftDef? oldDef}) {
                 hasMorningAllow: hasMorningAllow, hasNightAllow: hasNightAllow, hasMealAllow: hasMealAllow,
                 isAllDay: isAllDay, hasLunch: hasLunch,
                 hasAL: hasAL, hasSH: hasSH, hasGH: hasGH, hasWB: hasWB,
-                hasCustomLeave: hasCustomLeave, customLeaveCode: customLeaveCode
+                hasCustomLeave: hasCustomLeave, customLeaveCode: customLeaveCode,
+                alarmEnabled: alarmEnabled, alarmMinutesBefore: alarmMinutesBefore
               );
               for (var entry in roster.entries) {
                 if (entry.value == newCode) affectedDates.add(entry.key);
@@ -3678,11 +3804,9 @@ void showLeaveManagementDialog() {
     int year = focused.year;
     int month = focused.month;
 
-    // === 統計範圍：全年 = 1/1~12/31；月份 = 該月首日~末日 ===
     DateTime rangeStart = isYearReport ? DateTime(year, 1, 1) : DateTime(year, month, 1);
     DateTime rangeEnd = isYearReport ? DateTime(year, 12, 31) : DateTime(year, month + 1, 0);
 
-    // === 全年模式的年度統計 ===
     double totalYearHrs = 0;
     Map<int, double> yearMonthlyHrs = {};
     Map<String, int> yearShiftCount = {};
@@ -3707,7 +3831,6 @@ void showLeaveManagementDialog() {
       }
     }
 
-    // === 班次統計、OT、津貼（依統計範圍） ===
     double hrs = 0, ot = 0, allow = 0;
     Map<String, int> shiftCount = {};
     Map<String, double> shiftHours = {};
@@ -3738,7 +3861,6 @@ void showLeaveManagementDialog() {
     double otAmount = ot * overtimeRate;
     double totalAllow = allow + otAmount;
 
-    // === 每週工時統計（用於月份詳細 + 總差額計算） ===
     DateTime calStart = rangeStart.subtract(Duration(days: rangeStart.weekday - 1));
     DateTime calEnd = rangeEnd.add(Duration(days: 7 - rangeEnd.weekday));
     DateTime calcStart = _effectiveCalcStart(calStart);
@@ -3787,9 +3909,6 @@ void showLeaveManagementDialog() {
       }
     }
 
-    // === 總差額 ===
-    // 月份模式：該月最後一週的 diff（原邏輯）
-    // 全年模式：該年 calEnd 之前最後一週的 diff（年度累計差額）
     double totalDiff;
     if (isYearReport) {
       String endWeekKey = isoWeekKey(calEnd);
@@ -3831,13 +3950,11 @@ void showLeaveManagementDialog() {
             ),
           ]),
           const SizedBox(height: 8),
-          // === 全年：全年總工時逐月 ===
           if (isYearReport) Card(color: const Color(0xFFE3F2FD), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('全年總工時 ${totalYearHrs.toStringAsFixed(1)}h', style: const TextStyle(fontWeight: FontWeight.bold)),
             const Divider(),
             ...yearMonthlyHrs.entries.map((e) => Row(children: [Text('${e.key}月'), const Spacer(), Text('${e.value.toStringAsFixed(1)}h')])),
           ]))),
-          // === 全年：全年班次統計 ===
           if (isYearReport) Card(color: const Color(0xFFE3F2FD), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('班次統計 (全年)', style: TextStyle(fontWeight: FontWeight.bold)),
             const Divider(),
@@ -3857,7 +3974,6 @@ void showLeaveManagementDialog() {
             const Divider(),
             Text('全年總工時 ${totalYearHrs.toStringAsFixed(1)}h'),
           ]))),
-          // === 月份：本月班次統計 ===
           if (!isYearReport) Card(color: const Color(0xFFE3F2FD), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('班次統計', style: TextStyle(fontWeight: FontWeight.bold)),
             const Divider(),
@@ -3877,7 +3993,6 @@ void showLeaveManagementDialog() {
             const Divider(),
             Text('總工時 ${hrs.toStringAsFixed(1)}h'),
           ]))),
-          // === 月份：每週工時統計詳細 ===
           if (!isYearReport) Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('每週工時統計 (標準 & 承上) 週數', style: TextStyle(fontWeight: FontWeight.bold)),
             const Divider(),
@@ -3901,7 +4016,6 @@ void showLeaveManagementDialog() {
               Text('${totalDiff >= 0 ? '+' : ''}${totalDiff.toStringAsFixed(1)}h', style: TextStyle(fontWeight: FontWeight.bold, color: totalDiff > 0 ? Colors.green : (totalDiff < 0 ? Colors.red : Colors.black))),
             ]),
           ]))),
-          // === 全年：年度累計工時差額摘要 ===
           if (isYearReport) Card(color: const Color(0xFFF3E5F5), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('年度累計工時差額', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
@@ -3913,7 +4027,6 @@ void showLeaveManagementDialog() {
             const SizedBox(height: 4),
             Text('（截至 ${year}年12月，累計差額）', style: const TextStyle(fontSize: 11, color: Colors.grey)),
           ]))),
-          // === 津貼類別統計（依統計範圍） ===
           Card(color: const Color(0xFFE8F5E9), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(isYearReport ? '津貼類別 (含自定義類別) - 全年' : '津貼類別 (含自定義類別)', style: const TextStyle(fontWeight: FontWeight.bold)),
             Row(children: [const Text('班次津貼+單日額外'), const Spacer(), Text('\$${allow.toStringAsFixed(1)}')]),
@@ -3956,7 +4069,7 @@ void showLeaveManagementDialog() {
           return ListTile(
             leading: CircleAvatar(backgroundColor: d.color, child: Text(d.code, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))),
             title: Text('${d.code} - ${d.label}', style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: (d.hasLunch || d.hasMorningAllow || d.hasNightAllow || d.hasMealAllow || d.hasAL || d.hasSH || d.hasGH || d.hasWB || d.hasCustomLeave) ? Text('${d.hasMorningAllow ? '早/夜班 ' : ''}${d.hasNightAllow ? '通宵 ' : ''}${d.hasMealAllow ? '膳食 ' : ''}${d.hasLunch ? '午飯1h ' : ''}${d.hasAL ? 'AL ' : ''}${d.hasSH ? 'SH ' : ''}${d.hasGH ? 'GH ' : ''}${d.hasWB ? 'WB ' : ''}${d.hasCustomLeave ? '自訂假期(${d.customLeaveCode})' : ''}', style: const TextStyle(fontSize: 11, color: Colors.deepPurple)) : null,
+            subtitle: (d.hasLunch || d.hasMorningAllow || d.hasNightAllow || d.hasMealAllow || d.hasAL || d.hasSH || d.hasGH || d.hasWB || d.hasCustomLeave || d.alarmEnabled) ? Text('${d.hasMorningAllow ? '早/夜班 ' : ''}${d.hasNightAllow ? '通宵 ' : ''}${d.hasMealAllow ? '膳食 ' : ''}${d.hasLunch ? '午飯1h ' : ''}${d.hasAL ? 'AL ' : ''}${d.hasSH ? 'SH ' : ''}${d.hasGH ? 'GH ' : ''}${d.hasWB ? 'WB ' : ''}${d.hasCustomLeave ? '自訂假期(${d.customLeaveCode}) ' : ''}${d.alarmEnabled ? '鬧鐘(${d.alarmMinutesBefore}分前)' : ''}', style: const TextStyle(fontSize: 11, color: Colors.deepPurple)) : null,
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
               IconButton(icon: const Icon(Icons.edit), onPressed: () => editShiftDialog(oldDef: d)),
               IconButton(icon: const Icon(Icons.delete), onPressed: () { setState(() => defs.remove(e.key)); save(); })
@@ -4472,7 +4585,7 @@ void showLeaveManagementDialog() {
                 SizedBox(height: 16),
                 Text('4. 設定與同步', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
-                Text('• 「假期數據管理」：可設定每年的假期天數、微調，系統會自動計算餘額。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：掃描範圍 2000~2100 年，只刪 [RosterPro] 事件。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
+                Text('• 「假期數據管理」：可設定每年的假期天數、微調，系統會自動計算餘額。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「上班鬧鐘」：在班次編輯卡內開啟鬧鐘，設定提前分鐘數，App 會依排班自動安排提醒。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：掃描範圍 2000~2100 年，只刪 [RosterPro] 事件。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
                 SizedBox(height: 16),
                 Text('5. 常見問題', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
