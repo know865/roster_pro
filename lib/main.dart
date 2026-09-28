@@ -180,7 +180,7 @@ class MainPageState extends State<MainPage> {
   Map<String, double> rosterOt = {};
   Map<String, double> rosterExtra = {};
   Map<String, double> rosterExtraHrs = {};
-  Map<String, bool> rosterAlarmMuted = {}; // dateKey -> true 表示該日臨時關閉鬧鐘
+  Map<String, bool> rosterAlarmMuted = {};
 
   List<LeaveDef> leaveDefs = [
     LeaveDef('AL', 'Annual Leave', Colors.teal),
@@ -376,7 +376,6 @@ class MainPageState extends State<MainPage> {
       if (def == null || !def.alarmEnabled) continue;
       if (def.isAllDay) { skipped++; continue; }
 
-      // 該日臨時關閉鬧鐘 → 跳過
       if (rosterAlarmMuted[dateKey] == true) { mutedCount++; continue; }
 
       DateTime date;
@@ -2698,7 +2697,6 @@ void showDetail(DateTime day) {
             const SizedBox(height: 8),
             Wrap(spacing: 8, children: defs.keys.map((c) => ChoiceChip(label: Text(c), selected: cur == c, onSelected: (_) => setM(() => cur = c))).toList()),
 
-            // ============ 單日臨時關閉鬧鐘開關 ============
             if (alarmApplicable) ...[
               const SizedBox(height: 10),
               Container(
@@ -3013,30 +3011,82 @@ void editShiftDialog({ShiftDef? oldDef}) {
                   Switch(value: alarmEnabled, onChanged: (v) => setS(() => alarmEnabled = v)),
                 ]),
                 if (alarmEnabled) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 6),
                   Row(children: [
-                    const Text('提前', style: TextStyle(fontSize: 12)),
-                    Expanded(
-                      child: Slider(
-                        value: alarmMinutesBefore.toDouble().clamp(5, 120),
-                        min: 5, max: 120, divisions: 23,
-                        label: '$alarmMinutesBefore 分鐘',
-                        onChanged: (v) => setS(() => alarmMinutesBefore = v.round()),
-                      ),
-                    ),
-                    SizedBox(width: 60, child: Text('$alarmMinutesBefore 分', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                    const Icon(Icons.schedule, size: 16, color: Colors.pink),
+                    const SizedBox(width: 4),
+                    const Text('鬧鐘時間', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                    const Spacer(),
+                    Text('（提前 $alarmMinutesBefore 分）', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
                   ]),
+                  const SizedBox(height: 6),
                   if (!isAllDay)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        '鬧鐘觸發時間：${_calcAlarmTimeText(startCtrl.text, alarmMinutesBefore)}（依目前開始時間）',
-                        style: const TextStyle(fontSize: 11, color: Colors.pink),
+                    InkWell(
+                      onTap: () async {
+                        int startH = 7, startM = 0;
+                        try {
+                          final parts = startCtrl.text.split(':');
+                          startH = int.parse(parts[0]);
+                          startM = int.parse(parts[1]);
+                        } catch (_) {}
+                        int alarmTotal = startH * 60 + startM - alarmMinutesBefore;
+                        while (alarmTotal < 0) alarmTotal += 24 * 60;
+                        TimeOfDay init = TimeOfDay(hour: alarmTotal ~/ 60, minute: alarmTotal % 60);
+                        TimeOfDay? picked = await _pickWheelTime(ctx2, init);
+                        if (picked != null) {
+                          int startTotal = startH * 60 + startM;
+                          int pickedTotal = picked.hour * 60 + picked.minute;
+                          int diff = startTotal - pickedTotal;
+                          if (diff < 0) diff += 24 * 60;
+                          setS(() => alarmMinutesBefore = diff);
+                        }
+                      },
+                      child: InputDecorator(
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        ),
+                        child: Row(children: [
+                          const Text('⏰', style: TextStyle(fontSize: 16)),
+                          const SizedBox(width: 8),
+                          Text(
+                            _calcAlarmTimeText(startCtrl.text, alarmMinutesBefore),
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.pink,
+                              letterSpacing: 1.5,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            '點擊修改',
+                            style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                          ),
+                          const Icon(Icons.arrow_drop_down, color: Colors.grey),
+                        ]),
                       ),
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Row(children: [
+                        Text('⏰', style: TextStyle(fontSize: 16)),
+                        SizedBox(width: 8),
+                        Text('--:--', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1.5)),
+                        Spacer(),
+                        Text('全天班次不適用', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                      ]),
                     ),
+                  const SizedBox(height: 6),
                   const Padding(
-                    padding: EdgeInsets.only(top: 4),
-                    child: Text('💡 全天班次不會觸發鬧鐘；排班有變動會自動重新排程',
+                    padding: EdgeInsets.only(top: 2),
+                    child: Text('💡 點擊上方時間可修改；全天班次不會觸發鬧鐘；排班有變動會自動重新排程',
                       style: TextStyle(fontSize: 10, color: Colors.grey)),
                   ),
                 ],
@@ -4667,7 +4717,7 @@ void showLeaveManagementDialog() {
                 SizedBox(height: 16),
                 Text('4. 設定與同步', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
-                Text('• 「假期數據管理」：可設定每年的假期天數、微調，系統會自動計算餘額。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「上班鬧鐘」：在班次編輯卡內開啟鬧鐘，設定提前分鐘數，App 會依排班自動安排提醒。\n  - 單日臨時關閉：在日期編輯卡內可針對單獨一日臨時關閉鬧鐘，不影響其他日期。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：掃描範圍 2000~2100 年，只刪 [RosterPro] 事件。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
+                Text('• 「假期數據管理」：可設定每年的假期天數、微調，系統會自動計算餘額。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「上班鬧鐘」：在班次編輯卡內開啟鬧鐘，點擊時間框選一個時間，系統會自動計算提前分鐘數。\n  - 單日臨時關閉：在日期編輯卡內可針對單獨一日臨時關閉鬧鐘，不影響其他日期。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：掃描範圍 2000~2100 年，只刪 [RosterPro] 事件。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
                 SizedBox(height: 16),
                 Text('5. 常見問題', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
