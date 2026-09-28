@@ -940,7 +940,7 @@ Future<bool> _buildAndInsertEvent(String dateKey, String code, Duration offset, 
       return false;
     }
     if (!res.isSuccess) {
-      await _writeDebugLog('[createEvent] ❌ $dateKey 失敗: ${res.errorMessage}');
+      await _writeDebugLog('[createEvent] ❌ $dateKey 失敗: ${res.toString()}');
       return false;
     }
     if (res.data == null) {
