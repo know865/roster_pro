@@ -194,7 +194,7 @@ class MainPageState extends State<MainPage> {
   String selectedPatternCode = "O";
 
   double carry = 0;
-  String carryAnchorWeekKey = ''; // 累計起始週，例如 "2026-W38"，空字串代表尚未設定
+  String carryAnchorWeekKey = '';
   String customName = '我的排更-專屬日曆';
   TextEditingController nameCtrl = TextEditingController();
   double standardWeeklyHours = 42;
@@ -277,7 +277,6 @@ class MainPageState extends State<MainPage> {
     }
   }
 
-  // ✅ 修正：查詢失敗時拋異常，讓呼叫端知道「查詢失敗」，而不是「查詢成功但無事件」
   Future<List<Event>> _safeRetrieveEvents(DateTime start, DateTime end) async {
     final calId = _requireCalendarId();
     try {
@@ -311,7 +310,6 @@ class MainPageState extends State<MainPage> {
       await _writeDebugLog('[原生 queryEvents 失敗] $e，降級使用 device_calendar');
     }
 
-    // device_calendar 降級：失敗時拋異常
     final res = await _calendarPlugin.retrieveEvents(
       calId,
       RetrieveEventsParams(startDate: start, endDate: end),
@@ -681,7 +679,6 @@ void _ensureAnchorWeek() {
     return;
   }
 
-  // 若 roster 中出現比 anchor 更早的排班，往前移 anchor
   final anchorDate = _parseWeekKey(carryAnchorWeekKey);
   if (anchorDate != null && anchorDate.isAfter(globalStart)) {
     _writeDebugLog('[累計起始週] 偵測到更早排班 $earliestKey，anchor 由 $carryAnchorWeekKey 往前移');
@@ -1115,7 +1112,6 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
     int zombieFixed = 0;
 
     if (needFull) {
-      // ===== 全量重建 =====
       await _writeDebugLog('[同步] 全量重建：分批掃描清理 [RosterPro]');
 
       final Set<String> deletedIds = <String>{};
@@ -1168,7 +1164,6 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
       }
       return;
     } else {
-      // ===== 增量同步 =====
       if (_googleEventIdMap.isEmpty) {
         await _writeDebugLog('[同步] googleEventIdMap 為空，開始掃描現有日曆事件');
         DateTime scanStart = _calcScanStart();
@@ -1188,7 +1183,6 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
           }
           await _writeDebugLog('[同步] 掃描完成，共找到 ${_googleEventIdMap.length} 條現有事件');
         } catch (e) {
-          // 掃描失敗 → 保留舊 map，避免所有事件被重建
           await _writeDebugLog('[同步] ⚠️ 掃描重建失敗，保留現有 map：$e');
         }
       }
@@ -1202,7 +1196,6 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
         DateTime queryStart = DateTime(date.year, date.month, date.day, 0, 0, 0).subtract(const Duration(hours: 24));
         DateTime queryEnd = DateTime(date.year, date.month, date.day, 23, 59, 59).add(const Duration(hours: 24));
 
-        // ✅ 查詢失敗 → 跳過該天，保留 dirtyDates，下次重試
         List<Event> eventsInRange;
         try {
           eventsInRange = await _safeRetrieveEvents(queryStart, queryEnd);
@@ -1219,7 +1212,6 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
           }
           final title = (e.title ?? '').trim();
           if (title.isEmpty) return false;
-          // 沒有 [RosterPro] 標籤的事件：必須當天，才認領（避免誤刪相鄰日手動事件）
           final eDateKey = e.start != null ? DateFormat('yyyy-MM-dd').format(e.start!.toLocal()) : null;
           if (eDateKey != dateKey) return false;
           String t = title.contains(' | ') ? title.split(' | ')[0].trim() : title;
@@ -1246,7 +1238,6 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
         final newStart = isAllDayNow ? '全天' : newDef.start;
         final newEnd = isAllDayNow ? '全天' : newDef.end;
 
-        // ✅ 核心修復：驗證 _googleEventIdMap 記錄的 eventId 是否還存在於日曆中
         String? matchedEventId = _googleEventIdMap[dateKey];
         if (matchedEventId != null) {
           final stillExists = rosterEvents.any((e) => e.eventId == matchedEventId);
@@ -2312,29 +2303,108 @@ Future<void> exportReport() async {
       sb.writeln('OT 津貼, \$${(ot * overtimeRate).toStringAsFixed(1)}');
       sb.writeln('津貼總額, \$${(allow + ot * overtimeRate).toStringAsFixed(1)}');
     } else {
-      sb.writeln('========================================');
-      sb.writeln('       ${focused.year}年 全年排更報表');
-      sb.writeln('========================================');
-      sb.writeln('');
-      sb.writeln('【每月工時統計】');
-      sb.writeln('月份, 總工時');
-      double totalYearHrs = 0;
-      for (int mon = 1; mon <= 12; mon++) {
-        int dim = DateTime(focused.year, mon + 1, 0).day;
-        double hrs = 0;
-        for (int d = 1; d <= dim; d++) {
-          DateTime dt = DateTime(focused.year, mon, d);
-          String k = DateFormat('yyyy-MM-dd').format(dt);
-          String? c = roster[k];
-          if (c == null) continue;
-          var def = defs[c];
-          if (def != null) hrs += def.hours;
+      int year = focused.year;
+      DateTime rangeStart = DateTime(year, 1, 1);
+      DateTime rangeEnd = DateTime(year, 12, 31);
+      DateTime calStart = rangeStart.subtract(Duration(days: rangeStart.weekday - 1));
+      DateTime calEnd = rangeEnd.add(Duration(days: 7 - rangeEnd.weekday));
+      DateTime calcStart = _effectiveCalcStart(calStart);
+
+      Map<String, double> allWeeklyHours = {};
+      DateTime tempDt = calcStart;
+      while (!tempDt.isAfter(calEnd)) {
+        String k = DateFormat('yyyy-MM-dd').format(tempDt);
+        String? c = roster[k];
+        if (c != null) {
+          var d = defs[c];
+          if (d != null) {
+            String wk = isoWeekKey(tempDt);
+            allWeeklyHours[wk] = (allWeeklyHours[wk] ?? 0) + d.hours;
+          }
         }
-        sb.writeln('$mon月, ${hrs.toStringAsFixed(1)}h');
-        totalYearHrs += hrs;
+        tempDt = tempDt.add(const Duration(days: 1));
       }
+      List<String> sortedAllWeeks = allWeeklyHours.keys.toList()..sort();
+      double lastCarryExport = carry;
+      Map<String, double> weekDiffMap = {};
+      for (var wk in sortedAllWeeks) {
+        double weekHours = allWeeklyHours[wk]!;
+        double diff = lastCarryExport + weekHours - standardWeeklyHours;
+        weekDiffMap[wk] = diff;
+        lastCarryExport = diff;
+      }
+      String endWeekKey = isoWeekKey(calEnd);
+      double totalDiff = carry;
+      for (var wk in sortedAllWeeks) {
+        if (wk.compareTo(endWeekKey) <= 0) totalDiff = weekDiffMap[wk]!;
+        else break;
+      }
+
+      double hrs = 0, ot = 0, allow = 0;
+      SplayTreeMap<String, int> shiftCount = SplayTreeMap();
+      SplayTreeMap<String, double> extraByType = SplayTreeMap();
+      double totalYearHrs = 0;
+
+      for (DateTime dt = rangeStart; !dt.isAfter(rangeEnd); dt = dt.add(const Duration(days: 1))) {
+        String k = DateFormat('yyyy-MM-dd').format(dt);
+        String? c = roster[k];
+        if (c == null) continue;
+        var d = defs[c];
+        if (d != null) {
+          hrs += d.hours;
+          totalYearHrs += d.hours;
+          shiftCount[c] = (shiftCount[c] ?? 0) + 1;
+          if (d.hasMorningAllow) allow += morningAllowance;
+          if (d.hasNightAllow) allow += nightAllowance * d.hours;
+          if (d.hasMealAllow) allow += mealAllowance;
+        }
+        ot += (rosterOt[k] ?? d?.ot ?? 0);
+        allow += (rosterExtra[k] ?? 0);
+        if (rosterExtraType.containsKey(k) && rosterExtra.containsKey(k)) {
+          extraByType[rosterExtraType[k]!] = (extraByType[rosterExtraType[k]!] ?? 0) + rosterExtra[k]!;
+        }
+        hrs += (rosterExtraHrs[k] ?? 0);
+      }
+
+      sb.writeln('========================================');
+      sb.writeln('       ${year}年 全年排更報表');
+      sb.writeln('========================================');
       sb.writeln('');
-      sb.writeln('全年總工時, ${totalYearHrs.toStringAsFixed(1)}h');
+      sb.writeln('【一、班次統計】');
+      sb.writeln('班次代號, 班次名稱, 次數, 總工時');
+      double totalShiftHours = 0;
+      shiftCount.forEach((k, v) {
+        var d = defs[k];
+        double h = (d?.hours ?? 0) * v;
+        totalShiftHours += h;
+        sb.writeln('$k, ${d?.label ?? k}, $v次, ${h.toStringAsFixed(1)}h');
+      });
+      sb.writeln('小計, , ${shiftCount.values.fold(0, (a, b) => a + b)}次, ${totalShiftHours.toStringAsFixed(1)}h');
+      sb.writeln('');
+      sb.writeln('【二、年度累計工時差額】');
+      sb.writeln('標準工時, ${standardWeeklyHours}h/週');
+      sb.writeln('總差額, ${totalDiff >= 0 ? '+' : ''}${totalDiff.toStringAsFixed(1)}h');
+      sb.writeln('');
+      sb.writeln('【三、津貼類別統計】');
+      sb.writeln('類別, 金額');
+      double totalExtra = 0;
+      if (extraByType.isNotEmpty) {
+        extraByType.forEach((t, a) { sb.writeln('$t, \$${a.toStringAsFixed(1)}'); totalExtra += a; });
+      } else {
+        sb.writeln('無, \$0.0');
+      }
+      sb.writeln('小計, \$${totalExtra.toStringAsFixed(1)}');
+      sb.writeln('');
+      sb.writeln('【四、OT 統計】');
+      sb.writeln('OT 總時數, $ot h');
+      sb.writeln('OT 時薪, \$${overtimeRate.toStringAsFixed(0)}/h');
+      sb.writeln('OT 總金額, \$${(ot * overtimeRate).toStringAsFixed(1)}');
+      sb.writeln('');
+      sb.writeln('【五、總計】');
+      sb.writeln('總工時, ${hrs.toStringAsFixed(1)}h');
+      sb.writeln('班次津貼+單日額外, \$${allow.toStringAsFixed(1)}');
+      sb.writeln('OT 津貼, \$${(ot * overtimeRate).toStringAsFixed(1)}');
+      sb.writeln('津貼總額, \$${(allow + ot * overtimeRate).toStringAsFixed(1)}');
     }
     String dir = await _getBackupDir();
     String fileName = 'report_${isYearReport ? 'year${focused.year}' : '${focused.year}${focused.month.toString().padLeft(2, '0')}'}.csv';
@@ -2618,7 +2688,7 @@ void showDetail(DateTime day) {
                   if (exHVal != null && exHVal != 0) rosterExtraHrs[k] = exHVal; else rosterExtraHrs.remove(k);
                 });
                 _markDirty(k);
-                _ensureAnchorWeek(); // ✅ 修正：首次編輯也能設定 anchor
+                _ensureAnchorWeek();
                 await save();
                 await _syncNow();
               }, child: const Text('儲存'))),
@@ -3607,35 +3677,70 @@ void showLeaveManagementDialog() {
   Widget reportTab() {
     int year = focused.year;
     int month = focused.month;
+
+    // === 統計範圍：全年 = 1/1~12/31；月份 = 該月首日~末日 ===
+    DateTime rangeStart = isYearReport ? DateTime(year, 1, 1) : DateTime(year, month, 1);
+    DateTime rangeEnd = isYearReport ? DateTime(year, 12, 31) : DateTime(year, month + 1, 0);
+
+    // === 全年模式的年度統計 ===
     double totalYearHrs = 0;
-    Map<String, int> yearShiftCount = {};
     Map<int, double> yearMonthlyHrs = {};
+    Map<String, int> yearShiftCount = {};
+    Map<String, double> yearShiftHours = {};
     if (isYearReport) {
       for (int m = 1; m <= 12; m++) {
         int dim = DateTime(year, m + 1, 0).day;
-        double hrs = 0;
+        double hrsM = 0;
         for (int d = 1; d <= dim; d++) {
           String k = DateFormat('yyyy-MM-dd').format(DateTime(year, m, d));
           String? c = roster[k];
           if (c == null) continue;
           var def = defs[c];
-          if (def != null) { hrs += def.hours; totalYearHrs += def.hours; yearShiftCount[c] = (yearShiftCount[c] ?? 0) + 1; }
+          if (def != null) {
+            hrsM += def.hours;
+            totalYearHrs += def.hours;
+            yearShiftCount[c] = (yearShiftCount[c] ?? 0) + 1;
+            yearShiftHours[c] = (yearShiftHours[c] ?? 0) + def.hours;
+          }
         }
-        yearMonthlyHrs[m] = hrs;
+        yearMonthlyHrs[m] = hrsM;
       }
     }
 
-    int dim = DateTime(year, month + 1, 0).day;
+    // === 班次統計、OT、津貼（依統計範圍） ===
     double hrs = 0, ot = 0, allow = 0;
     Map<String, int> shiftCount = {};
     Map<String, double> shiftHours = {};
     Map<String, double> extraByType = {};
 
-    DateTime firstDayOfMonth = DateTime(year, month, 1);
-    DateTime lastDayOfMonth = DateTime(year, month + 1, 0);
-    DateTime calStart = firstDayOfMonth.subtract(Duration(days: firstDayOfMonth.weekday - 1));
-    DateTime calEnd = lastDayOfMonth.add(Duration(days: 7 - lastDayOfMonth.weekday));
+    for (DateTime dt = rangeStart; !dt.isAfter(rangeEnd); dt = dt.add(const Duration(days: 1))) {
+      String k = DateFormat('yyyy-MM-dd').format(dt);
+      String? c = roster[k];
+      if (c == null) continue;
+      var d = defs[c];
+      if (d != null) {
+        hrs += d.hours;
+        shiftCount[c] = (shiftCount[c] ?? 0) + 1;
+        shiftHours[c] = (shiftHours[c] ?? 0) + d.hours;
+        if (d.hasMorningAllow) allow += morningAllowance;
+        if (d.hasNightAllow) allow += nightAllowance * d.hours;
+        if (d.hasMealAllow) allow += mealAllowance;
+      }
+      ot += (rosterOt[k] ?? d?.ot ?? 0);
+      allow += (rosterExtra[k] ?? 0);
+      if (rosterExtra.containsKey(k) && rosterExtraType.containsKey(k)) {
+        String t = rosterExtraType[k]!;
+        extraByType[t] = (extraByType[t] ?? 0) + rosterExtra[k]!;
+      }
+      hrs += (rosterExtraHrs[k] ?? 0);
+    }
 
+    double otAmount = ot * overtimeRate;
+    double totalAllow = allow + otAmount;
+
+    // === 每週工時統計（用於月份詳細 + 總差額計算） ===
+    DateTime calStart = rangeStart.subtract(Duration(days: rangeStart.weekday - 1));
+    DateTime calEnd = rangeEnd.add(Duration(days: 7 - rangeEnd.weekday));
     DateTime calcStart = _effectiveCalcStart(calStart);
 
     Map<String, double> allWeeklyHours = {};
@@ -3665,14 +3770,14 @@ void showLeaveManagementDialog() {
       lastCarry = diff;
     }
 
-    Set<String> currentMonthWeeksSet = {};
+    Set<String> currentRangeWeeksSet = {};
     for (DateTime dt = calStart; !dt.isAfter(calEnd); dt = dt.add(const Duration(days: 1))) {
-      currentMonthWeeksSet.add(isoWeekKey(dt));
+      currentRangeWeeksSet.add(isoWeekKey(dt));
     }
 
     List<Map<String, dynamic>> weeklyStats = [];
     for (String wk in sortedAllWeeks) {
-      if (currentMonthWeeksSet.contains(wk)) {
+      if (currentRangeWeeksSet.contains(wk)) {
         weeklyStats.add({
           'week': wk,
           'hours': allWeeklyHours[wk]!,
@@ -3682,32 +3787,21 @@ void showLeaveManagementDialog() {
       }
     }
 
-    double totalDiff = weeklyStats.isNotEmpty ? (weeklyStats.last['diff'] as double) : 0.0;
-
-    for (DateTime dt = firstDayOfMonth; !dt.isAfter(lastDayOfMonth); dt = dt.add(const Duration(days: 1))) {
-      String k = DateFormat('yyyy-MM-dd').format(dt);
-      String? c = roster[k];
-      if (c == null) continue;
-      var d = defs[c];
-      if (d != null) {
-        hrs += d.hours;
-        shiftCount[c] = (shiftCount[c] ?? 0) + 1;
-        shiftHours[c] = (shiftHours[c] ?? 0) + d.hours;
-        if (d.hasMorningAllow) allow += morningAllowance;
-        if (d.hasNightAllow) allow += nightAllowance * d.hours;
-        if (d.hasMealAllow) allow += mealAllowance;
+    // === 總差額 ===
+    // 月份模式：該月最後一週的 diff（原邏輯）
+    // 全年模式：該年 calEnd 之前最後一週的 diff（年度累計差額）
+    double totalDiff;
+    if (isYearReport) {
+      String endWeekKey = isoWeekKey(calEnd);
+      double lastDiff = carry;
+      for (var wk in sortedAllWeeks) {
+        if (wk.compareTo(endWeekKey) <= 0) lastDiff = weekDiffMap[wk]!;
+        else break;
       }
-      ot += (rosterOt[k] ?? d?.ot ?? 0);
-      allow += (rosterExtra[k] ?? 0);
-      if (rosterExtra.containsKey(k) && rosterExtraType.containsKey(k)) {
-        String t = rosterExtraType[k]!;
-        extraByType[t] = (extraByType[t] ?? 0) + rosterExtra[k]!;
-      }
-      hrs += (rosterExtraHrs[k] ?? 0);
+      totalDiff = lastDiff;
+    } else {
+      totalDiff = weeklyStats.isNotEmpty ? (weeklyStats.last['diff'] as double) : 0.0;
     }
-
-    double otAmount = ot * overtimeRate;
-    double totalAllow = allow + otAmount;
 
     return SafeArea(
       child: GestureDetector(
@@ -3737,14 +3831,38 @@ void showLeaveManagementDialog() {
             ),
           ]),
           const SizedBox(height: 8),
+          // === 全年：全年總工時逐月 ===
           if (isYearReport) Card(color: const Color(0xFFE3F2FD), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('全年總工時 ${totalYearHrs.toStringAsFixed(1)}h', style: const TextStyle(fontWeight: FontWeight.bold)),
             const Divider(),
             ...yearMonthlyHrs.entries.map((e) => Row(children: [Text('${e.key}月'), const Spacer(), Text('${e.value.toStringAsFixed(1)}h')])),
           ]))),
+          // === 全年：全年班次統計 ===
+          if (isYearReport) Card(color: const Color(0xFFE3F2FD), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('班次統計 (全年)', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Divider(),
+            if (yearShiftCount.isEmpty)
+              const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('本年度尚未排班', style: TextStyle(color: Colors.grey))),
+            ...yearShiftCount.entries.map((e) {
+              double h = yearShiftHours[e.key] ?? 0;
+              var d = defs[e.key];
+              return Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Row(children: [
+                Container(width: 28, height: 28, decoration: BoxDecoration(color: d?.color ?? Colors.grey, borderRadius: BorderRadius.circular(6)), child: Center(child: Text(e.key, style: const TextStyle(color: Colors.white, fontSize: 11)))),
+                const SizedBox(width: 8),
+                Text('${d?.label ?? e.key}'),
+                const Spacer(),
+                Text('${e.value}次 / ${h.toStringAsFixed(1)}h', style: const TextStyle(fontWeight: FontWeight.bold)),
+              ]));
+            }),
+            const Divider(),
+            Text('全年總工時 ${totalYearHrs.toStringAsFixed(1)}h'),
+          ]))),
+          // === 月份：本月班次統計 ===
           if (!isYearReport) Card(color: const Color(0xFFE3F2FD), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('班次統計', style: TextStyle(fontWeight: FontWeight.bold)),
             const Divider(),
+            if (shiftCount.isEmpty)
+              const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('本月尚未排班', style: TextStyle(color: Colors.grey))),
             ...shiftCount.entries.map((e) {
               double h = shiftHours[e.key] ?? 0;
               var d = defs[e.key];
@@ -3759,9 +3877,12 @@ void showLeaveManagementDialog() {
             const Divider(),
             Text('總工時 ${hrs.toStringAsFixed(1)}h'),
           ]))),
-          Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(isYearReport ? '每週工時統計 全年' : '每週工時統計 (標準 & 承上) 週數', style: const TextStyle(fontWeight: FontWeight.bold)),
+          // === 月份：每週工時統計詳細 ===
+          if (!isYearReport) Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('每週工時統計 (標準 & 承上) 週數', style: TextStyle(fontWeight: FontWeight.bold)),
             const Divider(),
+            if (weeklyStats.isEmpty)
+              const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('本月無排班資料', style: TextStyle(color: Colors.grey))),
             ...weeklyStats.map((stat) {
               String week = stat['week'];
               double weekHours = stat['hours'];
@@ -3780,8 +3901,21 @@ void showLeaveManagementDialog() {
               Text('${totalDiff >= 0 ? '+' : ''}${totalDiff.toStringAsFixed(1)}h', style: TextStyle(fontWeight: FontWeight.bold, color: totalDiff > 0 ? Colors.green : (totalDiff < 0 ? Colors.red : Colors.black))),
             ]),
           ]))),
+          // === 全年：年度累計工時差額摘要 ===
+          if (isYearReport) Card(color: const Color(0xFFF3E5F5), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('年度累計工時差額', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Row(children: [
+              Text('標準 ${standardWeeklyHours}h/週 | 總差額 ', style: const TextStyle(fontWeight: FontWeight.bold)),
+              const Spacer(),
+              Text('${totalDiff >= 0 ? '+' : ''}${totalDiff.toStringAsFixed(1)}h', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: totalDiff > 0 ? Colors.green : (totalDiff < 0 ? Colors.red : Colors.black))),
+            ]),
+            const SizedBox(height: 4),
+            Text('（截至 ${year}年12月，累計差額）', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          ]))),
+          // === 津貼類別統計（依統計範圍） ===
           Card(color: const Color(0xFFE8F5E9), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('津貼類別 (含自定義類別)', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(isYearReport ? '津貼類別 (含自定義類別) - 全年' : '津貼類別 (含自定義類別)', style: const TextStyle(fontWeight: FontWeight.bold)),
             Row(children: [const Text('班次津貼+單日額外'), const Spacer(), Text('\$${allow.toStringAsFixed(1)}')]),
             if (extraByType.isNotEmpty) const Divider(),
             ...extraByType.entries.map((e) => Row(children: [Text('類別: ${e.key}'), const Spacer(), Text('\$${e.value.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple))])),
