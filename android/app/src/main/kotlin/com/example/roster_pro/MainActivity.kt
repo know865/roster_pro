@@ -39,6 +39,7 @@ class MainActivity : FlutterActivity() {
                 "updateWidget" -> handleUpdateWidget(result)
                 "scheduleAlarm" -> handleScheduleAlarm(call, result)
                 "cancelAllAlarms" -> handleCancelAllAlarms(result)
+                "canScheduleExactAlarms" -> handleCanScheduleExactAlarms(result)
                 "deleteAllEventsInCalendar" -> {
                     val calendarId = call.argument<String>("calendarId")
                     if (calendarId == null) result.error("NO_CAL_ID", "Calendar ID is null", null)
@@ -64,6 +65,24 @@ class MainActivity : FlutterActivity() {
             }
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.createNotificationChannel(channel)
+        }
+    }
+
+    // ==================== 精確鬧鐘權限檢查 ====================
+    // 因為 AndroidManifest 已宣告 USE_EXACT_ALARM（API 33+）與 SCHEDULE_EXACT_ALARM（API 31-32），
+    // 在 API 33+ 上 canScheduleExactAlarms() 會自動回傳 true，無需引導使用者。
+    // 在 API 31-32 上 SCHEDULE_EXACT_ALARM 也是自動授予。
+
+    private fun handleCanScheduleExactAlarms(result: MethodChannel.Result) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                result.success(alarmManager.canScheduleExactAlarms())
+            } else {
+                result.success(true) // API 30 及以下無需此權限
+            }
+        } catch (e: Exception) {
+            result.success(false)
         }
     }
 
@@ -94,30 +113,35 @@ class MainActivity : FlutterActivity() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
+            // 因為宣告了 USE_EXACT_ALARM（API 33+ 自動授予）與 SCHEDULE_EXACT_ALARM（API 31-32 自動授予），
+            // 大部分情況下 canScheduleExactAlarms() 都會是 true，可直接排精確鬧鐘。
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    // Android 12+：需要 SCHEDULE_EXACT_ALARM 或 USE_EXACT_ALARM
                     if (alarmManager.canScheduleExactAlarms()) {
+                        // 有精確鬧鐘權限（自動授予）→ 精確鬧鐘
                         alarmManager.setExactAndAllowWhileIdle(
                             AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent
                         )
                     } else {
-                        // 沒有精確鬧鐘權限 → 降級為非精確（會由系統自動調整時間）
+                        // 極少數情況（例如使用者手動到系統設定把 SCHEDULE_EXACT_ALARM 關閉）
+                        // → 降級為非精確鬧鐘，保證功能不中斷
                         alarmManager.setAndAllowWhileIdle(
                             AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent
                         )
                     }
                 } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    // Android 6~11：無需精確鬧鐘權限
                     alarmManager.setExactAndAllowWhileIdle(
                         AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent
                     )
                 } else {
+                    // Android 5 及以下
                     alarmManager.setExact(
                         AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent
                     )
                 }
             } catch (_: SecurityException) {
-                // 萬一還是被拒 → 用最普通的 set()
+                // 保底：若任何精確鬧鐘呼叫被拒 → 用最普通的 set()
                 alarmManager.set(AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent)
             }
 
