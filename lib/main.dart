@@ -257,98 +257,81 @@ class MainPageState extends State<MainPage> {
   }
 
   // ============================================================
-  // ✅ 統一的 deleteEvent 包裝，優先原生 Channel，退回 device_calendar
+  // ✅ 統一的 deleteEvent 包裝（優先使用原生通道，確保安全刪除）
   // ============================================================
   Future<bool> _safeDeleteEvent(String eventId) async {
     final calId = _requireCalendarId();
-    // 先試原生 Channel
     try {
-      final ok = await _realChannel.invokeMethod('deleteEvent', {
+      // 優先使用原生通道刪除（帶安全校驗，確保 eventId 屬於當前 calId）
+      final bool? ok = await _realChannel.invokeMethod('deleteEvent', {
         'calendarId': calId,
         'eventId': eventId,
       });
-      if (ok == true) {
-        await _writeDebugLog('[deleteEvent-native] calId=$calId eventId=$eventId OK');
-        return true;
-      }
+      await _writeDebugLog('[原生 deleteEvent] calId=$calId eventId=$eventId ok=$ok');
+      if (ok == true) return true;
     } catch (e) {
-      await _writeDebugLog('[deleteEvent-native] 失敗，退回 plugin: $e');
+      await _writeDebugLog('[原生 deleteEvent 失敗] calId=$calId eventId=$eventId 失敗: $e，降級使用 device_calendar');
     }
-    // Fallback: device_calendar
+
+    // 降級方案：如果原生失敗，依然使用 device_calendar
     try {
       final ok = await _calendarPlugin.deleteEvent(calId, eventId);
-      await _writeDebugLog('[deleteEvent-plugin] calId=$calId eventId=$eventId result=$ok');
+      await _writeDebugLog('[device_calendar deleteEvent] calId=$calId eventId=$eventId ok=$ok');
       return ok == true;
     } catch (e) {
-      await _writeDebugLog('[deleteEvent-plugin] calId=$calId eventId=$eventId 失敗: $e');
+      await _writeDebugLog('[device_calendar deleteEvent] calId=$calId eventId=$eventId 失敗: $e');
       return false;
     }
   }
 
   // ============================================================
-  // ✅ 原生 Channel 查詢事件（繞過 device_calendar 的 Samsung bug）
+  // ✅ 統一的 retrieveEvents 包裝（優先使用原生通道，繞過插件Bug）
   // ============================================================
-  Future<List<Map<String, dynamic>>> _queryEventsNative(DateTime start, DateTime end) async {
+  Future<List<Event>> _safeRetrieveEvents(DateTime start, DateTime end) async {
     final calId = _requireCalendarId();
     try {
-      final res = await _realChannel.invokeMethod('queryEvents', {
+      // 優先嘗試使用原生通道
+      final List<dynamic>? res = await _realChannel.invokeMethod('queryEvents', {
         'calendarId': calId,
         'startMillis': start.millisecondsSinceEpoch,
         'endMillis': end.millisecondsSinceEpoch,
       });
-      if (res is List) {
-        return res.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-      }
-      return [];
-    } catch (e) {
-      await _writeDebugLog('[queryEventsNative] calId=$calId 失敗: $e');
-      return [];
-    }
-  }
-
-  // ============================================================
-  // ✅ 統一查詢：優先原生 Channel，失敗才退回 device_calendar
-  // ============================================================
-  Future<List<Event>> _safeRetrieveEvents(DateTime start, DateTime end) async {
-    final calId = _requireCalendarId();
-    // 先試原生 Channel
-    try {
-      final nativeRes = await _queryEventsNative(start, end);
-      if (nativeRes.isNotEmpty) {
-        return nativeRes.map((m) {
+      if (res != null) {
+        return res.map((e) {
+          final map = Map<String, dynamic>.from(e as Map);
+          final int? startMs = map['startMillis'] as int?;
+          final int? endMs = map['endMillis'] as int?;
+          // 將原生返回的毫秒時間戳轉換為 device_calendar 的 Event 物件
           return Event(
             calId,
-            eventId: m['eventId']?.toString(),
-            title: m['title']?.toString(),
-            description: m['description']?.toString(),
-            start: tz.TZDateTime.fromMillisecondsSinceEpoch(tz.UTC, m['startMillis'] as int? ?? 0),
-            end: tz.TZDateTime.fromMillisecondsSinceEpoch(tz.UTC, m['endMillis'] as int? ?? 0),
-            allDay: (m['allDay'] ?? false) == true,
+            eventId: map['eventId']?.toString(),
+            title: map['title']?.toString(),
+            description: map['description']?.toString(),
+            start: startMs != null
+                ? tz.TZDateTime.fromMillisecondsSinceEpoch(tz.UTC, startMs)
+                : null,
+            end: endMs != null
+                ? tz.TZDateTime.fromMillisecondsSinceEpoch(tz.UTC, endMs)
+                : null,
+            allDay: map['allDay'] == true,
           );
         }).toList();
       }
     } catch (e) {
-      await _writeDebugLog('[queryEventsNative] 例外: $e');
+      await _writeDebugLog('[原生 queryEvents 失敗] $e，降級使用 device_calendar');
     }
-    // Fallback: 逐週用 device_calendar 查
-    final allEvents = <Event>[];
-    DateTime cur = DateTime(start.year, start.month, start.day);
-    final last = DateTime(end.year, end.month, end.day);
-    while (cur.isBefore(last)) {
-      DateTime chunkEnd = cur.add(const Duration(days: 7));
-      if (chunkEnd.isAfter(last)) chunkEnd = last;
-      try {
-        final res = await _calendarPlugin.retrieveEvents(
-          calId,
-          RetrieveEventsParams(startDate: cur, endDate: chunkEnd),
-        );
-        allEvents.addAll(res.data ?? []);
-      } catch (e) {
-        await _writeDebugLog('[retrieveEvents-fallback] calId=$calId $cur~$chunkEnd 失敗: $e');
-      }
-      cur = chunkEnd;
+
+    // 降級方案：如果原生失敗，依然使用 device_calendar
+    try {
+      final res = await _calendarPlugin.retrieveEvents(
+        calId,
+        RetrieveEventsParams(startDate: start, endDate: end),
+      );
+      return res.data ?? [];
+    } catch (e) {
+      await _writeDebugLog('[retrieveEvents] calId=$calId $start~$end 失敗: $e');
+      return [];
     }
-    return allEvents;
   }
 
   Future<void> _writeDebugLog(String message) async {
@@ -678,7 +661,7 @@ class MainPageState extends State<MainPage> {
     }
   }
 
-  // ✅ 切換日曆時清空 _googleEventIdMap（避免舊 eventId 汙染新日曆）
+  // ✅ 修改 1：切換日曆時清空 _googleEventIdMap
   Future<String?> _pickGoogleCalendarDialog() async {
     bool ok = await handleCalendarPermission(silent: false);
     if (!ok) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('未取得日曆權限，無法讀取日曆'))); return null; }
@@ -707,6 +690,7 @@ class MainPageState extends State<MainPage> {
       _rosterCalendarId = newId;
       _rosterCalendarName = pickedMap['displayName'].toString();
       _rosterAccountName = pickedMap['accountName'].toString();
+      // ✅ 切換日曆時清空 eventIdMap（舊 eventId 不屬於新日曆）
       if (oldId != null && oldId != newId) {
         _googleEventIdMap.clear();
         await _writeDebugLog('切換日曆 $oldId → $newId，已清空 googleEventIdMap');
@@ -887,7 +871,9 @@ String _padTime(String t) {
   return '$h:$m';
 }
 
-/// ✅ 支援 existingEventId：有值 → update；無值 → insert
+/// ✅ 統一使用 _rosterCalendarId 建立/更新事件
+/// 有 existingEventId → update（不重複）
+/// 無 existingEventId → insert
 Future<bool> _buildAndInsertEvent(String dateKey, String code, Duration offset, {String? existingEventId}) async {
   final calId = _requireCalendarId();
   final def = defs[code];
@@ -981,9 +967,9 @@ Future<void> syncDateRange() async {
   await sp.setStringList('dirtyDates', _dirtyDates.toList());
 }
 
-/// ✅ 核心同步：
-/// 增量 → 優先 update（用 _googleEventIdMap 記錄的 eventId），無 eventId 才 insert
-/// 全量 → 逐日掃描只刪 [RosterPro]（不呼叫 deleteAllEventsInCalendar）
+// ✅ 修改 2：統一使用 _rosterCalendarId + eventId 做同步
+// 增量：優先 update，無 eventId 才 insert（不重複）
+// 全量：徹底掃描 2000~2100 年，只刪 [RosterPro] 事件後重建
 Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) async {
   if (!googleSyncEnabled && !silent) {
     bool? en = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
@@ -998,6 +984,7 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
   }
   if (_isSyncing) return;
 
+  // ✅ 統一檢查日曆 ID
   if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) {
     if (!silent) await _ensureCalendar();
     if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) {
@@ -1074,48 +1061,40 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
     int del = 0, delFailed = 0, add = 0, upd = 0;
 
     if (needFull) {
-      // ===== 全量重建：逐日掃描只刪 [RosterPro] =====
-      await _writeDebugLog('=== 全量重建：逐日掃描只刪 [RosterPro] calId=$calId ===');
+      // ===== 全量重建：掃描極大範圍，徹底清理舊的 [RosterPro] 事件 =====
+      await _writeDebugLog('=== 全量重建：徹底掃描清理 [RosterPro] calId=$calId ===');
       statusNotifier.value = '正在掃描並刪除舊排班...';
       progressNotifier.value = -1;
 
-      final Set<String> dateKeys = <String>{};
-      if (roster.isNotEmpty) dateKeys.addAll(roster.keys);
-      DateTime today = DateTime.now();
-      DateTime fiveY = DateTime(today.year + 5, 12, 31);
-      for (DateTime d = DateTime(today.year, today.month, today.day);
-           !d.isAfter(fiveY);
-           d = d.add(const Duration(days: 1))) {
-        dateKeys.add(DateFormat('yyyy-MM-dd').format(d));
-      }
-      final sortedKeys = dateKeys.toList()..sort();
+      // ✅ 修改：掃描從 2000 年到 2100 年，確保所有歷史殘留都被清理
+      DateTime startScan = DateTime(2000, 1, 1);
+      DateTime endScan = DateTime(2100, 12, 31);
+
+      final events = await _safeRetrieveEvents(startScan, endScan);
       final Set<String> deletedIds = <String>{};
 
-      for (var dateKey in sortedKeys) {
-        DateTime date;
-        try { date = DateTime.parse(dateKey); } catch (_) { continue; }
-        DateTime start = DateTime(date.year, date.month, date.day, 0, 0, 0)
-            .subtract(const Duration(hours: 24));
-        DateTime end = DateTime(date.year, date.month, date.day, 23, 59, 59);
-        final events = await _safeRetrieveEvents(start, end);
-        for (var e in events) {
-          final desc = e.description ?? '';
-          if (!desc.contains('[RosterPro]')) continue;
-          if (e.eventId == null) continue;
-          if (deletedIds.contains(e.eventId)) continue;
-          final m = RegExp(r'\[RosterPro\](\d{4}-\d{2}-\d{2})').firstMatch(desc);
-          if (m != null && m.group(1) != dateKey) continue;
-          final ok = await _safeDeleteEvent(e.eventId!);
-          if (ok) { deletedIds.add(e.eventId!); del++; } else { delFailed++; }
+      for (var e in events) {
+        final desc = e.description ?? '';
+        if (!desc.contains('[RosterPro]')) continue; // 只刪我們自己App建立的
+        if (e.eventId == null) continue;
+        if (deletedIds.contains(e.eventId)) continue;
+        
+        final ok = await _safeDeleteEvent(e.eventId!);
+        if (ok) { 
+          deletedIds.add(e.eventId!); 
+          del++; 
+        } else { 
+          delFailed++; 
         }
       }
 
       _googleEventIdMap.clear();
 
-      statusNotifier.value = '正在重建事件...';
+      statusNotifier.value = '舊排班已清理（刪除 $del 條），正在重建事件...';
       progressNotifier.value = 0.0;
       int total = roster.length;
       int current = 0;
+      
       for (var entry in roster.entries) {
         current++;
         progressNotifier.value = total == 0 ? 1.0 : current / total;
@@ -1126,8 +1105,24 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
 
       _needsFullSync = false;
       _dirtyDates.clear();
+      
+      // 儲存同步後的狀態
+      sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
+      await sp.setStringList('dirtyDates', _dirtyDates.toList());
+      await sp.setBool('needsFullSync', _needsFullSync);
+      updateWidget();
+
+      await _writeDebugLog('=== 全量重建完成 calId=$calId del=$del delFailed=$delFailed add=$add ===');
+
+      if (!silent && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('完整同步完成：刪除舊事件 $del / 失敗 $delFailed / 建立新事件 $add'),
+          duration: const Duration(seconds: 4),
+        ));
+      }
+      return; // 全量重建完成，直接結束
     } else {
-      // ===== 增量同步 =====
+      // ===== 增量同步：優先 update，無 eventId 才 insert =====
       if (_googleEventIdMap.isEmpty) {
         statusNotifier.value = '正在掃描現有日曆事件...';
         progressNotifier.value = -1;
@@ -1136,13 +1131,15 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
         DateTime scanEnd = _calcScanEnd();
         try {
           var existingEvents = await _safeRetrieveEvents(scanStart, scanEnd);
-          for (var e in existingEvents) {
-            if (e.description != null && e.description!.contains('[RosterPro]')) {
-              RegExp regExp = RegExp(r'\[RosterPro\](\d{4}-\d{2}-\d{2})');
-              var match = regExp.firstMatch(e.description!);
-              if (match != null && e.eventId != null) {
-                String dateKey = match.group(1)!;
-                _googleEventIdMap[dateKey] = e.eventId!;
+          if (existingEvents.isNotEmpty) {
+            for (var e in existingEvents) {
+              if (e.description != null && e.description!.contains('[RosterPro]')) {
+                RegExp regExp = RegExp(r'\[RosterPro\](\d{4}-\d{2}-\d{2})');
+                var match = regExp.firstMatch(e.description!);
+                if (match != null && e.eventId != null) {
+                  String dateKey = match.group(1)!;
+                  _googleEventIdMap[dateKey] = e.eventId!;
+                }
               }
             }
           }
@@ -1171,6 +1168,7 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
         DateTime queryEnd = DateTime(date.year, date.month, date.day, 23, 59, 59)
             .add(const Duration(hours: 24));
 
+        // ✅ 統一用 _safeRetrieveEvents
         final eventsInRange = await _safeRetrieveEvents(queryStart, queryEnd);
 
         List<Event> rosterEvents = eventsInRange.where((e) {
@@ -1232,7 +1230,7 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
         }
 
         if (matchedEventId != null) {
-          // ✅ 用既有 eventId 原地 update
+          // ✅ 用既有 eventId 原地 update，不新建
           final updated = await _buildAndInsertEvent(dateKey, newCode, offset, existingEventId: matchedEventId);
           if (updated) { upd++; _googleEventIdMap[dateKey] = matchedEventId; }
           else {
@@ -1275,7 +1273,7 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
   }
 }
 
-/// ✅ 強制清理重複（逐日掃描，code+start+end 分組）
+/// ✅ 統一使用 _rosterCalendarId + eventId 清理重複
 Future<void> _forceCleanDuplicates() async {
   if (_isSyncing) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在同步中，請稍候...')));
@@ -1463,7 +1461,7 @@ Future<void> _forceCleanDuplicates() async {
   }
 }
 
-/// ✅ 按日期範圍清除 [RosterPro] 事件
+/// ✅ 統一使用 _rosterCalendarId + eventId 按範圍清除
 Future<void> _purgeRosterProInRange() async {
   if (_isSyncing) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在同步中，請稍候...')));
@@ -1623,7 +1621,7 @@ Future<void> _purgeRosterProInRange() async {
   }
 }
 
-/// ✅ 全清重建（掃描範圍 = roster ∪ 今天~今天+5年）
+// ✅ 修改 3：更新對話框文字，說明只刪 [RosterPro]
 Future<void> _forceFullResync() async {
   if (_isSyncing) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在同步中，請稍候...')));
@@ -1656,7 +1654,7 @@ Future<void> _forceFullResync() async {
 
   bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
     title: const Text('⚠️ 全清重建確認'),
-    content: const Text('這會掃描範圍內所有帶 [RosterPro] 的事件並刪除，然後根據 App 排班重新建立。\n\n掃描範圍：\n• App 排班有資料的所有日期\n• 今天 ~ 今天+5 年（強制）\n\n✅ App 排班資料不受影響\n✅ 你其他 Google 行程不會被刪除\n✅ 只會影響選定日曆\n\n確定要執行嗎？'),
+    content: const Text('這會掃描範圍內所有帶 [RosterPro] 的事件並刪除，然後根據 App 排班重新建立。\n\n掃描範圍：\n• App 排班有資料的所有日期\n• 2000年 ~ 2100年（強制）\n\n✅ App 排班資料不受影響\n✅ 你其他 Google 行程不會被刪除\n✅ 只會影響選定日曆\n\n確定要執行嗎？'),
     actions: [
       TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
       FilledButton(
@@ -1673,7 +1671,8 @@ Future<void> _forceFullResync() async {
   _dirtyDates.clear();
   await _syncToGoogle(forceFullSync: true);
 }
-    Future<String> _getBackupDir() async {
+
+  Future<String> _getBackupDir() async {
     try {
       Directory dir = Directory('/storage/emulated/0/RosterPro_Backups');
       if (!await dir.exists()) await dir.create(recursive: true);
@@ -2040,6 +2039,7 @@ Future<void> _forceFullResync() async {
     }
   }
 
+  /// ✅ 統一使用 _rosterCalendarId + eventId 按日期範圍清除
   Future<void> clearRosterByRange() async {
     if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('尚未選擇日曆')));
@@ -2058,6 +2058,7 @@ Future<void> _forceFullResync() async {
         count++;
         roster.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); rosterExtraType.remove(k); rosterLeave.remove(k);
         if (_googleEventIdMap.containsKey(k)) {
+          // ✅ 用 _safeDeleteEvent 確保使用 calId + eventId
           await _safeDeleteEvent(_googleEventIdMap[k]!);
           _googleEventIdMap.remove(k);
         }
@@ -2764,6 +2765,7 @@ Future<void> _forceFullResync() async {
     );
   }
 
+  /// ✅ 統一使用 _rosterCalendarId + eventId 清除單一事件
   void showDetail(DateTime day) {
     String k = DateFormat('yyyy-MM-dd').format(day);
     String cur = roster[k] ?? '';
@@ -2844,6 +2846,7 @@ Future<void> _forceFullResync() async {
                   Navigator.pop(ctx2);
                   setState(() { roster.remove(k); rosterLeave.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); rosterExtraType.remove(k); });
                   if (eventId != null) {
+                    // ✅ 使用 _safeDeleteEvent 統一 calId + eventId
                     await _safeDeleteEvent(eventId);
                     _googleEventIdMap.remove(k);
                   }
@@ -3839,7 +3842,7 @@ Future<void> _forceFullResync() async {
           decoration: BoxDecoration(color: Colors.red.withOpacity(0.08), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.withOpacity(0.3))),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('⚠️ 全清重建（救援用）', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 13)),
-            const Text('• 掃描範圍：App 排班日期 ∪ 今天~今天+5年\n• 只刪 [RosterPro] 事件，個人行程不受影響\n• 全部操作使用當前日曆 ID + eventId', style: TextStyle(fontSize: 10, color: Colors.black54)),
+            const Text('• 掃描範圍：2000年 ~ 2100年 (徹底清理)\n• 只刪 [RosterPro] 事件，個人行程不受影響\n• 全部操作使用當前日曆 ID + eventId', style: TextStyle(fontSize: 10, color: Colors.black54)),
             const SizedBox(height: 8),
             SizedBox(width: double.infinity, child: FilledButton.icon(
               onPressed: (googleSyncEnabled && !_isSyncing) ? _forceFullResync : null,
@@ -3865,108 +3868,58 @@ Future<void> _forceFullResync() async {
             SizedBox(width: double.infinity, child: OutlinedButton.icon(
               onPressed: () async {
                 final calId = _rosterCalendarId;
-                if (calId == null || calId.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('尚未選擇日曆')));
-                  return;
-                }
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text('正在查詢日曆 ID: $calId ...'),
-                  duration: const Duration(seconds: 2),
-                ));
-
+                if (calId == null || calId.isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('尚未選擇日曆'))); return; }
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('正在查詢日曆 ID: $calId ...'), duration: const Duration(seconds: 2)));
                 final start = DateTime.now().subtract(const Duration(days: 365));
                 final end = DateTime.now().add(const Duration(days: 365));
+                var events = await _safeRetrieveEvents(start, end);
+                final all = events;
+                final total = all.length;
+                final withTag = all.where((e) => (e.description ?? '').contains('[RosterPro]')).length;
+                final descNull = all.where((e) => e.description == null || e.description!.isEmpty).length;
+                final descNotNull = total - descNull;
 
-                // ✅ 優先走原生 Channel（繞過 device_calendar 的 Samsung bug）
-                List<Map<String, dynamic>> nativeEvents = [];
-                String nativeError = '';
-                try {
-                  nativeEvents = await _queryEventsNative(start, end);
-                } catch (e) {
-                  nativeError = e.toString();
-                }
-
-                // 若原生失敗才退回 device_calendar
-                List<Event> pluginEvents = [];
-                bool usedNative = nativeEvents.isNotEmpty;
-                if (!usedNative && nativeError.isEmpty) {
-                  try {
-                    final r = await _calendarPlugin.retrieveEvents(
-                      calId,
-                      RetrieveEventsParams(startDate: start, endDate: end),
-                    );
-                    pluginEvents = r.data ?? [];
-                  } catch (_) {}
-                }
-
-                StringBuffer sb = StringBuffer();
-                sb.writeln('日曆 ID: $calId');
-                sb.writeln('日曆名稱: $_rosterCalendarName');
-                sb.writeln('查詢範圍: ${DateFormat('yyyy-MM-dd').format(start)} ~ ${DateFormat('yyyy-MM-dd').format(end)}');
-                sb.writeln('');
-                if (nativeError.isNotEmpty) {
-                  sb.writeln('⚠️ 原生查詢錯誤: $nativeError');
-                }
-                sb.writeln('使用來源: ${usedNative ? "✅ 原生 Channel" : "❌ device_calendar (fallback)"}');
-                sb.writeln('');
-
-                if (usedNative) {
-                  sb.writeln('=== 原生 Channel 查詢結果 (${nativeEvents.length} 條) ===');
-                  int n = 0;
-                  int withTag = 0;
-                  int descEmpty = 0;
-                  for (var m in nativeEvents) {
-                    final desc = (m['description'] ?? '').toString();
-                    if (desc.contains('[RosterPro]')) withTag++;
-                    if (desc.isEmpty) descEmpty++;
-                    if (n >= 20) continue;
-                    n++;
-                    sb.writeln('[$n] id: ${m['eventId']}');
-                    sb.writeln('     title: ${m['title']}');
-                    sb.writeln('     desc : ${desc.isEmpty ? "<<空>>" : desc.replaceAll("\n", " / ")}');
-                    sb.writeln('     start: ${m['startMillis']}');
-                    sb.writeln('     end  : ${m['endMillis']}');
-                    sb.writeln('     allDay: ${m['allDay']}');
-                    sb.writeln('');
-                  }
-                  if (nativeEvents.length > 20) sb.writeln('... (還有 ${nativeEvents.length - 20} 條)');
-                  sb.writeln('');
-                  sb.writeln('含 [RosterPro]: $withTag');
-                  sb.writeln('description 為空: $descEmpty');
-                } else {
-                  sb.writeln('=== device_calendar 查詢結果 (${pluginEvents.length} 條) ===');
-                  int n = 0;
-                  int withTag = 0;
-                  int descEmpty = 0;
-                  for (var e in pluginEvents) {
-                    final desc = e.description ?? '';
-                    if (desc.contains('[RosterPro]')) withTag++;
-                    if (desc.isEmpty) descEmpty++;
-                    if (n >= 20) continue;
-                    n++;
-                    sb.writeln('[$n] id: ${e.eventId}');
-                    sb.writeln('     title: ${e.title}');
-                    sb.writeln('     desc : ${desc.isEmpty ? "<<空>>" : desc.replaceAll("\n", " / ")}');
-                    sb.writeln('     allDay: ${e.allDay}');
-                    sb.writeln('');
-                  }
-                  if (pluginEvents.length > 20) sb.writeln('... (還有 ${pluginEvents.length - 20} 條)');
-                  sb.writeln('');
-                  sb.writeln('含 [RosterPro]: $withTag');
-                  sb.writeln('description 為空: $descEmpty');
+                StringBuffer samples = StringBuffer();
+                int n = 0;
+                for (var e in all) {
+                  if (n >= 8) break;
+                  n++;
+                  final d = (e.description ?? '').replaceAll('\n', ' / ');
+                  final isEmpty = e.description == null || e.description!.isEmpty;
+                  final shortD = d.length > 60 ? '${d.substring(0, 60)}...' : d;
+                  samples.writeln('[$n] title: ${e.title}');
+                  samples.writeln('     desc : ${isEmpty ? '<<空>>' : shortD}');
+                  samples.writeln('     id   : ${e.eventId}');
+                  samples.writeln();
                 }
 
                 if (mounted) {
                   showDialog(context: context, builder: (ctx) => AlertDialog(
                     title: const Text('診斷結果'),
                     content: SizedBox(
-                      width: 540,
-                      height: 600,
-                      child: SingleChildScrollView(
-                        child: SelectableText(
-                          sb.toString(),
-                          style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
-                        ),
+                      width: 520,
+                      height: 560,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('日曆 ID: $calId\n名稱: $_rosterCalendarName', style: const TextStyle(fontSize: 12)),
+                          const Divider(),
+                          Text('總事件數: $total', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          Text('description 為空: $descNull', style: TextStyle(color: descNull > 0 ? Colors.red : Colors.green, fontWeight: FontWeight.bold)),
+                          Text('description 有值: $descNotNull'),
+                          Text('含 [RosterPro]: $withTag', style: TextStyle(color: withTag > 0 ? Colors.green : Colors.red, fontWeight: FontWeight.bold)),
+                          const Divider(),
+                          const Text('前 8 條事件樣本:', style: TextStyle(fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 4),
+                          Expanded(
+                            child: SingleChildScrollView(
+                              child: Text(
+                                samples.toString(),
+                                style: const TextStyle(fontSize: 10, fontFamily: 'monospace'),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('關閉'))],
@@ -4249,7 +4202,7 @@ Future<void> _forceFullResync() async {
                 SizedBox(height: 16),
                 Text('4. 設定與同步', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
-                Text('• 「假期數據管理」：可設定每年的假期天數、微調，系統會自動計算餘額。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：掃描範圍 = App 排班日期 ∪ 今天~今天+5年，只刪 [RosterPro] 事件。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
+                Text('• 「假期數據管理」：可設定每年的假期天數、微調，系統會自動計算餘額。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：掃描範圍 2000~2100 年，只刪 [RosterPro] 事件。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
                 SizedBox(height: 16),
                 Text('5. 常見問題', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
