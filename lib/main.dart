@@ -277,6 +277,7 @@ class MainPageState extends State<MainPage> {
     }
   }
 
+  // ✅ 修正：查詢失敗時拋異常，讓呼叫端知道「查詢失敗」，而不是「查詢成功但無事件」
   Future<List<Event>> _safeRetrieveEvents(DateTime start, DateTime end) async {
     final calId = _requireCalendarId();
     try {
@@ -288,7 +289,7 @@ class MainPageState extends State<MainPage> {
         _writeDebugLog('[原生 queryEvents 超時] $start ~ $end');
         return null;
       });
-      
+
       if (res != null) {
         return res.map((e) {
           final map = Map<String, dynamic>.from(e as Map);
@@ -305,20 +306,20 @@ class MainPageState extends State<MainPage> {
           );
         }).toList();
       }
+      await _writeDebugLog('[原生 queryEvents 超時] $start ~ $end，降級使用 device_calendar');
     } catch (e) {
       await _writeDebugLog('[原生 queryEvents 失敗] $e，降級使用 device_calendar');
     }
 
-    try {
-      final res = await _calendarPlugin.retrieveEvents(
-        calId,
-        RetrieveEventsParams(startDate: start, endDate: end),
-      );
-      return res.data ?? [];
-    } catch (e) {
-      await _writeDebugLog('[retrieveEvents] calId=$calId $start~$end 失敗: $e');
-      return [];
+    // device_calendar 降級：失敗時拋異常
+    final res = await _calendarPlugin.retrieveEvents(
+      calId,
+      RetrieveEventsParams(startDate: start, endDate: end),
+    );
+    if (!res.isSuccess) {
+      throw 'device_calendar retrieveEvents 失敗: ${res.toString()}';
     }
+    return res.data ?? [];
   }
 
   Future<void> _writeDebugLog(String message) async {
@@ -645,6 +646,7 @@ DateTime _effectiveCalcStart(DateTime fallback) {
   if (carryAnchorWeekKey.isNotEmpty) {
     final parsed = _parseWeekKey(carryAnchorWeekKey);
     if (parsed != null) return parsed;
+    _writeDebugLog('[累計起始週] 解析失敗: "$carryAnchorWeekKey"，改用最早排班週');
   }
   DateTime? globalStart;
   for (String k in roster.keys) {
@@ -660,8 +662,8 @@ DateTime _effectiveCalcStart(DateTime fallback) {
 }
 
 void _ensureAnchorWeek() {
-  if (carryAnchorWeekKey.isNotEmpty) return;
   if (roster.isEmpty) return;
+
   DateTime? globalStart;
   for (String k in roster.keys) {
     try {
@@ -669,8 +671,21 @@ void _ensureAnchorWeek() {
       if (globalStart == null || dt.isBefore(globalStart)) globalStart = dt;
     } catch (_) {}
   }
-  if (globalStart != null) {
-    carryAnchorWeekKey = isoWeekKey(globalStart);
+  if (globalStart == null) return;
+
+  final earliestKey = isoWeekKey(globalStart);
+
+  if (carryAnchorWeekKey.isEmpty) {
+    carryAnchorWeekKey = earliestKey;
+    _writeDebugLog('[累計起始週] 首次設定為 $earliestKey');
+    return;
+  }
+
+  // 若 roster 中出現比 anchor 更早的排班，往前移 anchor
+  final anchorDate = _parseWeekKey(carryAnchorWeekKey);
+  if (anchorDate != null && anchorDate.isAfter(globalStart)) {
+    _writeDebugLog('[累計起始週] 偵測到更早排班 $earliestKey，anchor 由 $carryAnchorWeekKey 往前移');
+    carryAnchorWeekKey = earliestKey;
   }
 }
 
@@ -868,27 +883,27 @@ void _markDirty(String dateKey) { _dirtyDates.add(dateKey); }
 
 DateTime _calcScanStart() {
   int currentYear = DateTime.now().year;
-  int minYear = currentYear - 10;
+  int minYear = currentYear - 2;
   if (roster.isNotEmpty) {
     for (String k in roster.keys) {
       if (k.length >= 4) {
         int? y = int.tryParse(k.substring(0, 4));
-        if (y != null && y - 2 < minYear) minYear = y - 2;
+        if (y != null && y - 1 < minYear) minYear = y - 1;
       }
     }
   }
-  if (minYear > 2000) minYear = 2000;
+  if (minYear < 2000) minYear = 2000;
   return DateTime(minYear, 1, 1);
 }
 
 DateTime _calcScanEnd() {
   int currentYear = DateTime.now().year;
-  int maxYear = currentYear + 30;
+  int maxYear = currentYear + 2;
   if (roster.isNotEmpty) {
     for (String k in roster.keys) {
       if (k.length >= 4) {
         int? y = int.tryParse(k.substring(0, 4));
-        if (y != null && y + 2 > maxYear) maxYear = y + 2;
+        if (y != null && y + 1 > maxYear) maxYear = y + 1;
       }
     }
   }
@@ -1052,9 +1067,6 @@ Future<void> syncDateRange() async {
   await sp.setStringList('dirtyDates', _dirtyDates.toList());
 }
 
-// ✅ 同步在背景進行，完成後顯示輕量提示
-// ✅ 核心修復：增量同步時會驗證 _googleEventIdMap 記錄的 eventId 是否還存在於日曆中
-//     若不存在（被用戶手動刪除），會清除記錄並改為新建事件，解決 eventId 僵屍問題
 Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) async {
   if (!googleSyncEnabled && !silent) {
     bool? en = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
@@ -1115,7 +1127,8 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
         try {
           events = await _safeRetrieveEvents(startScan, endScan);
         } catch (e) {
-          await _writeDebugLog('[同步] 掃描 $year 年失敗: $e');
+          await _writeDebugLog('[同步] ⚠️ 掃描 $year 年失敗，跳過該年：$e');
+          continue;
         }
 
         for (var e in events) {
@@ -1175,7 +1188,8 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
           }
           await _writeDebugLog('[同步] 掃描完成，共找到 ${_googleEventIdMap.length} 條現有事件');
         } catch (e) {
-          await _writeDebugLog('[同步] 掃描重建失敗: $e');
+          // 掃描失敗 → 保留舊 map，避免所有事件被重建
+          await _writeDebugLog('[同步] ⚠️ 掃描重建失敗，保留現有 map：$e');
         }
       }
 
@@ -1188,7 +1202,14 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
         DateTime queryStart = DateTime(date.year, date.month, date.day, 0, 0, 0).subtract(const Duration(hours: 24));
         DateTime queryEnd = DateTime(date.year, date.month, date.day, 23, 59, 59).add(const Duration(hours: 24));
 
-        final eventsInRange = await _safeRetrieveEvents(queryStart, queryEnd);
+        // ✅ 查詢失敗 → 跳過該天，保留 dirtyDates，下次重試
+        List<Event> eventsInRange;
+        try {
+          eventsInRange = await _safeRetrieveEvents(queryStart, queryEnd);
+        } catch (e) {
+          await _writeDebugLog('[同步] ⚠️ $dateKey 查詢失敗，跳過該天並保留 dirty：$e');
+          continue;
+        }
 
         List<Event> rosterEvents = eventsInRange.where((e) {
           final desc = e.description ?? '';
@@ -1198,6 +1219,9 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
           }
           final title = (e.title ?? '').trim();
           if (title.isEmpty) return false;
+          // 沒有 [RosterPro] 標籤的事件：必須當天，才認領（避免誤刪相鄰日手動事件）
+          final eDateKey = e.start != null ? DateFormat('yyyy-MM-dd').format(e.start!.toLocal()) : null;
+          if (eDateKey != dateKey) return false;
           String t = title.contains(' | ') ? title.split(' | ')[0].trim() : title;
           if (RegExp(r'^\S+\s+\d{1,2}:\d{2}-\d{1,2}:\d{2}').hasMatch(t)) return true;
           return RegExp(r'^\S+$').hasMatch(t);
@@ -1222,11 +1246,7 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
         final newStart = isAllDayNow ? '全天' : newDef.start;
         final newEnd = isAllDayNow ? '全天' : newDef.end;
 
-        // ✅ ============================================================
         // ✅ 核心修復：驗證 _googleEventIdMap 記錄的 eventId 是否還存在於日曆中
-        // ✅ 若不存在（被用戶手動刪除），清除記錄並改為新建事件
-        // ✅ 徹底解決 eventId 僵屍問題
-        // ✅ ============================================================
         String? matchedEventId = _googleEventIdMap[dateKey];
         if (matchedEventId != null) {
           final stillExists = rosterEvents.any((e) => e.eventId == matchedEventId);
@@ -1400,7 +1420,13 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
             .subtract(const Duration(hours: 24));
         DateTime endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59);
 
-        final eventsOnDay = await _safeRetrieveEvents(startOfDay, endOfDay);
+        List<Event> eventsOnDay;
+        try {
+          eventsOnDay = await _safeRetrieveEvents(startOfDay, endOfDay);
+        } catch (e) {
+          await _writeDebugLog('[強制清理] $dateKey 查詢失敗，跳過該天：$e');
+          continue;
+        }
 
         List<Event> rosterEvents = eventsOnDay.where((e) {
           final desc = e.description ?? '';
@@ -1595,7 +1621,13 @@ Future<void> _purgeRosterProInRange() async {
           .subtract(const Duration(hours: 24));
       DateTime endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59);
 
-      final eventsOnDay = await _safeRetrieveEvents(startOfDay, endOfDay);
+      List<Event> eventsOnDay;
+      try {
+        eventsOnDay = await _safeRetrieveEvents(startOfDay, endOfDay);
+      } catch (e) {
+        await _writeDebugLog('[按範圍清除] $dateKey 查詢失敗，跳過該天：$e');
+        continue;
+      }
 
       final Map<String, Event> toDelete = {};
       for (var e in eventsOnDay) {
@@ -2586,6 +2618,7 @@ void showDetail(DateTime day) {
                   if (exHVal != null && exHVal != 0) rosterExtraHrs[k] = exHVal; else rosterExtraHrs.remove(k);
                 });
                 _markDirty(k);
+                _ensureAnchorWeek(); // ✅ 修正：首次編輯也能設定 anchor
                 await save();
                 await _syncNow();
               }, child: const Text('儲存'))),
@@ -3889,8 +3922,15 @@ void showLeaveManagementDialog() {
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('正在查詢日曆 ID: $calId ...'), duration: const Duration(seconds: 2)));
                 final start = DateTime.now().subtract(const Duration(days: 365));
                 final end = DateTime.now().add(const Duration(days: 365));
-                var events = await _safeRetrieveEvents(start, end);
-                final all = events;
+                List<Event> all;
+                try {
+                  all = await _safeRetrieveEvents(start, end);
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('查詢失敗：$e'), backgroundColor: Colors.red));
+                  }
+                  return;
+                }
                 final total = all.length;
                 final withTag = all.where((e) => (e.description ?? '').contains('[RosterPro]')).length;
                 final descNull = all.where((e) => e.description == null || e.description!.isEmpty).length;
