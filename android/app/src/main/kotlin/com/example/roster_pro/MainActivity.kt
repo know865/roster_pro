@@ -19,10 +19,13 @@ import java.io.File
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.roster/calendar_real"
+    private var methodChannel: MethodChannel? = null
+    private var pendingSelectedDate: String? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+        methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        methodChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
                 "getCalendars" -> handleGetCalendars(result)
                 "scanImage" -> handleScanImage(call.argument<String>("path"), result)
@@ -40,13 +43,9 @@ class MainActivity : FlutterActivity() {
                     if (calendarId == null || startMillis == null || endMillis == null) {
                         result.error("BAD_ARGS", "calendarId/startMillis/endMillis required", null)
                     } else {
-                        // ✅ 修改：放入子線程執行，避免主線程卡死
                         Thread {
-                            try {
-                                handleQueryEvents(calendarId, startMillis, endMillis, result)
-                            } catch (e: Exception) {
-                                runOnUiThread { result.error("QUERY_FAIL", e.message, null) }
-                            }
+                            try { handleQueryEvents(calendarId, startMillis, endMillis, result) }
+                            catch (e: Exception) { runOnUiThread { result.error("QUERY_FAIL", e.message, null) } }
                         }.start()
                     }
                 }
@@ -56,18 +55,41 @@ class MainActivity : FlutterActivity() {
                     if (calendarId == null || eventId == null) {
                         result.error("BAD_ARGS", "calendarId/eventId required", null)
                     } else {
-                        // ✅ 修改：放入子線程執行
                         Thread {
-                            try {
-                                handleDeleteEvent(calendarId, eventId, result)
-                            } catch (e: Exception) {
-                                runOnUiThread { result.error("DELETE_FAIL", e.message, null) }
-                            }
+                            try { handleDeleteEvent(calendarId, eventId, result) }
+                            catch (e: Exception) { runOnUiThread { result.error("DELETE_FAIL", e.message, null) } }
                         }.start()
                     }
                 }
+                // ✅ 新增：Flutter 啟動完成後，主動向原生索取待處理的 widget 日期
+                "getPendingWidgetDate" -> {
+                    val d = pendingSelectedDate
+                    pendingSelectedDate = null
+                    result.success(d)
+                }
                 else -> result.notImplemented()
             }
+        }
+
+        // ✅ 處理 app 從「完全關閉」狀態被 widget 啟動
+        handleIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        val selectedDate = intent?.getStringExtra("selected_date")
+        if (selectedDate != null && selectedDate.isNotEmpty) {
+            if (methodChannel != null) {
+                // Flutter 已啟動，直接推送
+                methodChannel?.invokeMethod("onWidgetDateSelected", selectedDate)
+            }
+            // 暫存以防 Flutter 尚未準備好
+            pendingSelectedDate = selectedDate
         }
     }
 
@@ -203,7 +225,6 @@ class MainActivity : FlutterActivity() {
                     ))
                 }
             }
-            // ✅ 修改：回到主線程回調
             runOnUiThread { result.success(events) }
         } catch (e: Exception) {
             runOnUiThread { result.error("QUERY_FAIL", e.message, null) }
