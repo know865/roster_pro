@@ -2904,29 +2904,7 @@ void showDetail(DateTime day) {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            // ====== 修改處：標題與鬧鐘狀態圖示 ======
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Flexible(
-                  child: Text(
-                    '${DateFormat('yyyy-MM-dd EEE').format(day)} ${isHoliday(day) ? ' [${holidayName(day)}]' : ''}',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-                if (alarmApplicable) ...[
-                  const SizedBox(width: 8),
-                  Icon(
-                    isMuted ? Icons.alarm_off : Icons.alarm_on,
-                    color: isMuted ? Colors.grey : Colors.pink,
-                    size: 22,
-                  ),
-                ],
-              ],
-            ),
-            // ====== 修改結束 ======
-            
+            Text('${DateFormat('yyyy-MM-dd EEE').format(day)} ${isHoliday(day) ? ' [${holidayName(day)}]' : ''}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Wrap(spacing: 8, children: defs.keys.map((c) => ChoiceChip(label: Text(c), selected: cur == c, onSelected: (_) => setM(() => cur = c))).toList()),
 
@@ -3915,13 +3893,27 @@ void showLeaveManagementDialog() {
                               ],
                             ),
                             const SizedBox(height: 6),
+                            // ====== 修改處：白色詳細卡中的班次標籤與鬧鐘狀態 ======
                             Row(
                               children: [
                                 if (selDef != null)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                    decoration: BoxDecoration(color: selDef.color, borderRadius: BorderRadius.circular(6)),
-                                    child: Text('${selDef.code} ${selDef.label}', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(color: selDef.color, borderRadius: BorderRadius.circular(6)),
+                                        child: Text('${selDef.code} ${selDef.label}', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                                      ),
+                                      if (selDef.alarmEnabled && !selDef.isAllDay) ...[
+                                        const SizedBox(width: 6),
+                                        Icon(
+                                          rosterAlarmMuted[selKey] == true ? Icons.alarm_off : Icons.alarm_on,
+                                          color: rosterAlarmMuted[selKey] == true ? Colors.grey : Colors.pink,
+                                          size: 18,
+                                        ),
+                                      ],
+                                    ],
                                   )
                                 else if (selLeave != null)
                                   Container(
@@ -3939,7 +3931,8 @@ void showLeaveManagementDialog() {
                                 if (extraType.isNotEmpty)
                                   Text('[$extraType]', style: const TextStyle(fontSize: 12, color: Colors.deepPurple, fontWeight: FontWeight.bold)),
                               ],
-                            )
+                            ),
+                            // ====== 修改結束 ======
                           ],
                         ),
                       ),
