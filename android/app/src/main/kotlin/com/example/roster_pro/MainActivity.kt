@@ -1,8 +1,14 @@
 package com.example.roster_pro
 
 import android.Manifest
+import android.app.AlarmManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
+import android.content.BroadcastReceiver
 import android.content.ContentUris
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
@@ -11,6 +17,8 @@ import android.os.Build
 import android.os.Environment
 import android.provider.CalendarContract
 import android.provider.Settings
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -19,79 +27,147 @@ import java.io.File
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.roster/calendar_real"
-    private var methodChannel: MethodChannel? = null
-    private var pendingSelectedDate: String? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
-        methodChannel?.setMethodCallHandler { call, result ->
+        ensureNotificationChannel()
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getCalendars" -> handleGetCalendars(result)
                 "scanImage" -> handleScanImage(call.argument<String>("path"), result)
                 "requestManageStorage" -> handleRequestManageStorage(result)
                 "updateWidget" -> handleUpdateWidget(result)
+                "scheduleAlarm" -> handleScheduleAlarm(call, result)
+                "cancelAllAlarms" -> handleCancelAllAlarms(result)
                 "deleteAllEventsInCalendar" -> {
                     val calendarId = call.argument<String>("calendarId")
                     if (calendarId == null) result.error("NO_CAL_ID", "Calendar ID is null", null)
                     else handleDeleteAllEvents(calendarId, result)
                 }
-                "queryEvents" -> {
-                    val calendarId = call.argument<String>("calendarId")
-                    val startMillis = call.argument<Number>("startMillis")?.toLong()
-                    val endMillis = call.argument<Number>("endMillis")?.toLong()
-                    if (calendarId == null || startMillis == null || endMillis == null) {
-                        result.error("BAD_ARGS", "calendarId/startMillis/endMillis required", null)
-                    } else {
-                        Thread {
-                            try { handleQueryEvents(calendarId, startMillis, endMillis, result) }
-                            catch (e: Exception) { runOnUiThread { result.error("QUERY_FAIL", e.message, null) } }
-                        }.start()
-                    }
-                }
-                "deleteEvent" -> {
-                    val calendarId = call.argument<String>("calendarId")
-                    val eventId = call.argument<String>("eventId")
-                    if (calendarId == null || eventId == null) {
-                        result.error("BAD_ARGS", "calendarId/eventId required", null)
-                    } else {
-                        Thread {
-                            try { handleDeleteEvent(calendarId, eventId, result) }
-                            catch (e: Exception) { runOnUiThread { result.error("DELETE_FAIL", e.message, null) } }
-                        }.start()
-                    }
-                }
-                // ✅ 新增：Flutter 啟動完成後，主動向原生索取待處理的 widget 日期
-                "getPendingWidgetDate" -> {
-                    val d = pendingSelectedDate
-                    pendingSelectedDate = null
-                    result.success(d)
-                }
                 else -> result.notImplemented()
             }
         }
-
-        // ✅ 處理 app 從「完全關閉」狀態被 widget 啟動
-        handleIntent(intent)
     }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        handleIntent(intent)
-    }
+    // ==================== 通知頻道 ====================
 
-    private fun handleIntent(intent: Intent?) {
-        val selectedDate = intent?.getStringExtra("selected_date")
-        if (selectedDate != null && selectedDate.isNotEmpty) {
-            if (methodChannel != null) {
-                // Flutter 已啟動，直接推送
-                methodChannel?.invokeMethod("onWidgetDateSelected", selectedDate)
+    private fun ensureNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                ALARM_CHANNEL_ID,
+                "上班提醒",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "班次上班前的提醒通知"
+                enableVibration(true)
+                setShowBadge(true)
             }
-            // 暫存以防 Flutter 尚未準備好
-            pendingSelectedDate = selectedDate
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(channel)
         }
     }
+
+    // ==================== 鬧鐘排程 ====================
+
+    private fun handleScheduleAlarm(call: MethodChannel.MethodCall, result: MethodChannel.Result) {
+        try {
+            val alarmMillis = call.argument<Long>("alarmMillis")
+            val requestCode = call.argument<Int>("requestCode") ?: 0
+            val title = call.argument<String>("title") ?: "上班提醒"
+            val body = call.argument<String>("body") ?: ""
+
+            if (alarmMillis == null) {
+                result.error("NO_TIME", "alarmMillis is null", null)
+                return
+            }
+
+            val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val intent = Intent(this, AlarmReceiver::class.java).apply {
+                putExtra("title", title)
+                putExtra("body", body)
+                putExtra("requestCode", requestCode)
+            }
+            val pendingIntent = PendingIntent.getBroadcast(
+                this,
+                requestCode,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    // Android 12+：需要 SCHEDULE_EXACT_ALARM 或 USE_EXACT_ALARM
+                    if (alarmManager.canScheduleExactAlarms()) {
+                        alarmManager.setExactAndAllowWhileIdle(
+                            AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent
+                        )
+                    } else {
+                        // 沒有精確鬧鐘權限 → 降級為非精確（會由系統自動調整時間）
+                        alarmManager.setAndAllowWhileIdle(
+                            AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent
+                        )
+                    }
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent
+                    )
+                } else {
+                    alarmManager.setExact(
+                        AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent
+                    )
+                }
+            } catch (_: SecurityException) {
+                // 萬一還是被拒 → 用最普通的 set()
+                alarmManager.set(AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent)
+            }
+
+            // 記錄 requestCode 以便之後全部取消
+            val prefs = getSharedPreferences(ALARM_PREFS, Context.MODE_PRIVATE)
+            val codes = prefs.getStringSet(ALARM_CODES_KEY, emptySet())?.toMutableSet() ?: mutableSetOf()
+            codes.add(requestCode.toString())
+            prefs.edit().putStringSet(ALARM_CODES_KEY, codes).apply()
+
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("ALARM_FAIL", e.message, null)
+        }
+    }
+
+    private fun handleCancelAllAlarms(result: MethodChannel.Result) {
+        try {
+            val prefs = getSharedPreferences(ALARM_PREFS, Context.MODE_PRIVATE)
+            val codes = prefs.getStringSet(ALARM_CODES_KEY, emptySet()) ?: emptySet()
+            val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            var cancelled = 0
+            for (codeStr in codes) {
+                val code = codeStr.toIntOrNull() ?: continue
+                val intent = Intent(this, AlarmReceiver::class.java)
+                val pendingIntent = PendingIntent.getBroadcast(
+                    this,
+                    code,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                alarmManager.cancel(pendingIntent)
+                pendingIntent.cancel()
+                cancelled++
+            }
+            prefs.edit().remove(ALARM_CODES_KEY).apply()
+            // 同時清掉可能殘留的通知
+            try {
+                val nm = NotificationManagerCompat.from(this)
+                for (codeStr in codes) {
+                    val code = codeStr.toIntOrNull() ?: continue
+                    nm.cancel(code)
+                }
+            } catch (_: Exception) {}
+            result.success(cancelled)
+        } catch (e: Exception) {
+            result.error("CANCEL_FAIL", e.message, null)
+        }
+    }
+
+    // ==================== 原有方法（保持不變） ====================
 
     private fun handleUpdateWidget(result: MethodChannel.Result) {
         try {
@@ -162,126 +238,10 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) { result.error("STORAGE_FAIL", e.message, null) }
     }
 
-    private fun handleQueryEvents(
-        calendarId: String,
-        startMillis: Long,
-        endMillis: Long,
-        result: MethodChannel.Result
-    ) {
-        try {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
-                runOnUiThread { result.error("PERMISSION", "No read calendar permission", null) }
-                return
-            }
-
-            val events = mutableListOf<Map<String, Any?>>()
-            val projection = arrayOf(
-                CalendarContract.Events._ID,
-                CalendarContract.Events.TITLE,
-                CalendarContract.Events.DESCRIPTION,
-                CalendarContract.Events.DTSTART,
-                CalendarContract.Events.DTEND,
-                CalendarContract.Events.ALL_DAY,
-                CalendarContract.Events.CALENDAR_ID,
-                CalendarContract.Events.DELETED
-            )
-            val selection = "(${CalendarContract.Events.CALENDAR_ID} = ?) AND " +
-                    "(${CalendarContract.Events.DTSTART} < ?) AND " +
-                    "((${CalendarContract.Events.DTEND} > ?) OR (${CalendarContract.Events.DTEND} IS NULL))"
-            val selectionArgs = arrayOf(calendarId, endMillis.toString(), startMillis.toString())
-
-            val cursor = contentResolver.query(
-                CalendarContract.Events.CONTENT_URI,
-                projection,
-                selection,
-                selectionArgs,
-                "${CalendarContract.Events.DTSTART} ASC"
-            )
-
-            cursor?.use {
-                val idIdx = it.getColumnIndexOrThrow(CalendarContract.Events._ID)
-                val titleIdx = it.getColumnIndexOrThrow(CalendarContract.Events.TITLE)
-                val descIdx = it.getColumnIndexOrThrow(CalendarContract.Events.DESCRIPTION)
-                val dtStartIdx = it.getColumnIndexOrThrow(CalendarContract.Events.DTSTART)
-                val dtEndIdx = it.getColumnIndexOrThrow(CalendarContract.Events.DTEND)
-                val allDayIdx = it.getColumnIndexOrThrow(CalendarContract.Events.ALL_DAY)
-                val calIdIdx = it.getColumnIndexOrThrow(CalendarContract.Events.CALENDAR_ID)
-                val deletedIdx = it.getColumnIndexOrThrow(CalendarContract.Events.DELETED)
-
-                while (it.moveToNext()) {
-                    if (!it.isNull(deletedIdx) && it.getInt(deletedIdx) == 1) continue
-
-                    val dtStart = it.getLong(dtStartIdx)
-                    val dtEnd = if (it.isNull(dtEndIdx)) dtStart else it.getLong(dtEndIdx)
-
-                    events.add(mapOf(
-                        "eventId" to it.getLong(idIdx).toString(),
-                        "title" to it.getString(titleIdx),
-                        "description" to it.getString(descIdx),
-                        "startMillis" to dtStart,
-                        "endMillis" to dtEnd,
-                        "allDay" to (it.getInt(allDayIdx) == 1),
-                        "calendarId" to it.getString(calIdIdx)
-                    ))
-                }
-            }
-            runOnUiThread { result.success(events) }
-        } catch (e: Exception) {
-            runOnUiThread { result.error("QUERY_FAIL", e.message, null) }
-        }
-    }
-
-    private fun handleDeleteEvent(
-        calendarId: String,
-        eventId: String,
-        result: MethodChannel.Result
-    ) {
-        try {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
-                runOnUiThread { result.error("PERMISSION", "No write calendar permission", null) }
-                return
-            }
-
-            val eventIdLong = eventId.toLongOrNull()
-            if (eventIdLong == null) {
-                runOnUiThread { result.error("BAD_ID", "eventId is not a number: $eventId", null) }
-                return
-            }
-
-            val checkProjection = arrayOf(CalendarContract.Events.CALENDAR_ID)
-            val checkSelection = "${CalendarContract.Events._ID} = ?"
-            val checkArgs = arrayOf(eventId)
-            var belongs = false
-            contentResolver.query(
-                CalendarContract.Events.CONTENT_URI,
-                checkProjection,
-                checkSelection,
-                checkArgs,
-                null
-            )?.use { c ->
-                if (c.moveToFirst()) {
-                    val calId = c.getString(0)
-                    belongs = (calId == calendarId)
-                }
-            }
-            if (!belongs) {
-                runOnUiThread { result.success(false) }
-                return
-            }
-
-            val eventUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventIdLong)
-            val rows = contentResolver.delete(eventUri, null, null)
-            runOnUiThread { result.success(rows > 0) }
-        } catch (e: Exception) {
-            runOnUiThread { result.error("DELETE_FAIL", e.message, null) }
-        }
-    }
-
     private fun handleDeleteAllEvents(calendarId: String, result: MethodChannel.Result) {
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
-                runOnUiThread { result.error("PERMISSION", "No write calendar permission", null) }
-                return
+                result.error("PERMISSION", "No write calendar permission", null); return
             }
             val projection = arrayOf(CalendarContract.Events._ID)
             val selection = "${CalendarContract.Events.CALENDAR_ID} = ?"
@@ -302,7 +262,50 @@ class MainActivity : FlutterActivity() {
                 index = end
                 if (index < eventIds.size) try { Thread.sleep(200) } catch (_: InterruptedException) {}
             }
-            runOnUiThread { result.success(deleted) }
-        } catch (e: Exception) { runOnUiThread { result.error("DELETE_FAIL", e.message, null) } }
+            result.success(deleted)
+        } catch (e: Exception) { result.error("DELETE_FAIL", e.message, null) }
+    }
+
+    companion object {
+        const val ALARM_CHANNEL_ID = "roster_alarm_channel"
+        const val ALARM_PREFS = "roster_alarm_prefs"
+        const val ALARM_CODES_KEY = "alarm_request_codes"
+    }
+}
+
+// ==================== 鬧鐘觸發接收器 ====================
+class AlarmReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val title = intent.getStringExtra("title") ?: "上班提醒"
+        val body = intent.getStringExtra("body") ?: ""
+        val requestCode = intent.getIntExtra("requestCode", 0)
+
+        val notificationManager = NotificationManagerCompat.from(context)
+
+        // 點擊通知開啟 App
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            requestCode,
+            launchIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, MainActivity.ALARM_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+
+        try {
+            notificationManager.notify(requestCode, builder.build())
+        } catch (_: SecurityException) {
+            // 沒有通知權限（Android 13+ 的 POST_NOTIFICATIONS），忽略
+        }
     }
 }
