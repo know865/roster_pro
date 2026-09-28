@@ -417,6 +417,45 @@ void initState() {
   _loadVersion();
   _requestStoragePermission();
 
+  // ✅ 監聽 widget 傳來的日期選擇事件（App 在前台或剛被喚起）
+  _realChannel.setMethodCallHandler((call) async {
+    if (call.method == 'onWidgetDateSelected') {
+      final dateStr = call.arguments as String?;
+      if (dateStr != null && dateStr.isNotEmpty) {
+        try {
+          final dt = DateTime.parse(dateStr);
+          if (mounted) {
+            setState(() {
+              selectedDay = dt;
+              focused = DateTime(dt.year, dt.month, 1);
+              tab = 0;
+            });
+          }
+        } catch (e) {
+          await _writeDebugLog('[widget] 解析日期失敗: $dateStr, $e');
+        }
+      }
+    }
+    return null;
+  });
+
+  // ✅ App 啟動時，主動向原生索取 pending 的 widget 日期
+  Future.delayed(const Duration(milliseconds: 800), () async {
+    try {
+      final d = await _realChannel.invokeMethod('getPendingWidgetDate');
+      if (d is String && d.isNotEmpty) {
+        final dt = DateTime.parse(d);
+        if (mounted) {
+          setState(() {
+            selectedDay = dt;
+            focused = DateTime(dt.year, dt.month, 1);
+            tab = 0;
+          });
+        }
+      }
+    } catch (_) {}
+  });
+
   HomeWidget.registerInteractivityCallback(backgroundCallback);
 
   load().then((_) async {
