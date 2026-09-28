@@ -480,6 +480,10 @@ Future<void> _requestStoragePermission() async {
   if (!await Permission.manageExternalStorage.isGranted) {
     await Permission.manageExternalStorage.request();
   }
+  // 請求通知權限（Android 13+ 會彈出對話框；其他版本自動回傳已授予）
+  if (!await Permission.notification.isGranted) {
+    await Permission.notification.request();
+  }
 }
 
 @override
