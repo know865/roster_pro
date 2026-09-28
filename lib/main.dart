@@ -180,6 +180,7 @@ class MainPageState extends State<MainPage> {
   Map<String, double> rosterOt = {};
   Map<String, double> rosterExtra = {};
   Map<String, double> rosterExtraHrs = {};
+  Map<String, bool> rosterAlarmMuted = {}; // dateKey -> true 表示該日臨時關閉鬧鐘
 
   List<LeaveDef> leaveDefs = [
     LeaveDef('AL', 'Annual Leave', Colors.teal),
@@ -366,6 +367,7 @@ class MainPageState extends State<MainPage> {
     DateTime today = DateTime(now.year, now.month, now.day);
     int count = 0;
     int skipped = 0;
+    int mutedCount = 0;
 
     for (var entry in roster.entries) {
       final dateKey = entry.key;
@@ -373,6 +375,9 @@ class MainPageState extends State<MainPage> {
       final def = defs[code];
       if (def == null || !def.alarmEnabled) continue;
       if (def.isAllDay) { skipped++; continue; }
+
+      // 該日臨時關閉鬧鐘 → 跳過
+      if (rosterAlarmMuted[dateKey] == true) { mutedCount++; continue; }
 
       DateTime date;
       try { date = DateTime.parse(dateKey); } catch (_) { continue; }
@@ -402,7 +407,7 @@ class MainPageState extends State<MainPage> {
         await _writeDebugLog('[鬧鐘] 排程失敗 $dateKey: $e');
       }
     }
-    await _writeDebugLog('[鬧鐘] 已排程 $count 個、跳過 $skipped 個');
+    await _writeDebugLog('[鬧鐘] 已排程 $count 個、跳過 $skipped 個、單日靜音 $mutedCount 個');
   }
 
   Future<bool> _confirmAction() async {
@@ -480,7 +485,6 @@ Future<void> _requestStoragePermission() async {
   if (!await Permission.manageExternalStorage.isGranted) {
     await Permission.manageExternalStorage.request();
   }
-  // 請求通知權限（Android 13+ 會彈出對話框；其他版本自動回傳已授予）
   if (!await Permission.notification.isGranted) {
     await Permission.notification.request();
   }
@@ -593,6 +597,14 @@ Future<void> load() async {
   if (rl != null) {
     try { rosterLeave = Map<String, String>.from(jsonDecode(rl)); } catch (_) {}
   }
+  var ram = sp.getString('rosterAlarmMuted');
+  if (ram != null) {
+    try {
+      rosterAlarmMuted = Map<String, bool>.from(
+        (jsonDecode(ram) as Map).map((k, v) => MapEntry(k as String, v as bool))
+      );
+    } catch (_) {}
+  }
 
   var ddList = sp.getStringList('dirtyDates');
   if (ddList != null) _dirtyDates = ddList.toSet();
@@ -666,6 +678,7 @@ Future<void> save() async {
   await sp.setString('leaveDefs', jsonEncode(leaveDefs.map((e) => e.toJson()).toList()));
   await sp.setString('leaveRecords', jsonEncode(leaveRecords));
   await sp.setString('rosterLeave', jsonEncode(rosterLeave));
+  await sp.setString('rosterAlarmMuted', jsonEncode(rosterAlarmMuted));
 
   await sp.setStringList('dirtyDates', _dirtyDates.toList());
   await sp.setBool('needsFullSync', _needsFullSync);
@@ -1857,6 +1870,7 @@ Future<void> restoreFromFile(String path) async {
       if (j['leaveDefs'] != null) leaveDefs = (j['leaveDefs'] as List).map((e) => LeaveDef.fromJson(Map<String, dynamic>.from(e as Map))).toList();
       if (j['leaveRecords'] != null) leaveRecords = Map<String, Map<String, dynamic>>.from((j['leaveRecords'] as Map).map((k, v) => MapEntry(k as String, Map<String, dynamic>.from(v as Map))));
       if (j['rosterLeave'] != null) rosterLeave = Map<String, String>.from(j['rosterLeave']);
+      if (j['rosterAlarmMuted'] != null) rosterAlarmMuted = Map<String, bool>.from(j['rosterAlarmMuted']);
     });
 
     _needsFullSync = false;
@@ -2156,6 +2170,7 @@ Future<void> backupAnywhere() async {
       'leaveDefs': leaveDefs.map((e) => e.toJson()).toList(),
       'leaveRecords': leaveRecords,
       'rosterLeave': rosterLeave,
+      'rosterAlarmMuted': rosterAlarmMuted,
     };
     var f = File('$dirPath/$fileName');
     await f.writeAsString(jsonEncode(backup));
@@ -2186,7 +2201,7 @@ Future<void> clearRosterByRange() async {
     _markDirty(k);
     if (roster.containsKey(k)) {
       count++;
-      roster.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); rosterExtraType.remove(k); rosterLeave.remove(k);
+      roster.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); rosterExtraType.remove(k); rosterLeave.remove(k); rosterAlarmMuted.remove(k);
       if (_googleEventIdMap.containsKey(k)) {
         await _safeDeleteEvent(_googleEventIdMap[k]!);
         _googleEventIdMap.remove(k);
@@ -2671,6 +2686,9 @@ void showDetail(DateTime day) {
   var exTypeCtrl = TextEditingController(text: rosterExtraType[k] ?? '');
   showModalBottomSheet(context: context, isScrollControlled: true, builder: (ctx) {
     return StatefulBuilder(builder: (ctx2, setM) {
+      final currentDef = defs[cur];
+      final bool alarmApplicable = currentDef != null && currentDef.alarmEnabled && !currentDef.isAllDay;
+      final bool isMuted = rosterAlarmMuted[k] == true;
       return Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.of(ctx2).viewInsets.bottom),
         child: Padding(
@@ -2679,6 +2697,66 @@ void showDetail(DateTime day) {
             Text('${DateFormat('yyyy-MM-dd EEE').format(day)} ${isHoliday(day) ? ' [${holidayName(day)}]' : ''}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Wrap(spacing: 8, children: defs.keys.map((c) => ChoiceChip(label: Text(c), selected: cur == c, onSelected: (_) => setM(() => cur = c))).toList()),
+
+            // ============ 單日臨時關閉鬧鐘開關 ============
+            if (alarmApplicable) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isMuted ? Colors.grey.shade200 : Colors.pink.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isMuted ? Colors.grey.shade400 : Colors.pink.shade300,
+                    width: 1.2,
+                  ),
+                ),
+                child: Row(children: [
+                  Icon(
+                    isMuted ? Icons.alarm_off : Icons.alarm_on,
+                    color: isMuted ? Colors.grey.shade600 : Colors.pink,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          isMuted ? '此日鬧鐘已臨時關閉' : '此日鬧鐘將正常提醒',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: isMuted ? Colors.grey.shade700 : Colors.pink.shade700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          isMuted
+                              ? '僅影響本日，其他日期不受影響'
+                              : '提醒時間 ${_calcAlarmTimeText(currentDef.start, currentDef.alarmMinutesBefore)}（提前 ${currentDef.alarmMinutesBefore} 分）',
+                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch(
+                    value: !isMuted,
+                    activeColor: Colors.pink,
+                    onChanged: (v) {
+                      setM(() {
+                        if (v) {
+                          rosterAlarmMuted.remove(k);
+                        } else {
+                          rosterAlarmMuted[k] = true;
+                        }
+                      });
+                    },
+                  ),
+                ]),
+              ),
+            ],
+
             const SizedBox(height: 8),
             Padding(padding: const EdgeInsets.only(top: 6), child: TextField(controller: nc, minLines: 2, maxLines: 6, keyboardType: TextInputType.multiline, textInputAction: TextInputAction.newline, decoration: const InputDecoration(labelText: '記事 (可換行多行)', alignLabelWithHint: true, isDense: true, border: OutlineInputBorder()))),
             Row(children: [
@@ -2739,7 +2817,7 @@ void showDetail(DateTime day) {
               Expanded(child: OutlinedButton(onPressed: () async {
                 final eventId = _googleEventIdMap[k];
                 Navigator.pop(ctx2);
-                setState(() { roster.remove(k); rosterLeave.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); rosterExtraType.remove(k); });
+                setState(() { roster.remove(k); rosterLeave.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); rosterExtraType.remove(k); rosterAlarmMuted.remove(k); });
                 if (eventId != null) {
                   await _safeDeleteEvent(eventId);
                   _googleEventIdMap.remove(k);
@@ -4589,7 +4667,7 @@ void showLeaveManagementDialog() {
                 SizedBox(height: 16),
                 Text('4. 設定與同步', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
-                Text('• 「假期數據管理」：可設定每年的假期天數、微調，系統會自動計算餘額。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「上班鬧鐘」：在班次編輯卡內開啟鬧鐘，設定提前分鐘數，App 會依排班自動安排提醒。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：掃描範圍 2000~2100 年，只刪 [RosterPro] 事件。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
+                Text('• 「假期數據管理」：可設定每年的假期天數、微調，系統會自動計算餘額。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「上班鬧鐘」：在班次編輯卡內開啟鬧鐘，設定提前分鐘數，App 會依排班自動安排提醒。\n  - 單日臨時關閉：在日期編輯卡內可針對單獨一日臨時關閉鬧鐘，不影響其他日期。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：掃描範圍 2000~2100 年，只刪 [RosterPro] 事件。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
                 SizedBox(height: 16),
                 Text('5. 常見問題', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
