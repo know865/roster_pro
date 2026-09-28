@@ -194,6 +194,7 @@ class MainPageState extends State<MainPage> {
   String selectedPatternCode = "O";
 
   double carry = 0;
+  String carryAnchorWeekKey = ''; // 累計起始週，例如 "2026-W38"，空字串代表尚未設定
   String customName = '我的排更-專屬日曆';
   TextEditingController nameCtrl = TextEditingController();
   double standardWeeklyHours = 42;
@@ -524,6 +525,7 @@ Future<void> load() async {
 
   setState(() {
     carry = sp.getDouble('carry') ?? 0;
+    carryAnchorWeekKey = sp.getString('carryAnchorWeekKey') ?? '';
     customName = sp.getString('cName') ?? '我的排更-專屬日曆';
     nameCtrl.text = customName;
     standardWeeklyHours = sp.getDouble('stdWeek') ?? 42;
@@ -550,6 +552,7 @@ Future<void> load() async {
     widgetTextColor = sp.getInt('widgetTextColor') ?? 0xFF000000;
     iconIndex = sp.getInt('iconIndex') ?? 0;
   });
+  _ensureAnchorWeek();
   updateWidget();
 }
 
@@ -564,6 +567,7 @@ Future<void> save() async {
   sp.setString('defs', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
   sp.setString('pattern', jsonEncode(pattern));
   sp.setDouble('carry', carry);
+  sp.setString('carryAnchorWeekKey', carryAnchorWeekKey);
   sp.setString('cName', customName);
   sp.setDouble('stdWeek', standardWeeklyHours);
   sp.setDouble('otRate', overtimeRate);
@@ -616,6 +620,58 @@ int isoWeek(DateTime date) {
   DateTime jan1 = DateTime(thursday.year, 1, 1);
   int days = thursday.difference(jan1).inDays;
   return 1 + (days / 7).floor();
+}
+
+String isoWeekKey(DateTime date) {
+  DateTime thursday = date.add(Duration(days: 4 - date.weekday));
+  DateTime jan1 = DateTime(thursday.year, 1, 1);
+  int days = thursday.difference(jan1).inDays;
+  int week = 1 + (days / 7).floor();
+  return '${thursday.year}-W${week.toString().padLeft(2, '0')}';
+}
+
+DateTime? _parseWeekKey(String key) {
+  final m = RegExp(r'^(\d{4})-W(\d{2})$').firstMatch(key);
+  if (m == null) return null;
+  final year = int.parse(m.group(1)!);
+  final week = int.parse(m.group(2)!);
+  if (week < 1 || week > 53) return null;
+  DateTime jan4 = DateTime(year, 1, 4);
+  DateTime week1Monday = jan4.subtract(Duration(days: jan4.weekday - 1));
+  return week1Monday.add(Duration(days: (week - 1) * 7));
+}
+
+DateTime _effectiveCalcStart(DateTime fallback) {
+  if (carryAnchorWeekKey.isNotEmpty) {
+    final parsed = _parseWeekKey(carryAnchorWeekKey);
+    if (parsed != null) return parsed;
+  }
+  DateTime? globalStart;
+  for (String k in roster.keys) {
+    try {
+      DateTime dt = DateTime.parse(k);
+      if (globalStart == null || dt.isBefore(globalStart)) globalStart = dt;
+    } catch (_) {}
+  }
+  if (globalStart != null) {
+    return globalStart.subtract(Duration(days: globalStart.weekday - 1));
+  }
+  return fallback;
+}
+
+void _ensureAnchorWeek() {
+  if (carryAnchorWeekKey.isNotEmpty) return;
+  if (roster.isEmpty) return;
+  DateTime? globalStart;
+  for (String k in roster.keys) {
+    try {
+      DateTime dt = DateTime.parse(k);
+      if (globalStart == null || dt.isBefore(globalStart)) globalStart = dt;
+    } catch (_) {}
+  }
+  if (globalStart != null) {
+    carryAnchorWeekKey = isoWeekKey(globalStart);
+  }
 }
 
 void quickJumpMonth({bool forReport = false}) {
@@ -1672,6 +1728,7 @@ Future<void> restoreFromFile(String path) async {
       if (j['defs'] != null) defs = (j['defs'] as Map).map<String, ShiftDef>((k, v) => MapEntry(k as String, ShiftDef.fromJson(Map<String, dynamic>.from(v as Map))));
       if (j['pattern'] != null) pattern = (j['pattern'] as List).map<List<String>>((r) => (r as List).map<String>((e) => e.toString()).toList()).toList();
       if (j['carry'] != null) carry = (j['carry'] as num).toDouble();
+      if (j['carryAnchorWeekKey'] != null) carryAnchorWeekKey = j['carryAnchorWeekKey'];
       if (j['cName'] != null) { customName = j['cName']; nameCtrl.text = customName; }
       if (j['stdWeek'] != null) standardWeeklyHours = (j['stdWeek'] as num).toDouble();
       if (j['otRate'] != null) overtimeRate = (j['otRate'] as num).toDouble();
@@ -1702,6 +1759,7 @@ Future<void> restoreFromFile(String path) async {
     });
 
     _needsFullSync = false;
+    _ensureAnchorWeek();
 
     _dirtyDates.clear();
     for (var key in roster.keys) {
@@ -1976,7 +2034,9 @@ Future<void> backupAnywhere() async {
       'roster': roster, 'note': rosterNote, 'extraType': rosterExtraType,
       'roOt': rosterOt, 'roEx': rosterExtra, 'roExH': rosterExtraHrs,
       'defs': defs.map((k, v) => MapEntry(k, v.toJson())),
-      'pattern': pattern, 'carry': carry, 'cName': customName,
+      'pattern': pattern, 'carry': carry,
+      'carryAnchorWeekKey': carryAnchorWeekKey,
+      'cName': customName,
       'stdWeek': standardWeeklyHours, 'otRate': overtimeRate,
       'monthlySalary': monthlySalary, 'hourlyDivisor': hourlyDivisor, 'otMultiplier': otMultiplier,
       'morningAllow': morningAllowance, 'nightAllow': nightAllowance, 'mealAllow': mealAllowance,
@@ -2114,16 +2174,9 @@ Future<void> exportReport() async {
       DateTime calStart = firstDayOfMonth.subtract(Duration(days: firstDayOfMonth.weekday - 1));
       DateTime calEnd = lastDayOfMonth.add(Duration(days: 7 - lastDayOfMonth.weekday));
 
-      DateTime? globalStart;
-      for (String k in roster.keys) {
-        try {
-          DateTime dt = DateTime.parse(k);
-          if (globalStart == null || dt.isBefore(globalStart)) globalStart = dt;
-        } catch (_) {}
-      }
-      DateTime calcStart = globalStart != null ? globalStart.subtract(Duration(days: globalStart.weekday - 1)) : calStart;
+      DateTime calcStart = _effectiveCalcStart(calStart);
 
-      Map<int, double> allWeeklyHours = {};
+      Map<String, double> allWeeklyHours = {};
       DateTime tempDt = calcStart;
       while (!tempDt.isAfter(calEnd)) {
         String k = DateFormat('yyyy-MM-dd').format(tempDt);
@@ -2131,28 +2184,28 @@ Future<void> exportReport() async {
         if (c != null) {
           var d = defs[c];
           if (d != null) {
-            int w = isoWeek(tempDt);
-            allWeeklyHours[w] = (allWeeklyHours[w] ?? 0) + d.hours;
+            String wk = isoWeekKey(tempDt);
+            allWeeklyHours[wk] = (allWeeklyHours[wk] ?? 0) + d.hours;
           }
         }
         tempDt = tempDt.add(const Duration(days: 1));
       }
 
-      List<int> sortedAllWeeks = allWeeklyHours.keys.toList()..sort();
+      List<String> sortedAllWeeks = allWeeklyHours.keys.toList()..sort();
       double lastCarryExport = carry;
-      Map<int, double> weekCarryMap = {};
-      Map<int, double> weekDiffMap = {};
-      for (var w in sortedAllWeeks) {
-        double weekHours = allWeeklyHours[w]!;
-        weekCarryMap[w] = lastCarryExport;
+      Map<String, double> weekCarryMap = {};
+      Map<String, double> weekDiffMap = {};
+      for (var wk in sortedAllWeeks) {
+        double weekHours = allWeeklyHours[wk]!;
+        weekCarryMap[wk] = lastCarryExport;
         double diff = lastCarryExport + weekHours - standardWeeklyHours;
-        weekDiffMap[w] = diff;
+        weekDiffMap[wk] = diff;
         lastCarryExport = diff;
       }
 
-      Set<int> currentMonthWeeksSet = {};
+      Set<String> currentMonthWeeksSet = {};
       for (DateTime dt = calStart; !dt.isAfter(calEnd); dt = dt.add(const Duration(days: 1))) {
-        currentMonthWeeksSet.add(isoWeek(dt));
+        currentMonthWeeksSet.add(isoWeekKey(dt));
       }
 
       double hrs = 0, ot = 0, allow = 0;
@@ -2197,12 +2250,12 @@ Future<void> exportReport() async {
       sb.writeln('【二、每週工時統計】');
       sb.writeln('週次, 本週工時, 標準工時, 承上餘額, 累計差額');
 
-      for (var w in sortedAllWeeks) {
-        if (!currentMonthWeeksSet.contains(w)) continue;
-        double weekHours = allWeeklyHours[w]!;
-        double displayCarry = weekCarryMap[w]!;
-        double diff = weekDiffMap[w]!;
-        sb.writeln('W$w, ${weekHours.toStringAsFixed(1)}h, ${standardWeeklyHours}h, ${displayCarry.toStringAsFixed(1)}h, ${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}h');
+      for (var wk in sortedAllWeeks) {
+        if (!currentMonthWeeksSet.contains(wk)) continue;
+        double weekHours = allWeeklyHours[wk]!;
+        double displayCarry = weekCarryMap[wk]!;
+        double diff = weekDiffMap[wk]!;
+        sb.writeln('$wk, ${weekHours.toStringAsFixed(1)}h, ${standardWeeklyHours}h, ${displayCarry.toStringAsFixed(1)}h, ${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}h');
       }
 
       sb.writeln('');
@@ -2371,6 +2424,7 @@ Future<void> pickRangeAndApply() async {
       i++;
     }
   });
+  _ensureAnchorWeek();
   await save();
   setState(() => tab = 0);
   await _syncNow();
@@ -2415,6 +2469,7 @@ Future<void> smartSchedule() async {
       _markDirty(dateKey);
     }
   });
+  _ensureAnchorWeek();
   await save();
   setState(() => tab = 0);
   await _syncNow();
@@ -3548,16 +3603,9 @@ void showLeaveManagementDialog() {
     DateTime calStart = firstDayOfMonth.subtract(Duration(days: firstDayOfMonth.weekday - 1));
     DateTime calEnd = lastDayOfMonth.add(Duration(days: 7 - lastDayOfMonth.weekday));
 
-    DateTime? globalStart;
-    for (String k in roster.keys) {
-      try {
-        DateTime dt = DateTime.parse(k);
-        if (globalStart == null || dt.isBefore(globalStart)) globalStart = dt;
-      } catch (_) {}
-    }
-    DateTime calcStart = globalStart != null ? globalStart.subtract(Duration(days: globalStart.weekday - 1)) : calStart;
+    DateTime calcStart = _effectiveCalcStart(calStart);
 
-    Map<int, double> allWeeklyHours = {};
+    Map<String, double> allWeeklyHours = {};
     DateTime tempDt = calcStart;
     while (!tempDt.isAfter(calEnd)) {
       String k = DateFormat('yyyy-MM-dd').format(tempDt);
@@ -3565,38 +3613,38 @@ void showLeaveManagementDialog() {
       if (c != null) {
         var d = defs[c];
         if (d != null) {
-          int w = isoWeek(tempDt);
-          allWeeklyHours[w] = (allWeeklyHours[w] ?? 0) + d.hours;
+          String wk = isoWeekKey(tempDt);
+          allWeeklyHours[wk] = (allWeeklyHours[wk] ?? 0) + d.hours;
         }
       }
       tempDt = tempDt.add(const Duration(days: 1));
     }
 
-    List<int> sortedAllWeeks = allWeeklyHours.keys.toList()..sort();
+    List<String> sortedAllWeeks = allWeeklyHours.keys.toList()..sort();
     double lastCarry = carry;
-    Map<int, double> weekCarryMap = {};
-    Map<int, double> weekDiffMap = {};
-    for (var w in sortedAllWeeks) {
-      double weekHours = allWeeklyHours[w]!;
-      weekCarryMap[w] = lastCarry;
+    Map<String, double> weekCarryMap = {};
+    Map<String, double> weekDiffMap = {};
+    for (var wk in sortedAllWeeks) {
+      double weekHours = allWeeklyHours[wk]!;
+      weekCarryMap[wk] = lastCarry;
       double diff = lastCarry + weekHours - standardWeeklyHours;
-      weekDiffMap[w] = diff;
+      weekDiffMap[wk] = diff;
       lastCarry = diff;
     }
 
-    Set<int> currentMonthWeeksSet = {};
+    Set<String> currentMonthWeeksSet = {};
     for (DateTime dt = calStart; !dt.isAfter(calEnd); dt = dt.add(const Duration(days: 1))) {
-      currentMonthWeeksSet.add(isoWeek(dt));
+      currentMonthWeeksSet.add(isoWeekKey(dt));
     }
 
     List<Map<String, dynamic>> weeklyStats = [];
-    for (int w in sortedAllWeeks) {
-      if (currentMonthWeeksSet.contains(w)) {
+    for (String wk in sortedAllWeeks) {
+      if (currentMonthWeeksSet.contains(wk)) {
         weeklyStats.add({
-          'week': w,
-          'hours': allWeeklyHours[w]!,
-          'carry': weekCarryMap[w]!,
-          'diff': weekDiffMap[w]!,
+          'week': wk,
+          'hours': allWeeklyHours[wk]!,
+          'carry': weekCarryMap[wk]!,
+          'diff': weekDiffMap[wk]!,
         });
       }
     }
@@ -3682,16 +3730,15 @@ void showLeaveManagementDialog() {
             Text(isYearReport ? '每週工時統計 全年' : '每週工時統計 (標準 & 承上) 週數', style: const TextStyle(fontWeight: FontWeight.bold)),
             const Divider(),
             ...weeklyStats.map((stat) {
-              int week = stat['week'];
+              String week = stat['week'];
               double weekHours = stat['hours'];
               double displayCarry = stat['carry'];
               double diff = stat['diff'];
               return Padding(padding: const EdgeInsets.symmetric(vertical: 3), child: Row(children: [
-                Text('W$week', style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text(week, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                 const SizedBox(width: 8),
-                Text('${weekHours.toStringAsFixed(1)}h + 承上${displayCarry.toStringAsFixed(1)} = ${diff.toStringAsFixed(1)}h'),
-                const Spacer(),
-                Text('${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}h', style: TextStyle(color: diff > 0 ? Colors.green : Colors.red, fontWeight: FontWeight.bold)),
+                Expanded(child: Text('${weekHours.toStringAsFixed(1)}h + 承上${displayCarry.toStringAsFixed(1)} = ${diff.toStringAsFixed(1)}h', style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis)),
+                Text('${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}h', style: TextStyle(color: diff > 0 ? Colors.green : Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
               ]));
             }),
             const Divider(),
@@ -3915,6 +3962,85 @@ void showLeaveManagementDialog() {
           const SizedBox(width: 8),
           Expanded(child: TextField(controller: carryCtrl, decoration: const InputDecoration(labelText: '承上餘額', border: OutlineInputBorder())))
         ]),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.amber.shade50,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.amber.shade300),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('累計起始週 (承上基準)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 4),
+              Text(
+                carryAnchorWeekKey.isEmpty ? '未設定（將自動取最早排班週）' : carryAnchorWeekKey,
+                style: const TextStyle(fontSize: 12),
+              ),
+              const SizedBox(height: 6),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.edit_calendar, size: 16),
+                    label: const Text('修改起始週', style: TextStyle(fontSize: 12)),
+                    onPressed: () async {
+                      DateTime? picked = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime(2100),
+                        helpText: '選擇要當作「累計起始」的日期\n該日期所在的 ISO 週將成為新的計算起點',
+                      );
+                      if (picked == null) return;
+                      final newKey = isoWeekKey(picked);
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('修改累計起始週'),
+                          content: Text(
+                            '新的起始週：$newKey\n\n'
+                            '目前承上餘額：${carry.toStringAsFixed(1)}h\n\n'
+                            '⚠️ 這個設定會改變所有報表的累計差額起算點。\n'
+                            '若只是刪除了早排班，不想改變基準，請選「取消」。',
+                          ),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+                            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('確定修改')),
+                          ],
+                        ),
+                      );
+                      if (confirmed == true) {
+                        setState(() { carryAnchorWeekKey = newKey; });
+                        save();
+                        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('累計起始週已改為 $newKey')));
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.restore, size: 16),
+                    label: const Text('重設為最早排班', style: TextStyle(fontSize: 12)),
+                    onPressed: () {
+                      setState(() { carryAnchorWeekKey = ''; });
+                      _ensureAnchorWeek();
+                      save();
+                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已重設為 $carryAnchorWeekKey')));
+                    },
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 4),
+              const Text(
+                '💡 提示：刪除早排班時，若不想改變累計基準，保持此欄位不動即可。',
+                style: TextStyle(fontSize: 10, color: Colors.black54),
+              ),
+            ],
+          ),
+        ),
         const SizedBox(height: 10),
         SizedBox(
           width: double.infinity,
