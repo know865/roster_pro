@@ -2423,6 +2423,8 @@ Future<void> smartSchedule() async {
 
 void _goToPrevMonth() { setState(() { focused = DateTime(focused.year, focused.month - 1, 1); }); }
 void _goToNextMonth() { setState(() { focused = DateTime(focused.year, focused.month + 1, 1); }); }
+void _goToPrevYear()  { setState(() { focused = DateTime(focused.year - 1, focused.month, 1); }); }
+void _goToNextYear()  { setState(() { focused = DateTime(focused.year + 1, focused.month, 1); }); }
 
 void showDetail(DateTime day) {
   String k = DateFormat('yyyy-MM-dd').format(day);
@@ -3626,77 +3628,90 @@ void showLeaveManagementDialog() {
     double otAmount = ot * overtimeRate;
     double totalAllow = allow + otAmount;
 
-    return SafeArea(child: ListView(padding: const EdgeInsets.all(12), children: [
-      Row(children: [
-        FilledButton.icon(onPressed: exportReport, icon: const Icon(Icons.ios_share, size: 18), label: const Text('匯出', style: TextStyle(fontSize: 14)), style: FilledButton.styleFrom(backgroundColor: Colors.deepPurple, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8))),
-        const SizedBox(width: 8),
-        Expanded(child: InkWell(onTap: () => quickJumpMonth(forReport: true), child: Container(padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Flexible(child: Text('${year}年${isYearReport ? ' 全年' : ' ${month}月'}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
-          const Icon(Icons.arrow_drop_down, size: 22),
-        ])))),
-        const SizedBox(width: 4),
-        SegmentedButton<bool>(
-          segments: const [ButtonSegment(value: false, label: Text('本月')), ButtonSegment(value: true, label: Text('全年'))],
-          selected: {isYearReport},
-          onSelectionChanged: (s) { setState(() => isYearReport = s.first); },
-          style: ButtonStyle(padding: WidgetStateProperty.all(const EdgeInsets.symmetric(horizontal: 8)), textStyle: WidgetStateProperty.all(const TextStyle(fontSize: 13)), visualDensity: VisualDensity.compact),
-        ),
-      ]),
-      const SizedBox(height: 8),
-      if (isYearReport) Card(color: const Color(0xFFE3F2FD), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('全年總工時 ${totalYearHrs.toStringAsFixed(1)}h', style: const TextStyle(fontWeight: FontWeight.bold)),
-        const Divider(),
-        ...yearMonthlyHrs.entries.map((e) => Row(children: [Text('${e.key}月'), const Spacer(), Text('${e.value.toStringAsFixed(1)}h')])),
-      ]))),
-      if (!isYearReport) Card(color: const Color(0xFFE3F2FD), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('班次統計', style: TextStyle(fontWeight: FontWeight.bold)),
-        const Divider(),
-        ...shiftCount.entries.map((e) {
-          double h = shiftHours[e.key] ?? 0;
-          var d = defs[e.key];
-          return Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Row(children: [
-            Container(width: 28, height: 28, decoration: BoxDecoration(color: d?.color ?? Colors.grey, borderRadius: BorderRadius.circular(6)), child: Center(child: Text(e.key, style: const TextStyle(color: Colors.white, fontSize: 11)))),
+    return SafeArea(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragEnd: (details) {
+          if (details.primaryVelocity == null) return;
+          if (details.primaryVelocity! < -100) {
+            if (isYearReport) { _goToNextYear(); } else { _goToNextMonth(); }
+          } else if (details.primaryVelocity! > 100) {
+            if (isYearReport) { _goToPrevYear(); } else { _goToPrevMonth(); }
+          }
+        },
+        child: ListView(padding: const EdgeInsets.all(12), children: [
+          Row(children: [
+            FilledButton.icon(onPressed: exportReport, icon: const Icon(Icons.ios_share, size: 18), label: const Text('匯出', style: TextStyle(fontSize: 14)), style: FilledButton.styleFrom(backgroundColor: Colors.deepPurple, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8))),
             const SizedBox(width: 8),
-            Text('${d?.label ?? e.key}'),
-            const Spacer(),
-            Text('${e.value}次 / ${h.toStringAsFixed(1)}h', style: const TextStyle(fontWeight: FontWeight.bold)),
-          ]));
-        }),
-        const Divider(),
-        Text('總工時 ${hrs.toStringAsFixed(1)}h'),
-      ]))),
-      Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(isYearReport ? '每週工時統計 全年' : '每週工時統計 (標準 & 承上) 週數', style: const TextStyle(fontWeight: FontWeight.bold)),
-        const Divider(),
-        ...weeklyStats.map((stat) {
-          int week = stat['week'];
-          double weekHours = stat['hours'];
-          double displayCarry = stat['carry'];
-          double diff = stat['diff'];
-          return Padding(padding: const EdgeInsets.symmetric(vertical: 3), child: Row(children: [
-            Text('W$week', style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(width: 8),
-            Text('${weekHours.toStringAsFixed(1)}h + 承上${displayCarry.toStringAsFixed(1)} = ${diff.toStringAsFixed(1)}h'),
-            const Spacer(),
-            Text('${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}h', style: TextStyle(color: diff > 0 ? Colors.green : Colors.red, fontWeight: FontWeight.bold)),
-          ]));
-        }),
-        const Divider(),
-        Row(children: [
-          Text('標準 ${standardWeeklyHours}h/週 | 總差額 ', style: const TextStyle(fontWeight: FontWeight.bold)),
-          Text('${totalDiff >= 0 ? '+' : ''}${totalDiff.toStringAsFixed(1)}h', style: TextStyle(fontWeight: FontWeight.bold, color: totalDiff > 0 ? Colors.green : (totalDiff < 0 ? Colors.red : Colors.black))),
+            Expanded(child: InkWell(onTap: () => quickJumpMonth(forReport: true), child: Container(padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Flexible(child: Text('${year}年${isYearReport ? ' 全年' : ' ${month}月'}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+              const Icon(Icons.arrow_drop_down, size: 22),
+            ])))),
+            const SizedBox(width: 4),
+            SegmentedButton<bool>(
+              segments: const [ButtonSegment(value: false, label: Text('本月')), ButtonSegment(value: true, label: Text('全年'))],
+              selected: {isYearReport},
+              onSelectionChanged: (s) { setState(() => isYearReport = s.first); },
+              style: ButtonStyle(padding: WidgetStateProperty.all(const EdgeInsets.symmetric(horizontal: 8)), textStyle: WidgetStateProperty.all(const TextStyle(fontSize: 13)), visualDensity: VisualDensity.compact),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          if (isYearReport) Card(color: const Color(0xFFE3F2FD), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('全年總工時 ${totalYearHrs.toStringAsFixed(1)}h', style: const TextStyle(fontWeight: FontWeight.bold)),
+            const Divider(),
+            ...yearMonthlyHrs.entries.map((e) => Row(children: [Text('${e.key}月'), const Spacer(), Text('${e.value.toStringAsFixed(1)}h')])),
+          ]))),
+          if (!isYearReport) Card(color: const Color(0xFFE3F2FD), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('班次統計', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Divider(),
+            ...shiftCount.entries.map((e) {
+              double h = shiftHours[e.key] ?? 0;
+              var d = defs[e.key];
+              return Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: Row(children: [
+                Container(width: 28, height: 28, decoration: BoxDecoration(color: d?.color ?? Colors.grey, borderRadius: BorderRadius.circular(6)), child: Center(child: Text(e.key, style: const TextStyle(color: Colors.white, fontSize: 11)))),
+                const SizedBox(width: 8),
+                Text('${d?.label ?? e.key}'),
+                const Spacer(),
+                Text('${e.value}次 / ${h.toStringAsFixed(1)}h', style: const TextStyle(fontWeight: FontWeight.bold)),
+              ]));
+            }),
+            const Divider(),
+            Text('總工時 ${hrs.toStringAsFixed(1)}h'),
+          ]))),
+          Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(isYearReport ? '每週工時統計 全年' : '每週工時統計 (標準 & 承上) 週數', style: const TextStyle(fontWeight: FontWeight.bold)),
+            const Divider(),
+            ...weeklyStats.map((stat) {
+              int week = stat['week'];
+              double weekHours = stat['hours'];
+              double displayCarry = stat['carry'];
+              double diff = stat['diff'];
+              return Padding(padding: const EdgeInsets.symmetric(vertical: 3), child: Row(children: [
+                Text('W$week', style: const TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(width: 8),
+                Text('${weekHours.toStringAsFixed(1)}h + 承上${displayCarry.toStringAsFixed(1)} = ${diff.toStringAsFixed(1)}h'),
+                const Spacer(),
+                Text('${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}h', style: TextStyle(color: diff > 0 ? Colors.green : Colors.red, fontWeight: FontWeight.bold)),
+              ]));
+            }),
+            const Divider(),
+            Row(children: [
+              Text('標準 ${standardWeeklyHours}h/週 | 總差額 ', style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text('${totalDiff >= 0 ? '+' : ''}${totalDiff.toStringAsFixed(1)}h', style: TextStyle(fontWeight: FontWeight.bold, color: totalDiff > 0 ? Colors.green : (totalDiff < 0 ? Colors.red : Colors.black))),
+            ]),
+          ]))),
+          Card(color: const Color(0xFFE8F5E9), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('津貼類別 (含自定義類別)', style: TextStyle(fontWeight: FontWeight.bold)),
+            Row(children: [const Text('班次津貼+單日額外'), const Spacer(), Text('\$${allow.toStringAsFixed(1)}')]),
+            if (extraByType.isNotEmpty) const Divider(),
+            ...extraByType.entries.map((e) => Row(children: [Text('類別: ${e.key}'), const Spacer(), Text('\$${e.value.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple))])),
+            Row(children: [Text('OT${ot.toStringAsFixed(1)}h x ${overtimeRate.toStringAsFixed(0)}'), const Spacer(), Text('\$${otAmount.toStringAsFixed(1)}')]),
+            const Divider(),
+            Row(children: [const Text('津貼總額'), const Spacer(), Text('\$${totalAllow.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold))]),
+          ]))),
         ]),
-      ]))),
-      Card(color: const Color(0xFFE8F5E9), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('津貼類別 (含自定義類別)', style: TextStyle(fontWeight: FontWeight.bold)),
-        Row(children: [const Text('班次津貼+單日額外'), const Spacer(), Text('\$${allow.toStringAsFixed(1)}')]),
-        if (extraByType.isNotEmpty) const Divider(),
-        ...extraByType.entries.map((e) => Row(children: [Text('類別: ${e.key}'), const Spacer(), Text('\$${e.value.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple))])),
-        Row(children: [Text('OT${ot.toStringAsFixed(1)}h x ${overtimeRate.toStringAsFixed(0)}'), const Spacer(), Text('\$${otAmount.toStringAsFixed(1)}')]),
-        const Divider(),
-        Row(children: [const Text('津貼總額'), const Spacer(), Text('\$${totalAllow.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold))]),
-      ]))),
-    ]));
+      ),
+    );
   }
 
   Widget settingsTab() {
@@ -4153,7 +4168,7 @@ void showLeaveManagementDialog() {
                 SizedBox(height: 16),
                 Text('3. 報表與統計', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
-                Text('• 顯示本月或全年的工時統計、班次次數。\n• 自動計算 OT 時數與津貼總額。\n• 顯示每週工時與標準工時的差額。\n• 點擊「匯出」可將報表存為 CSV 檔案。', style: TextStyle(fontSize: 13)),
+                Text('• 顯示本月或全年的工時統計、班次次數。\n• 自動計算 OT 時數與津貼總額。\n• 顯示每週工時與標準工時的差額。\n• 點擊「匯出」可將報表存為 CSV 檔案。\n• 左右滑動可切換上/下月份（或上/下年份）。', style: TextStyle(fontSize: 13)),
                 SizedBox(height: 16),
                 Text('4. 設定與同步', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
