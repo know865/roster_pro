@@ -2904,7 +2904,29 @@ void showDetail(DateTime day) {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text('${DateFormat('yyyy-MM-dd EEE').format(day)} ${isHoliday(day) ? ' [${holidayName(day)}]' : ''}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            // ====== 修改處：標題與鬧鐘狀態圖示 ======
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Flexible(
+                  child: Text(
+                    '${DateFormat('yyyy-MM-dd EEE').format(day)} ${isHoliday(day) ? ' [${holidayName(day)}]' : ''}',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                if (alarmApplicable) ...[
+                  const SizedBox(width: 8),
+                  Icon(
+                    isMuted ? Icons.alarm_off : Icons.alarm_on,
+                    color: isMuted ? Colors.grey : Colors.pink,
+                    size: 22,
+                  ),
+                ],
+              ],
+            ),
+            // ====== 修改結束 ======
+            
             const SizedBox(height: 8),
             Wrap(spacing: 8, children: defs.keys.map((c) => ChoiceChip(label: Text(c), selected: cur == c, onSelected: (_) => setM(() => cur = c))).toList()),
 
