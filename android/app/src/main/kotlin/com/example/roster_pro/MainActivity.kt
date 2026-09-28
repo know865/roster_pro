@@ -33,7 +33,6 @@ class MainActivity : FlutterActivity() {
                     if (calendarId == null) result.error("NO_CAL_ID", "Calendar ID is null", null)
                     else handleDeleteAllEvents(calendarId, result)
                 }
-                // ✅ 新增：原生查詢事件（繞過 device_calendar 的 Samsung bug）
                 "queryEvents" -> {
                     val calendarId = call.argument<String>("calendarId")
                     val startMillis = call.argument<Number>("startMillis")?.toLong()
@@ -41,17 +40,30 @@ class MainActivity : FlutterActivity() {
                     if (calendarId == null || startMillis == null || endMillis == null) {
                         result.error("BAD_ARGS", "calendarId/startMillis/endMillis required", null)
                     } else {
-                        handleQueryEvents(calendarId, startMillis, endMillis, result)
+                        // ✅ 修改：放入子線程執行，避免主線程卡死
+                        Thread {
+                            try {
+                                handleQueryEvents(calendarId, startMillis, endMillis, result)
+                            } catch (e: Exception) {
+                                runOnUiThread { result.error("QUERY_FAIL", e.message, null) }
+                            }
+                        }.start()
                     }
                 }
-                // ✅ 新增：原生刪除單一事件
                 "deleteEvent" -> {
                     val calendarId = call.argument<String>("calendarId")
                     val eventId = call.argument<String>("eventId")
                     if (calendarId == null || eventId == null) {
                         result.error("BAD_ARGS", "calendarId/eventId required", null)
                     } else {
-                        handleDeleteEvent(calendarId, eventId, result)
+                        // ✅ 修改：放入子線程執行
+                        Thread {
+                            try {
+                                handleDeleteEvent(calendarId, eventId, result)
+                            } catch (e: Exception) {
+                                runOnUiThread { result.error("DELETE_FAIL", e.message, null) }
+                            }
+                        }.start()
                     }
                 }
                 else -> result.notImplemented()
@@ -128,11 +140,6 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) { result.error("STORAGE_FAIL", e.message, null) }
     }
 
-    /**
-     * ✅ 新增：原生查詢指定日曆在時間範圍內的事件
-     * 回傳 List<Map>，每筆包含：
-     *   eventId, title, description, startMillis, endMillis, allDay, calendarId
-     */
     private fun handleQueryEvents(
         calendarId: String,
         startMillis: Long,
@@ -141,7 +148,8 @@ class MainActivity : FlutterActivity() {
     ) {
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
-                result.error("PERMISSION", "No read calendar permission", null); return
+                runOnUiThread { result.error("PERMISSION", "No read calendar permission", null) }
+                return
             }
 
             val events = mutableListOf<Map<String, Any?>>()
@@ -155,9 +163,6 @@ class MainActivity : FlutterActivity() {
                 CalendarContract.Events.CALENDAR_ID,
                 CalendarContract.Events.DELETED
             )
-            // 只查詢該日曆 + 時間範圍重疊的事件
-            // (DTEND > start) AND (DTSTART < end)
-            // 有些事件 DTEND 為 null（例如純開始時間），退而用 DTSTART 判斷
             val selection = "(${CalendarContract.Events.CALENDAR_ID} = ?) AND " +
                     "(${CalendarContract.Events.DTSTART} < ?) AND " +
                     "((${CalendarContract.Events.DTEND} > ?) OR (${CalendarContract.Events.DTEND} IS NULL))"
@@ -182,7 +187,6 @@ class MainActivity : FlutterActivity() {
                 val deletedIdx = it.getColumnIndexOrThrow(CalendarContract.Events.DELETED)
 
                 while (it.moveToNext()) {
-                    // 跳過已刪除（deleted = 1）的殘留
                     if (!it.isNull(deletedIdx) && it.getInt(deletedIdx) == 1) continue
 
                     val dtStart = it.getLong(dtStartIdx)
@@ -199,16 +203,13 @@ class MainActivity : FlutterActivity() {
                     ))
                 }
             }
-            result.success(events)
+            // ✅ 修改：回到主線程回調
+            runOnUiThread { result.success(events) }
         } catch (e: Exception) {
-            result.error("QUERY_FAIL", e.message, null)
+            runOnUiThread { result.error("QUERY_FAIL", e.message, null) }
         }
     }
 
-    /**
-     * ✅ 新增：原生刪除單一事件（使用 CalendarContract）
-     * 回傳 Boolean，true 表示刪除成功
-     */
     private fun handleDeleteEvent(
         calendarId: String,
         eventId: String,
@@ -216,15 +217,16 @@ class MainActivity : FlutterActivity() {
     ) {
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
-                result.error("PERMISSION", "No write calendar permission", null); return
+                runOnUiThread { result.error("PERMISSION", "No write calendar permission", null) }
+                return
             }
 
             val eventIdLong = eventId.toLongOrNull()
             if (eventIdLong == null) {
-                result.error("BAD_ID", "eventId is not a number: $eventId", null); return
+                runOnUiThread { result.error("BAD_ID", "eventId is not a number: $eventId", null) }
+                return
             }
 
-            // 安全檢查：確認該事件真的屬於指定日曆，避免誤刪其他日曆的事件
             val checkProjection = arrayOf(CalendarContract.Events.CALENDAR_ID)
             val checkSelection = "${CalendarContract.Events._ID} = ?"
             val checkArgs = arrayOf(eventId)
@@ -242,25 +244,23 @@ class MainActivity : FlutterActivity() {
                 }
             }
             if (!belongs) {
-                result.success(false); return
+                runOnUiThread { result.success(false) }
+                return
             }
 
             val eventUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventIdLong)
             val rows = contentResolver.delete(eventUri, null, null)
-            result.success(rows > 0)
+            runOnUiThread { result.success(rows > 0) }
         } catch (e: Exception) {
-            result.error("DELETE_FAIL", e.message, null)
+            runOnUiThread { result.error("DELETE_FAIL", e.message, null) }
         }
     }
 
-    /**
-     * ⚠️ 已棄用：Dart 側已不再呼叫此方法
-     * 保留僅為相容舊版本。此方法會刪除日曆上所有事件（含個人行程），請勿使用。
-     */
     private fun handleDeleteAllEvents(calendarId: String, result: MethodChannel.Result) {
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
-                result.error("PERMISSION", "No write calendar permission", null); return
+                runOnUiThread { result.error("PERMISSION", "No write calendar permission", null) }
+                return
             }
             val projection = arrayOf(CalendarContract.Events._ID)
             val selection = "${CalendarContract.Events.CALENDAR_ID} = ?"
@@ -281,7 +281,7 @@ class MainActivity : FlutterActivity() {
                 index = end
                 if (index < eventIds.size) try { Thread.sleep(200) } catch (_: InterruptedException) {}
             }
-            result.success(deleted)
-        } catch (e: Exception) { result.error("DELETE_FAIL", e.message, null) }
+            runOnUiThread { result.success(deleted) }
+        } catch (e: Exception) { runOnUiThread { result.error("DELETE_FAIL", e.message, null) } }
     }
 }
