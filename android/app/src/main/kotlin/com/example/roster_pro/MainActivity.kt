@@ -35,7 +35,7 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         stopAlarmService()
-        requestOverlayPermission()
+        requestOverlayPermission() // 請求懸浮窗權限（用於全屏彈出）
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -52,6 +52,7 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {}
     }
 
+    // 請求懸浮窗權限（Android 10+ 從背景啟動 Activity 的關鍵）
     private fun requestOverlayPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (!Settings.canDrawOverlays(this)) {
@@ -103,6 +104,7 @@ class MainActivity : FlutterActivity() {
                         handleDeleteEvent(calendarId, eventId, result)
                     }
                 }
+                // ====== 新增：處理選擇相冊圖片的方法 ======
                 "pickAndPinIcon" -> {
                     try {
                         val intent = Intent(Intent.ACTION_PICK, android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
@@ -112,6 +114,7 @@ class MainActivity : FlutterActivity() {
                         result.error("PICK_ICON_FAIL", e.message, null)
                     }
                 }
+                // =========================================
                 else -> result.notImplemented()
             }
         }
