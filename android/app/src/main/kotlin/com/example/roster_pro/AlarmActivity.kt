@@ -1,84 +1,94 @@
-package com.example.roster_pro
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-import android.app.KeyguardManager
-import android.content.Context
-import android.content.Intent
-import android.os.Build
-import android.os.Bundle
-import android.view.WindowManager
-import android.widget.Button
-import android.widget.TextView
-import androidx.appcompat.app.AppCompatActivity
+    <!-- ==================== 基本權限 ==================== -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
 
-class AlarmActivity : AppCompatActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        
-        // 關鍵：允許在鎖屏上顯示，並點亮螢幕
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            setShowWhenLocked(true)
-            setTurnScreenOn(true)
-            val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-            keyguardManager.requestDismissKeyguard(this, null)
-        } else {
-            window.addFlags(
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
-                        or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-                        or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-            )
-        }
+    <!-- ==================== 儲存與音訊權限 ==================== -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
-        // 簡單的全屏佈局（這裡用程式碼動態建立，避免還需要寫 XML）
-        val layout = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            setBackgroundColor(android.graphics.Color.BLACK)
-            gravity = android.view.Gravity.CENTER
-        }
+    <!-- ==================== 鬧鐘與前景服務權限 ==================== -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- 新增：懸浮窗權限（用於強制彈出全屏畫面） -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
-        val titleTv = TextView(this).apply {
-            text = intent.getStringExtra("title") ?: "上班提醒"
-            setTextColor(android.graphics.Color.WHITE)
-            textSize = 28f
-            gravity = android.view.Gravity.CENTER
-        }
+    <application
+        android:label="Roster Pro"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
 
-        val bodyTv = TextView(this).apply {
-            text = intent.getStringExtra("body") ?: ""
-            setTextColor(android.graphics.Color.LTGRAY)
-            textSize = 20f
-            gravity = android.view.Gravity.CENTER
-            setPadding(0, 30, 0, 80)
-        }
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data android:name="io.flutter.embedding.android.NormalTheme" android:resource="@style/NormalTheme" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
 
-        val stopBtn = Button(this).apply {
-            text = "停止響鈴"
-            textSize = 24f
-            setOnClickListener {
-                // 發送停止指令給 Service
-                val stopIntent = Intent(this@AlarmActivity, AlarmService::class.java).apply {
-                    action = AlarmService.ACTION_STOP_ALARM
-                }
-                startService(stopIntent)
-                finish()
-            }
-        }
+        <meta-data android:name="flutterEmbedding" android:value="2" />
 
-        val params = android.widget.LinearLayout.LayoutParams(
-            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
-            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply {
-            gravity = android.view.Gravity.CENTER
-        }
+        <receiver android:name=".RosterWidgetProvider" android:exported="true" android:label="Roster Pro 月曆">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="PREV_MONTH" />
+                <action android:name="NEXT_MONTH" />
+                <action android:name="REFRESH_WIDGET" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info" />
+        </receiver>
 
-        layout.addView(titleTv, params)
-        layout.addView(bodyTv, params)
-        layout.addView(stopBtn, params)
+        <receiver android:name=".AlarmReceiver" android:exported="false" />
 
-        setContentView(layout)
-    }
+        <service
+            android:name=".AlarmService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
-    override fun onBackPressed() {
-        // 防止用家按返回鍵關閉，必須點擊停止
-        // super.onBackPressed()
-    }
-}
+        <!-- 鬧鐘全屏畫面：加入 excludeFromRecents 與 singleInstance，防止被系統折疊 -->
+        <activity
+            android:name=".AlarmActivity"
+            android:exported="false"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:launchMode="singleInstance"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <receiver android:name=".BootReceiver" android:exported="true" android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+
+    <queries>
+        <intent><action android:name="android.intent.action.VIEW" /><data android:scheme="content" /></intent>
+        <intent><action android:name="android.intent.action.VIEW" /><data android:scheme="file" /></intent>
+        <intent><action android:name="android.intent.action.SEND" /><data android:mimeType="*/*" /></intent>
+        <intent><action android:name="android.intent.action.PROCESS_TEXT"/><data android:mimeType="text/plain"/></intent>
+    </queries>
+
+</manifest>
