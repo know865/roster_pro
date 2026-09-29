@@ -90,7 +90,7 @@ workflows:
                   </receiver>
                   <receiver android:name=".AlarmReceiver" android:exported="false" />
                   <service android:name=".AlarmService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
-                  <activity android:name=".AlarmActivity" android:exported="false" android:showWhenLocked="true" android:turnScreenOn="true" android:excludeFromRecents="true" android:taskAffinity="" android:launchMode="singleInstance" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+                  <activity android:name=".AlarmActivity" android:exported="false" android:showWhenLocked="true" android:turnScreenOn="true" android:excludeFromRecents="true" android:taskAffinity="" android:launchMode="singleInstance" android:process=":alarm" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
                   <receiver android:name=".BootReceiver" android:exported="true" android:enabled="true">
                       <intent-filter>
                           <action android:name="android.intent.action.BOOT_COMPLETED" />
@@ -649,17 +649,7 @@ workflows:
                   startForeground(NOTIFICATION_ID, buildNotification(title, body, requestCode))
                   playAlarmSound(soundUri)
 
-                  try {
-                      val fullScreenIntent = Intent(this, AlarmActivity::class.java).apply {
-                          putExtra("title", title)
-                          putExtra("body", body)
-                          putExtra("requestCode", requestCode)
-                          this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                      }
-                      startActivity(fullScreenIntent)
-                  } catch (e: Exception) {
-                      e.printStackTrace()
-                  }
+                  // 已移除手動 startActivity，完全依賴 setFullScreenIntent 觸發全屏
 
                   return START_STICKY
               }
@@ -769,7 +759,6 @@ workflows:
           package com.example.roster_pro
 
           import android.app.Activity
-          import android.content.Context
           import android.content.Intent
           import android.os.Build
           import android.os.Bundle
@@ -781,68 +770,72 @@ workflows:
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
 
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                      setShowWhenLocked(true)
-                      setTurnScreenOn(true)
-                  } else {
-                      @Suppress("DEPRECATION")
-                      window.addFlags(
-                          WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
-                                  or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-                      )
-                  }
-                  window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-                  val layout = android.widget.LinearLayout(this).apply {
-                      orientation = android.widget.LinearLayout.VERTICAL
-                      setBackgroundColor(android.graphics.Color.BLACK)
-                      gravity = android.view.Gravity.CENTER
-                  }
-
-                  val titleTv = TextView(this).apply {
-                      text = intent.getStringExtra("title") ?: "上班提醒"
-                      setTextColor(android.graphics.Color.WHITE)
-                      textSize = 28f
-                      gravity = android.view.Gravity.CENTER
-                  }
-
-                  val bodyTv = TextView(this).apply {
-                      text = intent.getStringExtra("body") ?: ""
-                      setTextColor(android.graphics.Color.LTGRAY)
-                      textSize = 20f
-                      gravity = android.view.Gravity.CENTER
-                      setPadding(0, 30, 0, 80)
-                  }
-
-                  val stopBtn = Button(this).apply {
-                      text = "停止響鈴"
-                      textSize = 24f
-                      setOnClickListener {
-                          val stopIntent = Intent(this@AlarmActivity, AlarmService::class.java).apply {
-                              action = AlarmService.ACTION_STOP_ALARM
-                          }
-                          startService(stopIntent)
-                          finish()
+                  try {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                          setShowWhenLocked(true)
+                          setTurnScreenOn(true)
+                      } else {
+                          @Suppress("DEPRECATION")
+                          window.addFlags(
+                              WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                                      or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                          )
                       }
+                      window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+                      val layout = android.widget.LinearLayout(this).apply {
+                          orientation = android.widget.LinearLayout.VERTICAL
+                          setBackgroundColor(android.graphics.Color.BLACK)
+                          gravity = android.view.Gravity.CENTER
+                      }
+
+                      val titleTv = TextView(this).apply {
+                          text = intent.getStringExtra("title") ?: "上班提醒"
+                          setTextColor(android.graphics.Color.WHITE)
+                          textSize = 28f
+                          gravity = android.view.Gravity.CENTER
+                      }
+
+                      val bodyTv = TextView(this).apply {
+                          text = intent.getStringExtra("body") ?: ""
+                          setTextColor(android.graphics.Color.LTGRAY)
+                          textSize = 20f
+                          gravity = android.view.Gravity.CENTER
+                          setPadding(0, 30, 0, 80)
+                      }
+
+                      val stopBtn = Button(this).apply {
+                          text = "停止響鈴"
+                          textSize = 24f
+                          setOnClickListener {
+                              val stopIntent = Intent(this@AlarmActivity, AlarmService::class.java).apply {
+                                  action = AlarmService.ACTION_STOP_ALARM
+                              }
+                              startService(stopIntent)
+                              finish()
+                          }
+                      }
+
+                      val params = android.widget.LinearLayout.LayoutParams(
+                          android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                          android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                      ).apply {
+                          gravity = android.view.Gravity.CENTER
+                      }
+
+                      layout.addView(titleTv, params)
+                      layout.addView(bodyTv, params)
+                      layout.addView(stopBtn, params)
+
+                      setContentView(layout)
+                  } catch (e: Exception) {
+                      e.printStackTrace()
+                      finish()
                   }
-
-                  val params = android.widget.LinearLayout.LayoutParams(
-                      android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
-                      android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-                  ).apply {
-                      gravity = android.view.Gravity.CENTER
-                  }
-
-                  layout.addView(titleTv, params)
-                  layout.addView(bodyTv, params)
-                  layout.addView(stopBtn, params)
-
-                  setContentView(layout)
               }
 
               override fun onBackPressed() {
-                  // 防止按返回鍵關閉，必須點擊停止
-                  // super.onBackPressed()
+                  // 防止按返回鍵關閉
               }
           }
           ACTIVITY_EOF
