@@ -16,12 +16,14 @@ import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
 import android.provider.CalendarContract
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
@@ -29,6 +31,25 @@ class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.roster/calendar_real"
     private val RINGTONE_CHANNEL = "com.roster/ringtone"
     private var currentRingtone: Ringtone? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        stopAlarmService()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        stopAlarmService()
+    }
+
+    private fun stopAlarmService() {
+        try {
+            val stopIntent = Intent(this, AlarmService::class.java).apply {
+                action = AlarmService.ACTION_STOP_ALARM
+            }
+            startService(stopIntent)
+        } catch (_: Exception) {}
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -49,7 +70,6 @@ class MainActivity : FlutterActivity() {
                     if (calendarId == null) result.error("NO_CAL_ID", "Calendar ID is null", null)
                     else handleDeleteAllEvents(calendarId, result)
                 }
-                // ====== 補回缺失的 queryEvents ======
                 "queryEvents" -> {
                     val calendarId = call.argument<String>("calendarId")
                     val startMillis = call.argument<Number>("startMillis")?.toLong()
@@ -60,7 +80,6 @@ class MainActivity : FlutterActivity() {
                         handleQueryEvents(calendarId, startMillis, endMillis, result)
                     }
                 }
-                // ====== 補回缺失的 deleteEvent ======
                 "deleteEvent" -> {
                     val calendarId = call.argument<String>("calendarId")
                     val eventId = call.argument<String>("eventId")
@@ -88,8 +107,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // ==================== 通知頻道（真鬧鐘體驗） ====================
-
+    // ==================== 通知頻道 ====================
     private fun ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val audioAttributes = AudioAttributes.Builder()
@@ -114,14 +132,12 @@ class MainActivity : FlutterActivity() {
     }
 
     // ==================== 鈴聲處理 ====================
-
     private fun handleGetRingtones(result: MethodChannel.Result) {
         try {
             val ringtones = mutableListOf<Map<String, String>>()
             val manager = RingtoneManager(this)
             manager.setType(RingtoneManager.TYPE_ALARM)
             val cursor = manager.cursor
-
             while (cursor.moveToNext()) {
                 val title = cursor.getString(RingtoneManager.TITLE_COLUMN_INDEX)
                 val uri = manager.getRingtoneUri(cursor.position).toString()
@@ -159,8 +175,7 @@ class MainActivity : FlutterActivity() {
         stopCurrentRingtone()
     }
 
-    // ==================== 精確鬧鐘權限檢查 ====================
-
+    // ==================== 精確鬧鐘 ====================
     private fun handleCanScheduleExactAlarms(result: MethodChannel.Result) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -174,9 +189,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // ==================== 鬧鐘排程 ====================
-
-    private fun handleScheduleAlarm(call: MethodChannel.MethodCall, result: MethodChannel.Result) {
+    private fun handleScheduleAlarm(call: MethodCall, result: MethodChannel.Result) {
         try {
             val alarmMillis = call.argument<Long>("alarmMillis")
             val requestCode = call.argument<Int>("requestCode") ?: 0
@@ -190,12 +203,14 @@ class MainActivity : FlutterActivity() {
             }
 
             val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            val intent = Intent(this, AlarmReceiver::class.java).apply {
-                putExtra("title", title)
-                putExtra("body", body)
-                putExtra("requestCode", requestCode)
-                putExtra("soundUri", soundUri)
+            val intent = Intent(this, AlarmReceiver::class.java)
+            intent.putExtra("title", title)
+            intent.putExtra("body", body)
+            intent.putExtra("requestCode", requestCode)
+            if (soundUri != null && soundUri.isNotEmpty()) {
+                intent.putExtra("soundUri", soundUri)
             }
+
             val pendingIntent = PendingIntent.getBroadcast(
                 this,
                 requestCode,
@@ -257,7 +272,6 @@ class MainActivity : FlutterActivity() {
     }
 
     // ==================== 原有方法 ====================
-
     private fun handleUpdateWidget(result: MethodChannel.Result) {
         try {
             val appWidgetManager = AppWidgetManager.getInstance(this)
@@ -274,7 +288,8 @@ class MainActivity : FlutterActivity() {
 
     private fun handleGetCalendars(result: MethodChannel.Result) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
-            result.error("PERMISSION", "No calendar permission", null); return
+            result.error("PERMISSION", "No calendar permission", null)
+            return
         }
         val calendars = mutableListOf<Map<String, Any?>>()
         val projection = arrayOf(
@@ -306,9 +321,7 @@ class MainActivity : FlutterActivity() {
         try {
             val file = File(path)
             if (!file.exists()) { result.error("NO_FILE", "File does not exist: $path", null); return }
-            MediaScannerConnection.scanFile(applicationContext, arrayOf(file.absolutePath), arrayOf("image/jpeg", "image/jpg", "image/png")) { _, uri ->
-                result.success(uri?.toString() ?: path)
-            }
+            MediaScannerConnection.scanFile(applicationContext, arrayOf(file.absolutePath), arrayOf("image/jpeg", "image/jpg", "image/png")) { _, uri -> result.success(uri?.toString() ?: path) }
         } catch (e: Exception) { result.error("SCAN_FAIL", e.message, null) }
     }
 
@@ -327,7 +340,6 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) { result.error("STORAGE_FAIL", e.message, null) }
     }
 
-    // ====== 補回缺失的 handleQueryEvents ======
     private fun handleQueryEvents(
         calendarId: String,
         startMillis: Long,
@@ -395,7 +407,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // ====== 補回缺失的 handleDeleteEvent ======
     private fun handleDeleteEvent(
         calendarId: String,
         eventId: String,
@@ -445,14 +456,22 @@ class MainActivity : FlutterActivity() {
     private fun handleDeleteAllEvents(calendarId: String, result: MethodChannel.Result) {
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
-                result.error("PERMISSION", "No write calendar permission", null); return
+                result.error("PERMISSION", "No write calendar permission", null)
+                return
             }
+
+            val uri = CalendarContract.Events.CONTENT_URI
             val projection = arrayOf(CalendarContract.Events._ID)
-            val selection = "${CalendarContract.Events.CALENDAR_ID} = ?"
+            val selection = CalendarContract.Events.CALENDAR_ID + " = ?"
             val selectionArgs = arrayOf(calendarId)
-            val cursor = contentResolver.query(CalendarContract.Events.CONTENT_URI, projection, selection, selectionArgs, null)
+
+            val cursor = contentResolver.query(uri, projection, selection, selectionArgs, null)
             val eventIds = mutableListOf<Long>()
-            cursor?.use { while (it.moveToNext()) eventIds.add(it.getLong(0)) }
+            cursor?.use {
+                while (it.moveToNext()) {
+                    eventIds.add(it.getLong(0))
+                }
+            }
 
             val batchSize = 10
             var deleted = 0
@@ -461,13 +480,22 @@ class MainActivity : FlutterActivity() {
                 val end = minOf(index + batchSize, eventIds.size)
                 for (i in index until end) {
                     val eventUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventIds[i])
-                    try { contentResolver.delete(eventUri, null, null); deleted++ } catch (_: Exception) {}
+                    try {
+                        contentResolver.delete(eventUri, null, null)
+                        deleted++
+                    } catch (e: Exception) {
+                    }
                 }
                 index = end
-                if (index < eventIds.size) try { Thread.sleep(200) } catch (_: InterruptedException) {}
+                if (index < eventIds.size) {
+                    try { Thread.sleep(200) } catch (_: InterruptedException) {}
+                }
             }
+
             result.success(deleted)
-        } catch (e: Exception) { result.error("DELETE_FAIL", e.message, null) }
+        } catch (e: Exception) {
+            result.error("DELETE_FAIL", e.message, null)
+        }
     }
 
     companion object {
