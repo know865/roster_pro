@@ -7,22 +7,20 @@
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
 
-    <!-- ==================== 儲存權限（用於備份、匯出、截圖） ==================== -->
+    <!-- ==================== 儲存與音訊權限 ==================== -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
+    <!-- Android 13+ 讀取音訊權限，用於系統鈴聲列表 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
     <!-- ==================== 鬧鐘權限 ==================== -->
-    <!-- Android 12+ 精確鬧鐘（可由使用者或系統設定授予） -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <!-- Android 13+ 精確鬧鐘（鬧鐘類 App 可宣告，Google Play 審查較嚴；若不通過可移除這條，改用 SCHEDULE_EXACT_ALARM） -->
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
-    <!-- Android 13+ 通知權限（運行時需請求） -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- 開機後重新排程鬧鐘（可選） -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
@@ -47,12 +45,10 @@
             </intent-filter>
         </activity>
 
-        <!-- ==================== Flutter Embedding ==================== -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
 
-        <!-- ==================== 桌面小工具 Widget ==================== -->
         <receiver
             android:name=".RosterWidgetProvider"
             android:exported="true"
@@ -68,12 +64,11 @@
                 android:resource="@xml/widget_info" />
         </receiver>
 
-        <!-- ==================== 鬧鐘觸發接收器 ==================== -->
+        <!-- 鬧鐘觸發接收器 -->
         <receiver
             android:name=".AlarmReceiver"
             android:exported="false" />
 
-        <!-- ==================== 開機後自動重排鬧鐘（可選） ==================== -->
         <receiver
             android:name=".BootReceiver"
             android:exported="true"
@@ -87,9 +82,7 @@
 
     </application>
 
-    <!-- ==================== Flutter Queries（如需） ==================== -->
     <queries>
-        <!-- 開啟外部檔案（open_filex） -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="content" />
@@ -98,7 +91,6 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="file" />
         </intent>
-        <!-- 分享（share_plus） -->
         <intent>
             <action android:name="android.intent.action.SEND" />
             <data android:mimeType="*/*" />
