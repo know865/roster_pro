@@ -56,8 +56,10 @@ workflows:
               <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
               <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
               <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-              <!-- 新增：全屏通知權限（Android 14+ 必須） -->
+              <!-- 全屏通知權限（Android 14+ 必須） -->
               <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+              <!-- 懸浮窗權限（Android 10+ 從背景彈出全屏畫面的關鍵） -->
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
               <application
                   android:label="Roster Pro"
@@ -90,8 +92,8 @@ workflows:
                   </receiver>
                   <receiver android:name=".AlarmReceiver" android:exported="false" />
                   <service android:name=".AlarmService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
-                  <!-- 新增：鬧鐘全屏畫面 -->
-                  <activity android:name=".AlarmActivity" android:exported="false" android:showWhenLocked="true" android:turnScreenOn="true" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+                  <!-- 鬧鐘全屏畫面：強化屬性，防止被系統折疊成通知 -->
+                  <activity android:name=".AlarmActivity" android:exported="false" android:showWhenLocked="true" android:turnScreenOn="true" android:excludeFromRecents="true" android:taskAffinity="" android:launchMode="singleInstance" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
                   <receiver android:name=".BootReceiver" android:exported="true" android:enabled="true">
                       <intent-filter>
                           <action android:name="android.intent.action.BOOT_COMPLETED" />
@@ -160,6 +162,7 @@ workflows:
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   stopAlarmService()
+                  requestOverlayPermission() // 請求懸浮窗權限（用於全屏彈出）
               }
 
               override fun onNewIntent(intent: Intent) {
@@ -174,6 +177,21 @@ workflows:
                       }
                       startService(stopIntent)
                   } catch (_: Exception) {}
+              }
+
+              // 請求懸浮窗權限（Android 10+ 從背景啟動 Activity 的關鍵）
+              private fun requestOverlayPermission() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                      if (!Settings.canDrawOverlays(this)) {
+                          try {
+                              val intent = Intent(
+                                  Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                  Uri.parse("package:$packageName")
+                              )
+                              startActivityForResult(intent, 1234)
+                          } catch (_: Exception) {}
+                      }
+                  }
               }
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -635,6 +653,19 @@ workflows:
                   startForeground(NOTIFICATION_ID, buildNotification(title, body, requestCode))
                   playAlarmSound(soundUri)
 
+                  // 後備方案：如果系統沒有彈出全屏，嘗試直接啟動 Activity
+                  try {
+                      val fullScreenIntent = Intent(this, AlarmActivity::class.java).apply {
+                          putExtra("title", title)
+                          putExtra("body", body)
+                          putExtra("requestCode", requestCode)
+                          flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                      }
+                      startActivity(fullScreenIntent)
+                  } catch (e: Exception) {
+                      e.printStackTrace()
+                  }
+
                   return START_STICKY
               }
 
@@ -691,7 +722,6 @@ workflows:
                       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                   )
 
-                  // 全屏 Intent（鎖屏直接彈出畫面）
                   val fullScreenIntent = Intent(this, AlarmActivity::class.java).apply {
                       putExtra("title", title)
                       putExtra("body", body)
