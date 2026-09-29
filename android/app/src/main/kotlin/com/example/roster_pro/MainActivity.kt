@@ -34,12 +34,12 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        stopAlarmService()
+        stopAlarmService() // App 打開時，自動停止響鈴
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        stopAlarmService()
+        stopAlarmService() // 從通知點擊進入 App 時，自動停止響鈴
     }
 
     private fun stopAlarmService() {
@@ -55,7 +55,6 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         ensureNotificationChannel()
 
-        // 日曆與鬧鐘的 Channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getCalendars" -> handleGetCalendars(result)
@@ -93,7 +92,6 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        // 鈴聲的 Channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, RINGTONE_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getRingtones" -> handleGetRingtones(result)
@@ -107,7 +105,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // ==================== 通知頻道 ====================
     private fun ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val audioAttributes = AudioAttributes.Builder()
@@ -131,7 +128,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // ==================== 鈴聲處理 ====================
     private fun handleGetRingtones(result: MethodChannel.Result) {
         try {
             val ringtones = mutableListOf<Map<String, String>>()
@@ -175,7 +171,6 @@ class MainActivity : FlutterActivity() {
         stopCurrentRingtone()
     }
 
-    // ==================== 精確鬧鐘 ====================
     private fun handleCanScheduleExactAlarms(result: MethodChannel.Result) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -271,7 +266,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // ==================== 原有方法 ====================
     private fun handleUpdateWidget(result: MethodChannel.Result) {
         try {
             val appWidgetManager = AppWidgetManager.getInstance(this)
@@ -340,42 +334,23 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) { result.error("STORAGE_FAIL", e.message, null) }
     }
 
-    private fun handleQueryEvents(
-        calendarId: String,
-        startMillis: Long,
-        endMillis: Long,
-        result: MethodChannel.Result
-    ) {
+    private fun handleQueryEvents(calendarId: String, startMillis: Long, endMillis: Long, result: MethodChannel.Result) {
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
                 result.error("PERMISSION", "No read calendar permission", null)
                 return
             }
-
             val events = mutableListOf<Map<String, Any?>>()
             val projection = arrayOf(
-                CalendarContract.Events._ID,
-                CalendarContract.Events.TITLE,
-                CalendarContract.Events.DESCRIPTION,
-                CalendarContract.Events.DTSTART,
-                CalendarContract.Events.DTEND,
-                CalendarContract.Events.ALL_DAY,
-                CalendarContract.Events.CALENDAR_ID,
-                CalendarContract.Events.DELETED
+                CalendarContract.Events._ID, CalendarContract.Events.TITLE, CalendarContract.Events.DESCRIPTION,
+                CalendarContract.Events.DTSTART, CalendarContract.Events.DTEND, CalendarContract.Events.ALL_DAY,
+                CalendarContract.Events.CALENDAR_ID, CalendarContract.Events.DELETED
             )
             val selection = "(" + CalendarContract.Events.CALENDAR_ID + " = ?) AND " +
                     "(" + CalendarContract.Events.DTSTART + " < ?) AND " +
                     "((" + CalendarContract.Events.DTEND + " > ?) OR (" + CalendarContract.Events.DTEND + " IS NULL))"
             val selectionArgs = arrayOf(calendarId, endMillis.toString(), startMillis.toString())
-
-            val cursor = contentResolver.query(
-                CalendarContract.Events.CONTENT_URI,
-                projection,
-                selection,
-                selectionArgs,
-                CalendarContract.Events.DTSTART + " ASC"
-            )
-
+            val cursor = contentResolver.query(CalendarContract.Events.CONTENT_URI, projection, selection, selectionArgs, CalendarContract.Events.DTSTART + " ASC")
             cursor?.use {
                 val idIdx = it.getColumnIndexOrThrow(CalendarContract.Events._ID)
                 val titleIdx = it.getColumnIndexOrThrow(CalendarContract.Events.TITLE)
@@ -385,94 +360,56 @@ class MainActivity : FlutterActivity() {
                 val allDayIdx = it.getColumnIndexOrThrow(CalendarContract.Events.ALL_DAY)
                 val calIdIdx = it.getColumnIndexOrThrow(CalendarContract.Events.CALENDAR_ID)
                 val deletedIdx = it.getColumnIndexOrThrow(CalendarContract.Events.DELETED)
-
                 while (it.moveToNext()) {
                     if (!it.isNull(deletedIdx) && it.getInt(deletedIdx) == 1) continue
                     val dtStart = it.getLong(dtStartIdx)
                     val dtEnd = if (it.isNull(dtEndIdx)) dtStart else it.getLong(dtEndIdx)
                     events.add(mapOf(
-                        "eventId" to it.getLong(idIdx).toString(),
-                        "title" to it.getString(titleIdx),
-                        "description" to it.getString(descIdx),
-                        "startMillis" to dtStart,
-                        "endMillis" to dtEnd,
-                        "allDay" to (it.getInt(allDayIdx) == 1),
+                        "eventId" to it.getLong(idIdx).toString(), "title" to it.getString(titleIdx),
+                        "description" to it.getString(descIdx), "startMillis" to dtStart,
+                        "endMillis" to dtEnd, "allDay" to (it.getInt(allDayIdx) == 1),
                         "calendarId" to it.getString(calIdIdx)
                     ))
                 }
             }
             result.success(events)
-        } catch (e: Exception) {
-            result.error("QUERY_FAIL", e.message, null)
-        }
+        } catch (e: Exception) { result.error("QUERY_FAIL", e.message, null) }
     }
 
-    private fun handleDeleteEvent(
-        calendarId: String,
-        eventId: String,
-        result: MethodChannel.Result
-    ) {
+    private fun handleDeleteEvent(calendarId: String, eventId: String, result: MethodChannel.Result) {
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
                 result.error("PERMISSION", "No write calendar permission", null)
                 return
             }
-
             val eventIdLong = eventId.toLongOrNull()
-            if (eventIdLong == null) {
-                result.error("BAD_ID", "eventId is not a number: " + eventId, null)
-                return
-            }
-
+            if (eventIdLong == null) { result.error("BAD_ID", "eventId is not a number: " + eventId, null); return }
             val checkProjection = arrayOf(CalendarContract.Events.CALENDAR_ID)
             val checkSelection = CalendarContract.Events._ID + " = ?"
             val checkArgs = arrayOf(eventId)
             var belongs = false
-            contentResolver.query(
-                CalendarContract.Events.CONTENT_URI,
-                checkProjection,
-                checkSelection,
-                checkArgs,
-                null
-            )?.use { c ->
-                if (c.moveToFirst()) {
-                    val calId = c.getString(0)
-                    belongs = (calId == calendarId)
-                }
+            contentResolver.query(CalendarContract.Events.CONTENT_URI, checkProjection, checkSelection, checkArgs, null)?.use { c ->
+                if (c.moveToFirst()) { belongs = (c.getString(0) == calendarId) }
             }
-            if (!belongs) {
-                result.success(false)
-                return
-            }
-
+            if (!belongs) { result.success(false); return }
             val eventUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventIdLong)
             val rows = contentResolver.delete(eventUri, null, null)
             result.success(rows > 0)
-        } catch (e: Exception) {
-            result.error("DELETE_FAIL", e.message, null)
-        }
+        } catch (e: Exception) { result.error("DELETE_FAIL", e.message, null) }
     }
 
     private fun handleDeleteAllEvents(calendarId: String, result: MethodChannel.Result) {
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
-                result.error("PERMISSION", "No write calendar permission", null)
-                return
+                result.error("PERMISSION", "No write calendar permission", null); return
             }
-
             val uri = CalendarContract.Events.CONTENT_URI
             val projection = arrayOf(CalendarContract.Events._ID)
             val selection = CalendarContract.Events.CALENDAR_ID + " = ?"
             val selectionArgs = arrayOf(calendarId)
-
             val cursor = contentResolver.query(uri, projection, selection, selectionArgs, null)
             val eventIds = mutableListOf<Long>()
-            cursor?.use {
-                while (it.moveToNext()) {
-                    eventIds.add(it.getLong(0))
-                }
-            }
-
+            cursor?.use { while (it.moveToNext()) { eventIds.add(it.getLong(0)) } }
             val batchSize = 10
             var deleted = 0
             var index = 0
@@ -480,22 +417,13 @@ class MainActivity : FlutterActivity() {
                 val end = minOf(index + batchSize, eventIds.size)
                 for (i in index until end) {
                     val eventUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventIds[i])
-                    try {
-                        contentResolver.delete(eventUri, null, null)
-                        deleted++
-                    } catch (e: Exception) {
-                    }
+                    try { contentResolver.delete(eventUri, null, null); deleted++ } catch (e: Exception) {}
                 }
                 index = end
-                if (index < eventIds.size) {
-                    try { Thread.sleep(200) } catch (_: InterruptedException) {}
-                }
+                if (index < eventIds.size) { try { Thread.sleep(200) } catch (_: InterruptedException) {} }
             }
-
             result.success(deleted)
-        } catch (e: Exception) {
-            result.error("DELETE_FAIL", e.message, null)
-        }
+        } catch (e: Exception) { result.error("DELETE_FAIL", e.message, null) }
     }
 
     companion object {
