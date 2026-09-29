@@ -23,7 +23,9 @@ class AlarmReceiver : BroadcastReceiver() {
         // 獲取通知管理器
         val notificationManager = NotificationManagerCompat.from(context)
 
-        // 如果有自訂鈴聲，動態建立一個對應的 NotificationChannel
+        // 決定使用哪個渠道：
+        // - 有自訂鈴聲 → 動態建立專屬渠道（使用 USAGE_ALARM）
+        // - 無自訂鈴聲 → 使用 MainActivity 建立的預設鬧鐘渠道（已設定為 USAGE_ALARM）
         val channelId = if (!soundUri.isNullOrEmpty()) {
             createCustomSoundChannel(context, soundUri)
         } else {
@@ -44,16 +46,18 @@ class AlarmReceiver : BroadcastReceiver() {
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
+            .setWhen(System.currentTimeMillis())
+            .setShowWhen(true)
 
-        // 如果沒有使用自訂通道（即使用預設通道），我們手動設定鈴聲
+        // 若是預設渠道（沒有自訂鈴聲），保險起見也指定預設鬧鐘鈴聲
         if (soundUri.isNullOrEmpty()) {
-            val defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            builder.setSound(defaultSoundUri)
+            val defaultAlarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            builder.setSound(defaultAlarmUri)
         }
 
         try {
@@ -63,22 +67,29 @@ class AlarmReceiver : BroadcastReceiver() {
         }
     }
 
+    /**
+     * 為自訂鈴聲動態建立一個 NotificationChannel。
+     * 關鍵：使用 AudioAttributes.USAGE_ALARM，確保手機靜音時也會響鈴。
+     */
     private fun createCustomSoundChannel(context: Context, soundUri: String): String {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channelId = "roster_alarm_custom_${soundUri.hashCode()}"
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+
             val channel = NotificationChannel(
                 channelId,
                 "自訂鈴聲提醒",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "使用自訂鈴聲的班次提醒"
+                description = "使用自訂鈴聲的班次提醒（鬧鐘模式）"
                 enableVibration(true)
+                enableLights(true)
                 setShowBadge(true)
-                val audioAttributes = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
                 setSound(Uri.parse(soundUri), audioAttributes)
             }
             nm.createNotificationChannel(channel)
