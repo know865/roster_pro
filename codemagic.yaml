@@ -39,6 +39,11 @@ workflows:
               <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <!-- 新增：鬧鐘與音訊權限 -->
+              <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+              <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+              <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
               <application
                   android:label="Roster Pro"
@@ -68,6 +73,14 @@ workflows:
                           <action android:name="REFRESH_WIDGET" />
                       </intent-filter>
                       <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info" />
+                  </receiver>
+                  <receiver android:name=".AlarmReceiver" android:exported="false" />
+                  <receiver android:name=".BootReceiver" android:exported="true" android:enabled="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.BOOT_COMPLETED" />
+                          <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                          <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+                      </intent-filter>
                   </receiver>
               </application>
               <queries>
@@ -407,7 +420,6 @@ workflows:
           INFO_EOF
 
           mkdir -p android/app/src/main/res/drawable
-
           cat > android/app/src/main/res/drawable/cell_bg_today.xml <<'DRAW1_EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <shape xmlns:android="http://schemas.android.com/apk/res/android">
@@ -492,7 +504,6 @@ workflows:
           import android.content.Intent
           import android.content.SharedPreferences
           import android.graphics.Color
-          import android.util.Log
           import android.util.TypedValue
           import android.view.View
           import android.widget.RemoteViews
