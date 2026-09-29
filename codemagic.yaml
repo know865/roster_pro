@@ -56,9 +56,7 @@ workflows:
               <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
               <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
               <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-              <!-- 全屏通知權限（Android 14+ 必須） -->
               <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
-              <!-- 懸浮窗權限（Android 10+ 從背景彈出全屏畫面的關鍵） -->
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
               <application
@@ -92,7 +90,6 @@ workflows:
                   </receiver>
                   <receiver android:name=".AlarmReceiver" android:exported="false" />
                   <service android:name=".AlarmService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
-                  <!-- 鬧鐘全屏畫面：強化屬性，防止被系統折疊成通知 -->
                   <activity android:name=".AlarmActivity" android:exported="false" android:showWhenLocked="true" android:turnScreenOn="true" android:excludeFromRecents="true" android:taskAffinity="" android:launchMode="singleInstance" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
                   <receiver android:name=".BootReceiver" android:exported="true" android:enabled="true">
                       <intent-filter>
@@ -162,7 +159,7 @@ workflows:
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   stopAlarmService()
-                  requestOverlayPermission() // 請求懸浮窗權限（用於全屏彈出）
+                  requestOverlayPermission()
               }
 
               override fun onNewIntent(intent: Intent) {
@@ -179,7 +176,6 @@ workflows:
                   } catch (_: Exception) {}
               }
 
-              // 請求懸浮窗權限（Android 10+ 從背景啟動 Activity 的關鍵）
               private fun requestOverlayPermission() {
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                       if (!Settings.canDrawOverlays(this)) {
@@ -653,13 +649,11 @@ workflows:
                   startForeground(NOTIFICATION_ID, buildNotification(title, body, requestCode))
                   playAlarmSound(soundUri)
 
-                  // 後備方案：如果系統沒有彈出全屏，嘗試直接啟動 Activity
                   try {
                       val fullScreenIntent = Intent(this, AlarmActivity::class.java).apply {
                           putExtra("title", title)
                           putExtra("body", body)
                           putExtra("requestCode", requestCode)
-                          // 使用 this.flags 避免與外層 onStartCommand 的 flags 參數衝突
                           this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                       }
                       startActivity(fullScreenIntent)
@@ -774,7 +768,7 @@ workflows:
           cat > android/app/src/main/kotlin/com/example/roster_pro/AlarmActivity.kt <<'ACTIVITY_EOF'
           package com.example.roster_pro
 
-          import android.app.KeyguardManager
+          import android.app.Activity
           import android.content.Context
           import android.content.Intent
           import android.os.Build
@@ -782,23 +776,22 @@ workflows:
           import android.view.WindowManager
           import android.widget.Button
           import android.widget.TextView
-          import androidx.appcompat.app.AppCompatActivity
 
-          class AlarmActivity : AppCompatActivity() {
+          class AlarmActivity : Activity() {
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
+
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                       setShowWhenLocked(true)
                       setTurnScreenOn(true)
-                      val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-                      keyguardManager.requestDismissKeyguard(this, null)
                   } else {
+                      @Suppress("DEPRECATION")
                       window.addFlags(
                           WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
                                   or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-                                  or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
                       )
                   }
+                  window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
                   val layout = android.widget.LinearLayout(this).apply {
                       orientation = android.widget.LinearLayout.VERTICAL
@@ -848,7 +841,8 @@ workflows:
               }
 
               override fun onBackPressed() {
-                  // 防止按返回鍵關閉
+                  // 防止按返回鍵關閉，必須點擊停止
+                  // super.onBackPressed()
               }
           }
           ACTIVITY_EOF
