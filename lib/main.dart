@@ -308,6 +308,33 @@ class MainPageState extends State<MainPage> {
     }
   }
 
+  // ==================== 權限請求 ====================
+
+  Future<void> _requestAllPermissions() async {
+    // 1. 日曆權限
+    await handleCalendarPermission(silent: false);
+
+    // 2. 通知權限 (Android 13+)
+    if (!await Permission.notification.isGranted) {
+      await Permission.notification.request();
+    }
+
+    // 3. 精確鬧鐘權限 (Android 12+)
+    if (await Permission.scheduleExactAlarm.isDenied) {
+      await Permission.scheduleExactAlarm.request();
+    }
+
+    // 4. 儲存權限 (用於備份、匯出)
+    if (!await Permission.manageExternalStorage.isGranted) {
+      await Permission.manageExternalStorage.request();
+    }
+
+    // 5. 音訊權限 (Android 13+，用於讀取系統鈴聲)
+    if (await Permission.audio.isDenied) {
+      await Permission.audio.request();
+    }
+  }
+
   // ==================== 原有方法 ====================
 
   String _requireCalendarId() {
@@ -591,17 +618,11 @@ class MainPageState extends State<MainPage> {
     } catch (e) { await _writeDebugLog('updateWidget 整體失敗: $e'); }
   }
 
-  Future<void> _requestStoragePermission() async {
-    if (!await Permission.manageExternalStorage.isGranted) await Permission.manageExternalStorage.request();
-    if (!await Permission.notification.isGranted) await Permission.notification.request();
-  }
-
   @override
   void initState() {
     super.initState();
     nameCtrl.text = customName;
     _loadVersion();
-    _requestStoragePermission();
 
     _realChannel.setMethodCallHandler((call) async {
       if (call.method == 'onWidgetDateSelected') {
@@ -609,8 +630,16 @@ class MainPageState extends State<MainPage> {
         if (dateStr != null && dateStr.isNotEmpty) {
           try {
             final dt = DateTime.parse(dateStr);
-            if (mounted) setState(() { selectedDay = dt; focused = DateTime(dt.year, dt.month, 1); tab = 0; });
-          } catch (_) {}
+            if (mounted) {
+              setState(() {
+                selectedDay = dt;
+                focused = DateTime(dt.year, dt.month, 1);
+                tab = 0;
+              });
+            }
+          } catch (e) {
+            await _writeDebugLog('[widget] 解析日期失敗: $dateStr, $e');
+          }
         }
       }
       return null;
@@ -621,7 +650,13 @@ class MainPageState extends State<MainPage> {
         final d = await _realChannel.invokeMethod('getPendingWidgetDate');
         if (d is String && d.isNotEmpty) {
           final dt = DateTime.parse(d);
-          if (mounted) setState(() { selectedDay = dt; focused = DateTime(dt.year, dt.month, 1); tab = 0; });
+          if (mounted) {
+            setState(() {
+              selectedDay = dt;
+              focused = DateTime(dt.year, dt.month, 1);
+              tab = 0;
+            });
+          }
         }
       } catch (_) {}
     });
@@ -630,12 +665,16 @@ class MainPageState extends State<MainPage> {
 
     load().then((_) async {
       await Future.delayed(const Duration(milliseconds: 500));
-      bool ok = await handleCalendarPermission(silent: false);
-      if (!ok && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('需要日曆權限才能讀取日曆，請在設定中允許')));
+      // 統一請求所有權限
+      await _requestAllPermissions();
       try { await _realChannel.invokeMethod('requestManageStorage'); } catch (_) {}
       await updateWidget();
       Future.microtask(() => _autoFetchHolidays());
-      if (googleSyncEnabled) Future.delayed(const Duration(seconds: 2), () { if (mounted) _syncToGoogle(silent: true, forceFullSync: false); });
+      if (googleSyncEnabled) {
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) { _syncToGoogle(silent: true, forceFullSync: false); }
+        });
+      }
     });
   }
 
