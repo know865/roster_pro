@@ -284,7 +284,6 @@ class MainPageState extends State<MainPage> {
 
   Future<List<Map<String, String>>> _getSystemRingtones() async {
     try {
-      // 在獲取鈴聲前，確保音訊權限已開啟
       if (await Permission.audio.isDenied) {
         final status = await Permission.audio.request();
         if (status.isDenied || status.isPermanentlyDenied) {
@@ -945,6 +944,9 @@ class MainPageState extends State<MainPage> {
   Map<String, String>? _parseShiftFromDesc(String? desc, {String? title}) {
     try {
       if (desc != null && desc.isNotEmpty) {
+        // 純記事事件沒有班次信息
+        if (desc.contains('類型: 純記事')) return null;
+
         final shiftMatch = RegExp(r'班次:\s*(\S+)').firstMatch(desc);
         if (shiftMatch != null) {
           final code = shiftMatch.group(1)?.trim() ?? '';
@@ -969,7 +971,8 @@ class MainPageState extends State<MainPage> {
         final pipeIdx = t.indexOf(' | ');
         if (pipeIdx >= 0) t = t.substring(0, pipeIdx).trim();
 
-        final m = RegExp(r'^(\S+)\s+(\d{1,2}:\d{2})-(\d{1,2}:\d{2})').firstMatch(t);
+        // 支援新格式 "T 碼頭早更 07:00-15:30" 與舊格式 "T 07:00-15:30"
+        final m = RegExp(r'^(\S+)\s+.*?(\d{1,2}:\d{2})-(\d{1,2}:\d{2})').firstMatch(t);
         if (m != null) {
           return {
             'code': m.group(1)!,
@@ -978,7 +981,7 @@ class MainPageState extends State<MainPage> {
           };
         }
 
-        final s = RegExp(r'^(\S+)$').firstMatch(t);
+        final s = RegExp(r'^(\S+)').firstMatch(t);
         if (s != null) {
           return {'code': s.group(1)!, 'start': '全天', 'end': '全天'};
         }
@@ -998,22 +1001,46 @@ class MainPageState extends State<MainPage> {
   Future<bool> _buildAndInsertEvent(String dateKey, String code, Duration offset, {String? existingEventId}) async {
     final calId = _requireCalendarId();
     final def = defs[code];
-    if (def == null) {
-      await _writeDebugLog('[createEvent] ❌ 找不到班次定義: $code');
-      return false;
-    }
     final date = DateTime.parse(dateKey);
     final note = rosterNote[dateKey] ?? '';
     final tag = '[RosterPro]$dateKey';
-    final allDayFlag = def.isAllDay || def.code == 'O';
 
+    // 純記事（無班次）
+    if (def == null) {
+      if (note.isEmpty) {
+        await _writeDebugLog('[createEvent] ❌ 無班次且無記事: $dateKey');
+        return false;
+      }
+      final desc = '$tag\n$customName\n類型: 純記事\n記事: $note';
+      final title = '📝 $note';
+      final ev = Event(calId, eventId: existingEventId, title: title, description: desc,
+        start: tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0),
+        end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59),
+        allDay: true);
+      try {
+        final res = await _calendarPlugin.createOrUpdateEvent(ev);
+        if (res == null || !res.isSuccess || res.data == null) {
+          await _writeDebugLog('[createEvent] ❌ $dateKey 純記事建立失敗');
+          return false;
+        }
+        _googleEventIdMap[dateKey] = res.data!;
+        await _writeDebugLog('[createEvent] ✅ $dateKey 純記事 → eventId=${res.data}');
+        return true;
+      } catch (e) {
+        await _writeDebugLog('[createEvent] ❌ $dateKey 純記事例外: $e');
+        return false;
+      }
+    }
+
+    // 有班次
+    final allDayFlag = def.isAllDay || def.code == 'O';
     String desc, title;
     if (allDayFlag) {
       desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n類型: 全天${note.isNotEmpty ? '\n記事: $note' : ''}';
-      title = '${def.code}${note.isNotEmpty ? ' | $note' : ''}';
+      title = '${def.code} ${def.label}${note.isNotEmpty ? ' | $note' : ''}';
     } else {
       desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n時間: ${def.start}-${def.end}${note.isNotEmpty ? '\n記事: $note' : ''}';
-      title = '${def.code} ${def.start}-${def.end}${note.isNotEmpty ? ' | $note' : ''}';
+      title = '${def.code} ${def.label} ${def.start}-${def.end}${note.isNotEmpty ? ' | $note' : ''}';
     }
 
     Event ev;
@@ -1175,9 +1202,17 @@ class MainPageState extends State<MainPage> {
 
         _googleEventIdMap.clear();
 
+        // 建立所有排班事件
         for (var entry in roster.entries) {
           final added = await _buildAndInsertEvent(entry.key, entry.value, offset, existingEventId: null);
           if (added) add++;
+        }
+        // 建立所有純記事事件（無排班但有記事）
+        for (var dateKey in rosterNote.keys) {
+          if (!roster.containsKey(dateKey) && rosterNote[dateKey]!.isNotEmpty) {
+            final added = await _buildAndInsertEvent(dateKey, '', offset, existingEventId: null);
+            if (added) add++;
+          }
         }
 
         _needsFullSync = false;
@@ -1250,22 +1285,52 @@ class MainPageState extends State<MainPage> {
             final eDateKey = e.start != null ? DateFormat('yyyy-MM-dd').format(e.start!.toLocal()) : null;
             if (eDateKey != dateKey) return false;
             String t = title.contains(' | ') ? title.split(' | ')[0].trim() : title;
-            if (RegExp(r'^\S+\s+\d{1,2}:\d{2}-\d{1,2}:\d{2}').hasMatch(t)) return true;
+            if (RegExp(r'^\S+\s+.*?\d{1,2}:\d{2}-\d{1,2}:\d{2}').hasMatch(t)) return true;
             return RegExp(r'^\S+$').hasMatch(t);
           }).toList();
 
+          // 沒有排班
           if (!roster.containsKey(dateKey)) {
-            for (var e in rosterEvents) {
-              if (e.eventId != null) {
-                final ok = await _safeDeleteEvent(e.eventId!);
-                if (ok) del++; else delFailed++;
+            final hasNote = rosterNote.containsKey(dateKey) && rosterNote[dateKey]!.isNotEmpty;
+            if (hasNote) {
+              // 只保留/建立純記事事件，刪除班次事件
+              String? matchedEventId;
+              for (var e in rosterEvents) {
+                if (e.eventId == null) continue;
+                final desc = e.description ?? '';
+                if (desc.contains('類型: 純記事')) {
+                  if (matchedEventId == null) {
+                    matchedEventId = e.eventId;
+                  } else {
+                    final ok = await _safeDeleteEvent(e.eventId!);
+                    if (ok) del++; else delFailed++;
+                  }
+                } else {
+                  final ok = await _safeDeleteEvent(e.eventId!);
+                  if (ok) del++; else delFailed++;
+                }
               }
+              final updated = await _buildAndInsertEvent(dateKey, '', offset, existingEventId: matchedEventId);
+              if (updated) {
+                upd++;
+                if (matchedEventId != null) _googleEventIdMap[dateKey] = matchedEventId;
+              }
+              _dirtyDates.remove(dateKey);
+              continue;
+            } else {
+              for (var e in rosterEvents) {
+                if (e.eventId != null) {
+                  final ok = await _safeDeleteEvent(e.eventId!);
+                  if (ok) del++; else delFailed++;
+                }
+              }
+              _googleEventIdMap.remove(dateKey);
+              _dirtyDates.remove(dateKey);
+              continue;
             }
-            _googleEventIdMap.remove(dateKey);
-            _dirtyDates.remove(dateKey);
-            continue;
           }
 
+          // 有排班
           final newCode = roster[dateKey]!;
           final newDef = defs[newCode];
           if (newDef == null) { _dirtyDates.remove(dateKey); continue; }
@@ -1424,6 +1489,7 @@ class MainPageState extends State<MainPage> {
 
     final Set<String> allKeys = <String>{};
     allKeys.addAll(roster.keys);
+    allKeys.addAll(rosterNote.keys);
     allKeys.addAll(_googleEventIdMap.keys);
     final List<String> sortedKeys = allKeys.toList()..sort();
 
@@ -1717,7 +1783,7 @@ Future<void> _forceFullResync() async {
     return;
   }
 
-  if (roster.isEmpty) {
+  if (roster.isEmpty && rosterNote.isEmpty) {
     bool? stillProceed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1826,6 +1892,9 @@ Future<void> restoreFromFile(String path) async {
 
     _dirtyDates.clear();
     for (var key in roster.keys) {
+      _dirtyDates.add(key);
+    }
+    for (var key in rosterNote.keys) {
       _dirtyDates.add(key);
     }
 
@@ -2148,9 +2217,9 @@ Future<void> clearRosterByRange() async {
   for (DateTime d = range.start; !d.isAfter(range.end); d = d.add(const Duration(days: 1))) {
     String k = DateFormat('yyyy-MM-dd').format(d);
     _markDirty(k);
-    if (roster.containsKey(k)) {
+    if (roster.containsKey(k) || rosterNote.containsKey(k)) {
       count++;
-      roster.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); rosterExtraType.remove(k); rosterLeave.remove(k); rosterAlarmMuted.remove(k);
+      roster.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); rosterExtraType.remove(k); rosterLeave.remove(k); rosterAlarmMuted.remove(k); rosterNote.remove(k);
       if (_googleEventIdMap.containsKey(k)) {
         await _safeDeleteEvent(_googleEventIdMap[k]!);
         _googleEventIdMap.remove(k);
@@ -3036,7 +3105,6 @@ void editShiftDialog({ShiftDef? oldDef}) {
                       ]),
                     ),
                   const SizedBox(height: 6),
-                  // ====== 鈴聲選擇 ======
                   Row(children: [
                     const Icon(Icons.music_note, size: 16, color: Colors.pink),
                     const SizedBox(width: 4),
@@ -3086,8 +3154,6 @@ void editShiftDialog({ShiftDef? oldDef}) {
                       child: Text(alarmSoundName ?? '系統預設', style: const TextStyle(fontSize: 12, color: Colors.pink)),
                     ),
                   ]),
-                  // ====== 鈴聲選擇結束 ======
-
                   const SizedBox(height: 6),
                   const Padding(
                     padding: EdgeInsets.only(top: 2),
@@ -3688,7 +3754,6 @@ void showLeaveManagementDialog() {
                               ],
                             ),
                             const SizedBox(height: 6),
-                            // ====== 修改處：白色詳細卡中的班次標籤與鬧鐘狀態 ======
                             Row(
                               children: [
                                 if (selDef != null)
@@ -3727,7 +3792,6 @@ void showLeaveManagementDialog() {
                                   Text('[$extraType]', style: const TextStyle(fontSize: 12, color: Colors.deepPurple, fontWeight: FontWeight.bold)),
                               ],
                             ),
-                            // ====== 修改結束 ======
                           ],
                         ),
                       ),
