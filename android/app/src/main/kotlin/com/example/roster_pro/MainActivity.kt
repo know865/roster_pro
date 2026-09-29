@@ -34,12 +34,13 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        stopAlarmService() // App 打開時，自動停止響鈴
+        stopAlarmService()
+        requestOverlayPermission() // 請求懸浮窗權限（用於全屏彈出）
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        stopAlarmService() // 從通知點擊進入 App 時，自動停止響鈴
+        stopAlarmService()
     }
 
     private fun stopAlarmService() {
@@ -49,6 +50,21 @@ class MainActivity : FlutterActivity() {
             }
             startService(stopIntent)
         } catch (_: Exception) {}
+    }
+
+    // 請求懸浮窗權限（Android 10+ 從背景啟動 Activity 的關鍵）
+    private fun requestOverlayPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (!Settings.canDrawOverlays(this)) {
+                try {
+                    val intent = Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName")
+                    )
+                    startActivityForResult(intent, 1234)
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
