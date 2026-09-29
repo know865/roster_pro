@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.media.RingtoneManager
@@ -38,11 +39,24 @@ class AlarmService : Service() {
         val soundUri = intent?.getStringExtra("soundUri")
         val requestCode = intent?.getIntExtra("requestCode", 0) ?: 0
 
-        startForeground(NOTIFICATION_ID, buildNotification(title, body, requestCode))
-        playAlarmSound(soundUri)
+        val notif = buildNotification(title, body, requestCode)
+        try {
+            // Android 14 (API 34) 開始，若 Manifest 宣告了 foregroundServiceType，
+            // 就必須用帶 type 參數的 startForeground()，否則會拋 MissingForegroundServiceTypeException
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notif,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notif)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
 
-        // 已移除手動 startActivity，完全依賴 setFullScreenIntent 觸發全屏
-        // 這樣可避免從 Service 背景啟動 Activity 觸發系統崩潰
+        playAlarmSound(soundUri)
 
         return START_STICKY
     }
@@ -132,7 +146,12 @@ class AlarmService : Service() {
             it.release()
         }
         mediaPlayer = null
-        stopForeground(true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID)
         stopSelf()
     }
