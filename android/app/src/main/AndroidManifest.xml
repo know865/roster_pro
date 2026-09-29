@@ -21,11 +21,11 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <!-- 前景服務與媒體播放權限 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-    <!-- 新增：全屏通知權限（Android 14+ 必須） -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- 新增：懸浮窗權限（Android 10+ 從背景彈出全屏畫面的關鍵） -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:label="Roster Pro"
@@ -79,12 +79,15 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
-        <!-- 新增：鬧鐘全屏畫面（鎖屏顯示並可點擊停止） -->
+        <!-- 鬧鐘全屏畫面：強化屬性，防止被系統折疊成通知 -->
         <activity
             android:name=".AlarmActivity"
             android:exported="false"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:launchMode="singleInstance"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
         <receiver
