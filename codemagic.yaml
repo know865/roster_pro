@@ -121,6 +121,7 @@ workflows:
           MANIFEST_EOF
 
           mkdir -p android/app/src/main/kotlin/com/example/roster_pro
+
           cat > android/app/src/main/kotlin/com/example/roster_pro/MainActivity.kt <<'MAIN_EOF'
           package com.example.roster_pro
 
@@ -162,17 +163,29 @@ workflows:
               private val CHANNEL = "com.roster/calendar_real"
               private val RINGTONE_CHANNEL = "com.roster/ringtone"
               private var currentRingtone: Ringtone? = null
+
               private var pendingPickIconResult: MethodChannel.Result? = null
 
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
-                  stopAlarmService()
                   requestOverlayPermission()
+                  requestFullScreenIntentPermission()
+
+                  if (intent?.action == Intent.ACTION_MAIN &&
+                      !intent.hasExtra("selected_date") &&
+                      !intent.hasExtra("from_alarm")
+                  ) {
+                      stopAlarmService()
+                  }
               }
 
               override fun onNewIntent(intent: Intent) {
                   super.onNewIntent(intent)
-                  stopAlarmService()
+                  if (intent.hasExtra("selected_date")) return
+                  if (intent.hasExtra("from_alarm")) return
+                  if (intent.action == Intent.ACTION_MAIN) {
+                      stopAlarmService()
+                  }
               }
 
               private fun stopAlarmService() {
@@ -186,6 +199,7 @@ workflows:
 
               override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
                   super.onActivityResult(requestCode, resultCode, data)
+
                   if (requestCode == 1001) {
                       if (resultCode != RESULT_OK || data?.data == null) {
                           pendingPickIconResult?.success(false)
@@ -215,13 +229,16 @@ workflows:
                       val bitmap = BitmapFactory.decodeStream(inputStream)
                       inputStream?.close()
                       if (bitmap == null) return null
+
                       val size = 432
                       val scaled = Bitmap.createScaledBitmap(bitmap, size, size, true)
+
                       val iconFile = File(filesDir, "custom_app_icon.png")
                       val out = FileOutputStream(iconFile)
                       scaled.compress(Bitmap.CompressFormat.PNG, 100, out)
                       out.flush()
                       out.close()
+
                       iconFile.absolutePath
                   } catch (e: Exception) {
                       e.printStackTrace()
@@ -233,19 +250,24 @@ workflows:
                   return try {
                       val iconFile = File(iconPath)
                       if (!iconFile.exists()) return false
+
                       val shortcutId = "roster_pro_custom_icon_${System.currentTimeMillis()}"
+
                       val intent = Intent(this, MainActivity::class.java).apply {
                           action = Intent.ACTION_MAIN
                           addCategory(Intent.CATEGORY_LAUNCHER)
                           flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                       }
+
                       val icon = IconCompat.createWithContentUri(Uri.fromFile(iconFile))
+
                       val shortcut = ShortcutInfoCompat.Builder(this, shortcutId)
                           .setShortLabel("Roster Pro")
                           .setLongLabel("Roster Pro 排更日曆")
                           .setIcon(icon)
                           .setIntent(intent)
                           .build()
+
                       ShortcutManagerCompat.requestPinShortcut(this, shortcut, null)
                       true
                   } catch (e: Exception) {
@@ -265,6 +287,29 @@ workflows:
                               startActivityForResult(intent, 1234)
                           } catch (_: Exception) {}
                       }
+                  }
+              }
+
+              private fun requestFullScreenIntentPermission() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                      try {
+                          val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                          if (!nm.canUseFullScreenIntent()) {
+                              try {
+                                  val intent = Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                                      data = Uri.parse("package:$packageName")
+                                  }
+                                  startActivity(intent)
+                              } catch (_: Exception) {
+                                  try {
+                                      val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                          putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                                      }
+                                      startActivity(intent)
+                                  } catch (_: Exception) {}
+                              }
+                          }
+                      } catch (_: Exception) {}
                   }
               }
 
@@ -709,6 +754,7 @@ workflows:
           import android.app.Service
           import android.content.Context
           import android.content.Intent
+          import android.content.pm.ServiceInfo
           import android.media.AudioAttributes
           import android.media.MediaPlayer
           import android.media.RingtoneManager
@@ -741,7 +787,21 @@ workflows:
                   val soundUri = intent?.getStringExtra("soundUri")
                   val requestCode = intent?.getIntExtra("requestCode", 0) ?: 0
 
-                  startForeground(NOTIFICATION_ID, buildNotification(title, body, requestCode))
+                  val notif = buildNotification(title, body, requestCode)
+                  try {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                          startForeground(
+                              NOTIFICATION_ID,
+                              notif,
+                              ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                          )
+                      } else {
+                          startForeground(NOTIFICATION_ID, notif)
+                      }
+                  } catch (e: Exception) {
+                      e.printStackTrace()
+                  }
+
                   playAlarmSound(soundUri)
 
                   return START_STICKY
@@ -832,7 +892,12 @@ workflows:
                       it.release()
                   }
                   mediaPlayer = null
-                  stopForeground(true)
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                      stopForeground(STOP_FOREGROUND_REMOVE)
+                  } else {
+                      @Suppress("DEPRECATION")
+                      stopForeground(true)
+                  }
                   NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID)
                   stopSelf()
               }
@@ -1295,7 +1360,7 @@ workflows:
       - name: Build APK Release
         script: |
           BUILD_NUM=$(date +%s | tail -c 8)
-          BUILD_NAME="7.4.$(date +%m%d)"
+          BUILD_NAME="7.5.$(date +%m%d)"
           echo "Build name: $BUILD_NAME  Build number: $BUILD_NUM"
           flutter pub get
           flutter build apk --release --no-tree-shake-icons --build-name=$BUILD_NAME --build-number=$BUILD_NUM
