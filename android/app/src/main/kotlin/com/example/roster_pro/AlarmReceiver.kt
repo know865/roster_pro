@@ -12,6 +12,7 @@ class AlarmReceiver : BroadcastReceiver() {
         val requestCode = intent.getIntExtra("requestCode", 0)
         val soundUri = intent.getStringExtra("soundUri")
 
+        // 改為啟動 AlarmService 來播放強制鬧鐘鈴聲
         val serviceIntent = Intent(context, AlarmService::class.java).apply {
             action = AlarmService.ACTION_START_ALARM
             putExtra("title", title)
