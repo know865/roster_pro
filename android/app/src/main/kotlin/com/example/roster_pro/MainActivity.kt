@@ -49,6 +49,27 @@ class MainActivity : FlutterActivity() {
                     if (calendarId == null) result.error("NO_CAL_ID", "Calendar ID is null", null)
                     else handleDeleteAllEvents(calendarId, result)
                 }
+                // ====== 補回缺失的 queryEvents ======
+                "queryEvents" -> {
+                    val calendarId = call.argument<String>("calendarId")
+                    val startMillis = call.argument<Number>("startMillis")?.toLong()
+                    val endMillis = call.argument<Number>("endMillis")?.toLong()
+                    if (calendarId == null || startMillis == null || endMillis == null) {
+                        result.error("BAD_ARGS", "calendarId/startMillis/endMillis required", null)
+                    } else {
+                        handleQueryEvents(calendarId, startMillis, endMillis, result)
+                    }
+                }
+                // ====== 補回缺失的 deleteEvent ======
+                "deleteEvent" -> {
+                    val calendarId = call.argument<String>("calendarId")
+                    val eventId = call.argument<String>("eventId")
+                    if (calendarId == null || eventId == null) {
+                        result.error("BAD_ARGS", "calendarId/eventId required", null)
+                    } else {
+                        handleDeleteEvent(calendarId, eventId, result)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
@@ -67,11 +88,10 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // ==================== 通知頻道（關鍵修改：真鬧鐘體驗） ====================
+    // ==================== 通知頻道（真鬧鐘體驗） ====================
 
     private fun ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // 關鍵：使用 USAGE_ALARM，即使手機靜音/震動，鬧鐘依然會響
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ALARM)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -86,7 +106,6 @@ class MainActivity : FlutterActivity() {
                 enableVibration(true)
                 enableLights(true)
                 setShowBadge(true)
-                // 關鍵：設定系統預設鬧鐘鈴聲 + 鬧鐘音訊屬性
                 setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM), audioAttributes)
             }
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -306,6 +325,121 @@ class MainActivity : FlutterActivity() {
                 result.success(true)
             } else result.success(true)
         } catch (e: Exception) { result.error("STORAGE_FAIL", e.message, null) }
+    }
+
+    // ====== 補回缺失的 handleQueryEvents ======
+    private fun handleQueryEvents(
+        calendarId: String,
+        startMillis: Long,
+        endMillis: Long,
+        result: MethodChannel.Result
+    ) {
+        try {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+                result.error("PERMISSION", "No read calendar permission", null)
+                return
+            }
+
+            val events = mutableListOf<Map<String, Any?>>()
+            val projection = arrayOf(
+                CalendarContract.Events._ID,
+                CalendarContract.Events.TITLE,
+                CalendarContract.Events.DESCRIPTION,
+                CalendarContract.Events.DTSTART,
+                CalendarContract.Events.DTEND,
+                CalendarContract.Events.ALL_DAY,
+                CalendarContract.Events.CALENDAR_ID,
+                CalendarContract.Events.DELETED
+            )
+            val selection = "(" + CalendarContract.Events.CALENDAR_ID + " = ?) AND " +
+                    "(" + CalendarContract.Events.DTSTART + " < ?) AND " +
+                    "((" + CalendarContract.Events.DTEND + " > ?) OR (" + CalendarContract.Events.DTEND + " IS NULL))"
+            val selectionArgs = arrayOf(calendarId, endMillis.toString(), startMillis.toString())
+
+            val cursor = contentResolver.query(
+                CalendarContract.Events.CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                CalendarContract.Events.DTSTART + " ASC"
+            )
+
+            cursor?.use {
+                val idIdx = it.getColumnIndexOrThrow(CalendarContract.Events._ID)
+                val titleIdx = it.getColumnIndexOrThrow(CalendarContract.Events.TITLE)
+                val descIdx = it.getColumnIndexOrThrow(CalendarContract.Events.DESCRIPTION)
+                val dtStartIdx = it.getColumnIndexOrThrow(CalendarContract.Events.DTSTART)
+                val dtEndIdx = it.getColumnIndexOrThrow(CalendarContract.Events.DTEND)
+                val allDayIdx = it.getColumnIndexOrThrow(CalendarContract.Events.ALL_DAY)
+                val calIdIdx = it.getColumnIndexOrThrow(CalendarContract.Events.CALENDAR_ID)
+                val deletedIdx = it.getColumnIndexOrThrow(CalendarContract.Events.DELETED)
+
+                while (it.moveToNext()) {
+                    if (!it.isNull(deletedIdx) && it.getInt(deletedIdx) == 1) continue
+                    val dtStart = it.getLong(dtStartIdx)
+                    val dtEnd = if (it.isNull(dtEndIdx)) dtStart else it.getLong(dtEndIdx)
+                    events.add(mapOf(
+                        "eventId" to it.getLong(idIdx).toString(),
+                        "title" to it.getString(titleIdx),
+                        "description" to it.getString(descIdx),
+                        "startMillis" to dtStart,
+                        "endMillis" to dtEnd,
+                        "allDay" to (it.getInt(allDayIdx) == 1),
+                        "calendarId" to it.getString(calIdIdx)
+                    ))
+                }
+            }
+            result.success(events)
+        } catch (e: Exception) {
+            result.error("QUERY_FAIL", e.message, null)
+        }
+    }
+
+    // ====== 補回缺失的 handleDeleteEvent ======
+    private fun handleDeleteEvent(
+        calendarId: String,
+        eventId: String,
+        result: MethodChannel.Result
+    ) {
+        try {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+                result.error("PERMISSION", "No write calendar permission", null)
+                return
+            }
+
+            val eventIdLong = eventId.toLongOrNull()
+            if (eventIdLong == null) {
+                result.error("BAD_ID", "eventId is not a number: " + eventId, null)
+                return
+            }
+
+            val checkProjection = arrayOf(CalendarContract.Events.CALENDAR_ID)
+            val checkSelection = CalendarContract.Events._ID + " = ?"
+            val checkArgs = arrayOf(eventId)
+            var belongs = false
+            contentResolver.query(
+                CalendarContract.Events.CONTENT_URI,
+                checkProjection,
+                checkSelection,
+                checkArgs,
+                null
+            )?.use { c ->
+                if (c.moveToFirst()) {
+                    val calId = c.getString(0)
+                    belongs = (calId == calendarId)
+                }
+            }
+            if (!belongs) {
+                result.success(false)
+                return
+            }
+
+            val eventUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventIdLong)
+            val rows = contentResolver.delete(eventUri, null, null)
+            result.success(rows > 0)
+        } catch (e: Exception) {
+            result.error("DELETE_FAIL", e.message, null)
+        }
     }
 
     private fun handleDeleteAllEvents(calendarId: String, result: MethodChannel.Result) {
