@@ -284,6 +284,26 @@ class MainPageState extends State<MainPage> {
 
   Future<List<Map<String, String>>> _getSystemRingtones() async {
     try {
+      // 在獲取鈴聲前，確保音訊權限已開啟
+      if (await Permission.audio.isDenied) {
+        final status = await Permission.audio.request();
+        if (status.isDenied || status.isPermanentlyDenied) {
+          if (mounted) {
+            showDialog(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: const Text('需要音訊權限'),
+                content: const Text('請允許存取音訊權限，才能讀取系統鈴聲列表。\n\n前往設定 > 應用程式 > Roster Pro > 權限 > 音樂和音訊，允許存取。'),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+                  FilledButton(onPressed: () { openAppSettings(); Navigator.pop(ctx); }, child: const Text('去設定')),
+                ],
+              ),
+            );
+          }
+          return [];
+        }
+      }
       final List<dynamic>? result = await _ringtoneChannel.invokeMethod('getRingtones');
       return result?.map((e) => Map<String, String>.from(e as Map)).toList() ?? [];
     } catch (e) {
@@ -311,99 +331,52 @@ class MainPageState extends State<MainPage> {
   // ==================== 權限請求 ====================
 
   Future<void> _requestAllPermissions() async {
-    // 1. 日曆權限
     await handleCalendarPermission(silent: false);
-
-    // 2. 通知權限 (Android 13+)
-    if (!await Permission.notification.isGranted) {
-      await Permission.notification.request();
-    }
-
-    // 3. 精確鬧鐘權限 (Android 12+)
-    if (await Permission.scheduleExactAlarm.isDenied) {
-      await Permission.scheduleExactAlarm.request();
-    }
-
-    // 4. 儲存權限 (用於備份、匯出)
-    if (!await Permission.manageExternalStorage.isGranted) {
-      await Permission.manageExternalStorage.request();
-    }
-
-    // 5. 音訊權限 (Android 13+，用於讀取系統鈴聲)
-    if (await Permission.audio.isDenied) {
-      await Permission.audio.request();
-    }
+    if (!await Permission.notification.isGranted) await Permission.notification.request();
+    if (await Permission.scheduleExactAlarm.isDenied) await Permission.scheduleExactAlarm.request();
+    if (!await Permission.manageExternalStorage.isGranted) await Permission.manageExternalStorage.request();
+    if (await Permission.audio.isDenied) await Permission.audio.request();
   }
 
   // ==================== 原有方法 ====================
 
   String _requireCalendarId() {
     final id = _rosterCalendarId;
-    if (id == null || id.isEmpty) {
-      throw '尚未選擇日曆，請至「設定 → 選擇日曆」指定目標日曆';
-    }
+    if (id == null || id.isEmpty) throw '尚未選擇日曆，請至「設定 → 選擇日曆」指定目標日曆';
     return id;
   }
 
   Future<bool> _safeDeleteEvent(String eventId) async {
     final calId = _requireCalendarId();
     try {
-      final bool? ok = await _realChannel.invokeMethod('deleteEvent', {
-        'calendarId': calId,
-        'eventId': eventId,
-      });
-      await _writeDebugLog('[原生 deleteEvent] calId=$calId eventId=$eventId ok=$ok');
+      final bool? ok = await _realChannel.invokeMethod('deleteEvent', {'calendarId': calId, 'eventId': eventId});
       if (ok == true) return true;
-    } catch (e) {
-      await _writeDebugLog('[原生 deleteEvent 失敗] calId=$calId eventId=$eventId 失敗: $e，降級使用 device_calendar');
-    }
+    } catch (e) { await _writeDebugLog('[原生 deleteEvent 失敗] $e'); }
     try {
       final ok = await _calendarPlugin.deleteEvent(calId, eventId);
-      await _writeDebugLog('[device_calendar deleteEvent] calId=$calId eventId=$eventId ok=$ok');
       return ok == true;
-    } catch (e) {
-      await _writeDebugLog('[device_calendar deleteEvent] calId=$calId eventId=$eventId 失敗: $e');
-      return false;
-    }
+    } catch (e) { return false; }
   }
 
   Future<List<Event>> _safeRetrieveEvents(DateTime start, DateTime end) async {
     final calId = _requireCalendarId();
     try {
       final List<dynamic>? res = await _realChannel.invokeMethod('queryEvents', {
-        'calendarId': calId,
-        'startMillis': start.millisecondsSinceEpoch,
-        'endMillis': end.millisecondsSinceEpoch,
-      }).timeout(const Duration(seconds: 10), onTimeout: () {
-        _writeDebugLog('[原生 queryEvents 超時] $start ~ $end');
-        return null;
-      });
+        'calendarId': calId, 'startMillis': start.millisecondsSinceEpoch, 'endMillis': end.millisecondsSinceEpoch,
+      }).timeout(const Duration(seconds: 10), onTimeout: () { return null; });
       if (res != null) {
         return res.map((e) {
           final map = Map<String, dynamic>.from(e as Map);
           final int? startMs = map['startMillis'] as int?;
           final int? endMs = map['endMillis'] as int?;
-          return Event(
-            calId,
-            eventId: map['eventId']?.toString(),
-            title: map['title']?.toString(),
-            description: map['description']?.toString(),
+          return Event(calId, eventId: map['eventId']?.toString(), title: map['title']?.toString(), description: map['description']?.toString(),
             start: startMs != null ? tz.TZDateTime.fromMillisecondsSinceEpoch(tz.UTC, startMs) : null,
-            end: endMs != null ? tz.TZDateTime.fromMillisecondsSinceEpoch(tz.UTC, endMs) : null,
-            allDay: map['allDay'] == true,
-          );
+            end: endMs != null ? tz.TZDateTime.fromMillisecondsSinceEpoch(tz.UTC, endMs) : null, allDay: map['allDay'] == true);
         }).toList();
       }
-    } catch (e) {
-      await _writeDebugLog('[原生 queryEvents 失敗] $e，降級使用 device_calendar');
-    }
-    final res = await _calendarPlugin.retrieveEvents(
-      calId,
-      RetrieveEventsParams(startDate: start, endDate: end),
-    );
-    if (!res.isSuccess) {
-      throw 'device_calendar retrieveEvents 失敗: ${res.toString()}';
-    }
+    } catch (e) { await _writeDebugLog('[原生 queryEvents 失敗] $e'); }
+    final res = await _calendarPlugin.retrieveEvents(calId, RetrieveEventsParams(startDate: start, endDate: end));
+    if (!res.isSuccess) throw 'device_calendar retrieveEvents 失敗';
     return res.data ?? [];
   }
 
@@ -414,9 +387,7 @@ class MainPageState extends State<MainPage> {
       final f = File('${dir.path}/roster_widget_debug.txt');
       final ts = DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now());
       await f.writeAsString('[$ts][Dart] $message\n', mode: FileMode.append);
-      if (await f.length() > 200 * 1024) {
-        await f.writeAsString('[$ts] (log reset)\n');
-      }
+      if (await f.length() > 200 * 1024) await f.writeAsString('[$ts] (log reset)\n');
     } catch (_) {}
   }
 
@@ -566,7 +537,7 @@ class MainPageState extends State<MainPage> {
           'requestCode': requestCode,
           'title': '上班提醒：${def.code} ${def.label}',
           'body': '${def.start} 上班，還有 ${def.alarmMinutesBefore} 分鐘',
-          'soundUri': def.alarmSoundUri, // 傳遞自訂鈴聲
+          'soundUri': def.alarmSoundUri,
         });
         count++;
       } catch (e) { await _writeDebugLog('[鬧鐘] 排程失敗 $dateKey: $e'); }
@@ -665,7 +636,6 @@ class MainPageState extends State<MainPage> {
 
     load().then((_) async {
       await Future.delayed(const Duration(milliseconds: 500));
-      // 統一請求所有權限
       await _requestAllPermissions();
       try { await _realChannel.invokeMethod('requestManageStorage'); } catch (_) {}
       await updateWidget();
