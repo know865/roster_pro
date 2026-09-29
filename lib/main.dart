@@ -1154,7 +1154,7 @@ class MainPageState extends State<MainPage> {
 
     bool needFull = forceFullSync || _needsFullSync;
 
-    if (!needFull && _dirtyDates.isEmpty) {
+    if (!needFull && _dirtyDates.isEmpty && rosterNote.isEmpty) {
       await _writeDebugLog('[同步] 沒有變更 (dirtyDates 為空)');
       if (!silent && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('沒有變更需要同步'), duration: Duration(seconds: 2)));
@@ -1257,8 +1257,19 @@ class MainPageState extends State<MainPage> {
           }
         }
 
-        final datesToSync = List<String>.from(_dirtyDates);
-        datesToSync.sort();
+        // ====== 修改重點：確保排班開始前的純記事也能被同步 ======
+        // 原本的 datesToSync 只包含 _dirtyDates，會漏掉早期未編輯過的純記事。
+        // 這裡強制掃描所有 rosterNote 中，尚未在日曆中建立事件（不在 _googleEventIdMap 中）的日期。
+        final Set<String> syncSet = <String>{};
+        syncSet.addAll(_dirtyDates);
+        for (var noteKey in rosterNote.keys) {
+          if (rosterNote[noteKey]!.isNotEmpty && !_googleEventIdMap.containsKey(noteKey)) {
+            syncSet.add(noteKey);
+          }
+        }
+        final datesToSync = syncSet.toList()..sort();
+        // =========================================================
+
         await _writeDebugLog('[同步] 增量同步：待處理 ${datesToSync.length} 天 → $datesToSync');
 
         for (var dateKey in datesToSync) {
