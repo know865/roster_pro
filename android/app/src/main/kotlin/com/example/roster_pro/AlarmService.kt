@@ -54,7 +54,7 @@ class AlarmService : Service() {
             mediaPlayer = MediaPlayer().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM) // 關鍵：無視靜音/震動，強制從鬧鐘音訊流播放
+                        .setUsage(AudioAttributes.USAGE_ALARM) // 關鍵：無視靜音/震動模式，強制從鬧鐘音訊流播放
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build()
                 )
@@ -77,11 +77,13 @@ class AlarmService : Service() {
             ).apply {
                 description = "班次上班鬧鐘響鈴"
                 setSound(null, null) // 聲音由 MediaPlayer 播放，避免雙重播放
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC // 關鍵：允許在鎖屏顯示完整內容
             }
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.createNotificationChannel(channel)
         }
 
+        // 停止按鈕的 PendingIntent（透過 Service 處理，無需解鎖即可按停）
         val stopIntent = Intent(this, AlarmService::class.java).apply {
             action = ACTION_STOP_ALARM
         }
@@ -90,6 +92,7 @@ class AlarmService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        // 點擊通知內容的 PendingIntent（打開 App）
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
         val contentPendingIntent = PendingIntent.getActivity(
             this, requestCode, launchIntent,
@@ -102,11 +105,11 @@ class AlarmService : Service() {
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setCategory(NotificationCompat.CATEGORY_ALARM) // 關鍵：標記為鬧鐘類別
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC) // 關鍵：鎖屏顯示完整內容
             .setContentIntent(contentPendingIntent)
-            .addAction(android.R.drawable.ic_media_pause, "停止響鈴", stopPendingIntent) // 提供停止按鈕
-            .setOngoing(true) // 防止使用者滑掉通知，必須按停止
+            .addAction(android.R.drawable.ic_media_pause, "停止響鈴", stopPendingIntent) // 關鍵：鎖屏可按的停止按鈕
+            .setOngoing(true) // 防止被滑掉，必須按停止
             .build()
     }
 
