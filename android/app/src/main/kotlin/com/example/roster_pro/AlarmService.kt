@@ -41,20 +41,19 @@ class AlarmService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification(title, body, requestCode))
         playAlarmSound(soundUri)
 
-        // ====== 後備方案：如果系統沒有彈出全屏，嘗試直接啟動 Activity ======
+        // 後備方案：如果系統沒有彈出全屏，嘗試直接啟動 Activity
         try {
             val fullScreenIntent = Intent(this, AlarmActivity::class.java).apply {
                 putExtra("title", title)
                 putExtra("body", body)
                 putExtra("requestCode", requestCode)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                // 使用 this.flags 避免與外層 onStartCommand 的 flags 參數衝突
+                this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
             startActivity(fullScreenIntent)
         } catch (e: Exception) {
-            // 背景啟動 Activity 被系統攔截，這是正常的，不影響通知與鈴聲
             e.printStackTrace()
         }
-        // ===============================================================
 
         return START_STICKY
     }
@@ -116,7 +115,7 @@ class AlarmService : Service() {
             putExtra("title", title)
             putExtra("body", body)
             putExtra("requestCode", requestCode)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val fullScreenPendingIntent = PendingIntent.getActivity(
             this, requestCode + 20000, fullScreenIntent,
