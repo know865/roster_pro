@@ -54,7 +54,7 @@ class AlarmService : Service() {
             mediaPlayer = MediaPlayer().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM) // 關鍵：使用鬧鐘音訊流，無視媒體/通知靜音
+                        .setUsage(AudioAttributes.USAGE_ALARM) // 關鍵：無視靜音/震動，強制從鬧鐘音訊流播放
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build()
                 )
