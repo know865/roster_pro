@@ -25,6 +25,18 @@ workflows:
           cp /tmp/pubspec.yaml.bak pubspec.yaml
           ls -la android/build.gradle
 
+      - name: Fix compileSdk
+        script: |
+          # 修正 compileSdk 為 35，避免 plugin 編譯警告
+          if [ -f android/app/build.gradle ]; then
+            sed -i '' 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/g' android/app/build.gradle || true
+            sed -i '' 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/g' android/app/build.gradle || true
+          fi
+          if [ -f android/app/build.gradle.kts ]; then
+            sed -i '' 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/g' android/app/build.gradle.kts || true
+          fi
+          cat android/app/build.gradle 2>/dev/null | head -40 || cat android/app/build.gradle.kts 2>/dev/null | head -40
+
       - name: Add Custom Widget Files
         script: |
           set -e
@@ -130,6 +142,7 @@ workflows:
           import androidx.core.content.ContextCompat
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodCall
           import io.flutter.plugin.common.MethodChannel
           import java.io.File
 
@@ -277,7 +290,7 @@ workflows:
                   }
               }
 
-              private fun handleScheduleAlarm(call: MethodChannel.MethodCall, result: MethodChannel.Result) {
+              private fun handleScheduleAlarm(call: MethodCall, result: MethodChannel.Result) {
                   try {
                       val alarmMillis = call.argument<Long>("alarmMillis")
                       val requestCode = call.argument<Int>("requestCode") ?: 0
@@ -291,12 +304,14 @@ workflows:
                       }
 
                       val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-                      val intent = Intent(this, AlarmReceiver::class.java).apply {
-                          putExtra("title", title)
-                          putExtra("body", body)
-                          putExtra("requestCode", requestCode)
-                          putExtra("soundUri", soundUri)
+                      val intent = Intent(this, AlarmReceiver::class.java)
+                      intent.putExtra("title", title)
+                      intent.putExtra("body", body)
+                      intent.putExtra("requestCode", requestCode)
+                      if (soundUri != null && soundUri.isNotEmpty()) {
+                          intent.putExtra("soundUri", soundUri)
                       }
+
                       val pendingIntent = PendingIntent.getBroadcast(
                           this,
                           requestCode,
@@ -379,14 +394,13 @@ workflows:
                       return
                   }
                   val calendars = mutableListOf<Map<String, Any?>>()
-                  val uri = CalendarContract.Calendars.CONTENT_URI
                   val projection = arrayOf(
                       CalendarContract.Calendars._ID,
                       CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
                       CalendarContract.Calendars.ACCOUNT_NAME,
                       CalendarContract.Calendars.ACCOUNT_TYPE
                   )
-                  val cursor = contentResolver.query(uri, projection, null, null, null)
+                  val cursor = contentResolver.query(CalendarContract.Calendars.CONTENT_URI, projection, null, null, null)
                   cursor?.use {
                       while (it.moveToNext()) {
                           val id = it.getLong(0).toString()
