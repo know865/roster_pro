@@ -14,14 +14,16 @@
         android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
-    <!-- Android 13+ 讀取音訊權限，用於系統鈴聲列表 -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
-    <!-- ==================== 鬧鐘權限 ==================== -->
+    <!-- ==================== 鬧鐘與前景服務權限 ==================== -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 新增：前景服務與媒體播放權限 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
     <application
         android:label="Roster Pro"
@@ -69,6 +71,12 @@
             android:name=".AlarmReceiver"
             android:exported="false" />
 
+        <!-- 新增：鬧鐘前景服務 -->
+        <service
+            android:name=".AlarmService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
         <receiver
             android:name=".BootReceiver"
             android:exported="true"
@@ -94,6 +102,10 @@
         <intent>
             <action android:name="android.intent.action.SEND" />
             <data android:mimeType="*/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
         </intent>
     </queries>
 
