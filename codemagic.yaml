@@ -667,6 +667,7 @@ workflows:
                       ).apply {
                           description = "班次上班鬧鐘響鈴"
                           setSound(null, null)
+                          lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                       }
                       val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                       nm.createNotificationChannel(channel)
