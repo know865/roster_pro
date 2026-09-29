@@ -44,13 +44,27 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        stopAlarmService()
-        requestOverlayPermission() // 請求懸浮窗權限（用於全屏彈出）
+        requestOverlayPermission()
+        requestFullScreenIntentPermission()
+
+        // 只有使用者「主動從桌面圖標開啟 App」時才停止正在響的鬧鐘
+        // 避免從通知/小工具/鬧鐘畫面跳進來時誤殺鬧鐘
+        if (intent?.action == Intent.ACTION_MAIN &&
+            !intent.hasExtra("selected_date") &&
+            !intent.hasExtra("from_alarm")
+        ) {
+            stopAlarmService()
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        stopAlarmService()
+        // 由小工具日期點擊進來（帶 selected_date）不停鬧鐘
+        if (intent.hasExtra("selected_date")) return
+        if (intent.hasExtra("from_alarm")) return
+        if (intent.action == Intent.ACTION_MAIN) {
+            stopAlarmService()
+        }
     }
 
     private fun stopAlarmService() {
@@ -97,7 +111,6 @@ class MainActivity : FlutterActivity() {
             inputStream?.close()
             if (bitmap == null) return null
 
-            // 縮放到 432x432（Android 自訂圖標建議大小）
             val size = 432
             val scaled = Bitmap.createScaledBitmap(bitmap, size, size, true)
 
@@ -145,7 +158,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // 請求懸浮窗權限（Android 10+ 從背景啟動 Activity 的關鍵）
+    // 請求懸浮窗權限（部分機型從背景啟動 Activity 需要）
     private fun requestOverlayPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (!Settings.canDrawOverlays(this)) {
@@ -157,6 +170,31 @@ class MainActivity : FlutterActivity() {
                     startActivityForResult(intent, 1234)
                 } catch (_: Exception) {}
             }
+        }
+    }
+
+    // 請求「全屏通知」權限（Android 14+ 必須，否則全屏 Intent 會被降級為抬頭通知）
+    private fun requestFullScreenIntentPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            try {
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                if (!nm.canUseFullScreenIntent()) {
+                    try {
+                        val intent = Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                            data = Uri.parse("package:$packageName")
+                        }
+                        startActivity(intent)
+                    } catch (_: Exception) {
+                        // 部分機型無此 action，fallback 到 app 通知設定
+                        try {
+                            val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                            }
+                            startActivity(intent)
+                        } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: Exception) {}
         }
     }
 
