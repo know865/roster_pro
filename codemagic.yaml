@@ -27,7 +27,6 @@ workflows:
 
       - name: Fix compileSdk
         script: |
-          # 修正 compileSdk 為 35，避免 plugin 編譯警告
           if [ -f android/app/build.gradle ]; then
             sed -i '' 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/g' android/app/build.gradle || true
             sed -i '' 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/g' android/app/build.gradle || true
@@ -52,6 +51,7 @@ workflows:
               <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
               <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
               <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
               <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -87,6 +87,7 @@ workflows:
                       <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info" />
                   </receiver>
                   <receiver android:name=".AlarmReceiver" android:exported="false" />
+                  <service android:name=".AlarmService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
                   <receiver android:name=".BootReceiver" android:exported="true" android:enabled="true">
                       <intent-filter>
                           <action android:name="android.intent.action.BOOT_COMPLETED" />
@@ -136,6 +137,7 @@ workflows:
           import android.media.RingtoneManager
           import android.net.Uri
           import android.os.Build
+          import android.os.Bundle
           import android.os.Environment
           import android.provider.CalendarContract
           import android.provider.Settings
@@ -150,6 +152,25 @@ workflows:
               private val CHANNEL = "com.roster/calendar_real"
               private val RINGTONE_CHANNEL = "com.roster/ringtone"
               private var currentRingtone: Ringtone? = null
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  stopAlarmService()
+              }
+
+              override fun onNewIntent(intent: Intent) {
+                  super.onNewIntent(intent)
+                  stopAlarmService()
+              }
+
+              private fun stopAlarmService() {
+                  try {
+                      val stopIntent = Intent(this, AlarmService::class.java).apply {
+                          action = AlarmService.ACTION_STOP_ALARM
+                      }
+                      startService(stopIntent)
+                  } catch (_: Exception) {}
+              }
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
@@ -205,8 +226,6 @@ workflows:
                   }
               }
 
-              // ==================== 通知頻道（真鬧鐘：USAGE_ALARM） ====================
-
               private fun ensureNotificationChannel() {
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       val audioAttributes = AudioAttributes.Builder()
@@ -229,8 +248,6 @@ workflows:
                       nm.createNotificationChannel(channel)
                   }
               }
-
-              // ==================== 鈴聲處理 ====================
 
               private fun handleGetRingtones(result: MethodChannel.Result) {
                   try {
@@ -274,8 +291,6 @@ workflows:
                   super.onDestroy()
                   stopCurrentRingtone()
               }
-
-              // ==================== 精確鬧鐘 ====================
 
               private fun handleCanScheduleExactAlarms(result: MethodChannel.Result) {
                   try {
@@ -372,8 +387,6 @@ workflows:
                   }
               }
 
-              // ==================== 原有方法 ====================
-
               private fun handleUpdateWidget(result: MethodChannel.Result) {
                   try {
                       val appWidgetManager = AppWidgetManager.getInstance(this)
@@ -409,10 +422,8 @@ workflows:
                           val accountType = it.getString(3) ?: ""
                           val isGoogle = accountName.contains("gmail") || accountType.contains("google") || accountName.contains("google")
                           calendars.add(mapOf(
-                              "id" to id,
-                              "displayName" to displayName,
-                              "accountName" to accountName,
-                              "accountType" to accountType,
+                              "id" to id, "displayName" to displayName,
+                              "accountName" to accountName, "accountType" to accountType,
                               "isGoogle" to isGoogle
                           ))
                       }
@@ -440,46 +451,27 @@ workflows:
                               return
                           }
                           result.success(true)
-                      } else { result.success(true) }
+                      } else result.success(true)
                   } catch (e: Exception) { result.error("STORAGE_FAIL", e.message, null) }
               }
 
-              private fun handleQueryEvents(
-                  calendarId: String,
-                  startMillis: Long,
-                  endMillis: Long,
-                  result: MethodChannel.Result
-              ) {
+              private fun handleQueryEvents(calendarId: String, startMillis: Long, endMillis: Long, result: MethodChannel.Result) {
                   try {
                       if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
                           result.error("PERMISSION", "No read calendar permission", null)
                           return
                       }
-
                       val events = mutableListOf<Map<String, Any?>>()
                       val projection = arrayOf(
-                          CalendarContract.Events._ID,
-                          CalendarContract.Events.TITLE,
-                          CalendarContract.Events.DESCRIPTION,
-                          CalendarContract.Events.DTSTART,
-                          CalendarContract.Events.DTEND,
-                          CalendarContract.Events.ALL_DAY,
-                          CalendarContract.Events.CALENDAR_ID,
-                          CalendarContract.Events.DELETED
+                          CalendarContract.Events._ID, CalendarContract.Events.TITLE, CalendarContract.Events.DESCRIPTION,
+                          CalendarContract.Events.DTSTART, CalendarContract.Events.DTEND, CalendarContract.Events.ALL_DAY,
+                          CalendarContract.Events.CALENDAR_ID, CalendarContract.Events.DELETED
                       )
                       val selection = "(" + CalendarContract.Events.CALENDAR_ID + " = ?) AND " +
                               "(" + CalendarContract.Events.DTSTART + " < ?) AND " +
                               "((" + CalendarContract.Events.DTEND + " > ?) OR (" + CalendarContract.Events.DTEND + " IS NULL))"
                       val selectionArgs = arrayOf(calendarId, endMillis.toString(), startMillis.toString())
-
-                      val cursor = contentResolver.query(
-                          CalendarContract.Events.CONTENT_URI,
-                          projection,
-                          selection,
-                          selectionArgs,
-                          CalendarContract.Events.DTSTART + " ASC"
-                      )
-
+                      val cursor = contentResolver.query(CalendarContract.Events.CONTENT_URI, projection, selection, selectionArgs, CalendarContract.Events.DTSTART + " ASC")
                       cursor?.use {
                           val idIdx = it.getColumnIndexOrThrow(CalendarContract.Events._ID)
                           val titleIdx = it.getColumnIndexOrThrow(CalendarContract.Events.TITLE)
@@ -489,94 +481,56 @@ workflows:
                           val allDayIdx = it.getColumnIndexOrThrow(CalendarContract.Events.ALL_DAY)
                           val calIdIdx = it.getColumnIndexOrThrow(CalendarContract.Events.CALENDAR_ID)
                           val deletedIdx = it.getColumnIndexOrThrow(CalendarContract.Events.DELETED)
-
                           while (it.moveToNext()) {
                               if (!it.isNull(deletedIdx) && it.getInt(deletedIdx) == 1) continue
                               val dtStart = it.getLong(dtStartIdx)
                               val dtEnd = if (it.isNull(dtEndIdx)) dtStart else it.getLong(dtEndIdx)
                               events.add(mapOf(
-                                  "eventId" to it.getLong(idIdx).toString(),
-                                  "title" to it.getString(titleIdx),
-                                  "description" to it.getString(descIdx),
-                                  "startMillis" to dtStart,
-                                  "endMillis" to dtEnd,
-                                  "allDay" to (it.getInt(allDayIdx) == 1),
+                                  "eventId" to it.getLong(idIdx).toString(), "title" to it.getString(titleIdx),
+                                  "description" to it.getString(descIdx), "startMillis" to dtStart,
+                                  "endMillis" to dtEnd, "allDay" to (it.getInt(allDayIdx) == 1),
                                   "calendarId" to it.getString(calIdIdx)
                               ))
                           }
                       }
                       result.success(events)
-                  } catch (e: Exception) {
-                      result.error("QUERY_FAIL", e.message, null)
-                  }
+                  } catch (e: Exception) { result.error("QUERY_FAIL", e.message, null) }
               }
 
-              private fun handleDeleteEvent(
-                  calendarId: String,
-                  eventId: String,
-                  result: MethodChannel.Result
-              ) {
+              private fun handleDeleteEvent(calendarId: String, eventId: String, result: MethodChannel.Result) {
                   try {
                       if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
                           result.error("PERMISSION", "No write calendar permission", null)
                           return
                       }
-
                       val eventIdLong = eventId.toLongOrNull()
-                      if (eventIdLong == null) {
-                          result.error("BAD_ID", "eventId is not a number: " + eventId, null)
-                          return
-                      }
-
+                      if (eventIdLong == null) { result.error("BAD_ID", "eventId is not a number: " + eventId, null); return }
                       val checkProjection = arrayOf(CalendarContract.Events.CALENDAR_ID)
                       val checkSelection = CalendarContract.Events._ID + " = ?"
                       val checkArgs = arrayOf(eventId)
                       var belongs = false
-                      contentResolver.query(
-                          CalendarContract.Events.CONTENT_URI,
-                          checkProjection,
-                          checkSelection,
-                          checkArgs,
-                          null
-                      )?.use { c ->
-                          if (c.moveToFirst()) {
-                              val calId = c.getString(0)
-                              belongs = (calId == calendarId)
-                          }
+                      contentResolver.query(CalendarContract.Events.CONTENT_URI, checkProjection, checkSelection, checkArgs, null)?.use { c ->
+                          if (c.moveToFirst()) { belongs = (c.getString(0) == calendarId) }
                       }
-                      if (!belongs) {
-                          result.success(false)
-                          return
-                      }
-
+                      if (!belongs) { result.success(false); return }
                       val eventUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventIdLong)
                       val rows = contentResolver.delete(eventUri, null, null)
                       result.success(rows > 0)
-                  } catch (e: Exception) {
-                      result.error("DELETE_FAIL", e.message, null)
-                  }
+                  } catch (e: Exception) { result.error("DELETE_FAIL", e.message, null) }
               }
 
               private fun handleDeleteAllEvents(calendarId: String, result: MethodChannel.Result) {
                   try {
                       if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
-                          result.error("PERMISSION", "No write calendar permission", null)
-                          return
+                          result.error("PERMISSION", "No write calendar permission", null); return
                       }
-
                       val uri = CalendarContract.Events.CONTENT_URI
                       val projection = arrayOf(CalendarContract.Events._ID)
                       val selection = CalendarContract.Events.CALENDAR_ID + " = ?"
                       val selectionArgs = arrayOf(calendarId)
-
                       val cursor = contentResolver.query(uri, projection, selection, selectionArgs, null)
                       val eventIds = mutableListOf<Long>()
-                      cursor?.use {
-                          while (it.moveToNext()) {
-                              eventIds.add(it.getLong(0))
-                          }
-                      }
-
+                      cursor?.use { while (it.moveToNext()) { eventIds.add(it.getLong(0)) } }
                       val batchSize = 10
                       var deleted = 0
                       var index = 0
@@ -584,22 +538,13 @@ workflows:
                           val end = minOf(index + batchSize, eventIds.size)
                           for (i in index until end) {
                               val eventUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventIds[i])
-                              try {
-                                  contentResolver.delete(eventUri, null, null)
-                                  deleted++
-                              } catch (e: Exception) {
-                              }
+                              try { contentResolver.delete(eventUri, null, null); deleted++ } catch (e: Exception) {}
                           }
                           index = end
-                          if (index < eventIds.size) {
-                              try { Thread.sleep(200) } catch (_: InterruptedException) {}
-                          }
+                          if (index < eventIds.size) { try { Thread.sleep(200) } catch (_: InterruptedException) {} }
                       }
-
                       result.success(deleted)
-                  } catch (e: Exception) {
-                      result.error("DELETE_FAIL", e.message, null)
-                  }
+                  } catch (e: Exception) { result.error("DELETE_FAIL", e.message, null) }
               }
 
               companion object {
@@ -613,18 +558,10 @@ workflows:
           cat > android/app/src/main/kotlin/com/example/roster_pro/AlarmReceiver.kt <<'ALARM_EOF'
           package com.example.roster_pro
 
-          import android.app.NotificationChannel
-          import android.app.NotificationManager
-          import android.app.PendingIntent
           import android.content.BroadcastReceiver
           import android.content.Context
           import android.content.Intent
-          import android.media.AudioAttributes
-          import android.media.RingtoneManager
-          import android.net.Uri
           import android.os.Build
-          import androidx.core.app.NotificationCompat
-          import androidx.core.app.NotificationManagerCompat
 
           class AlarmReceiver : BroadcastReceiver() {
               override fun onReceive(context: Context, intent: Intent) {
@@ -633,23 +570,123 @@ workflows:
                   val requestCode = intent.getIntExtra("requestCode", 0)
                   val soundUri = intent.getStringExtra("soundUri")
 
-                  val notificationManager = NotificationManagerCompat.from(context)
-
-                  val channelId = if (!soundUri.isNullOrEmpty()) {
-                      createCustomSoundChannel(context, soundUri)
-                  } else {
-                      MainActivity.ALARM_CHANNEL_ID
+                  val serviceIntent = Intent(context, AlarmService::class.java).apply {
+                      action = AlarmService.ACTION_START_ALARM
+                      putExtra("title", title)
+                      putExtra("body", body)
+                      putExtra("requestCode", requestCode)
+                      putExtra("soundUri", soundUri)
                   }
 
-                  val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                  val pendingIntent = PendingIntent.getActivity(
-                      context,
-                      requestCode,
-                      launchIntent,
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      context.startForegroundService(serviceIntent)
+                  } else {
+                      context.startService(serviceIntent)
+                  }
+              }
+          }
+          ALARM_EOF
+
+          cat > android/app/src/main/kotlin/com/example/roster_pro/AlarmService.kt <<'SERVICE_EOF'
+          package com.example.roster_pro
+
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.app.Service
+          import android.content.Context
+          import android.content.Intent
+          import android.media.AudioAttributes
+          import android.media.MediaPlayer
+          import android.media.RingtoneManager
+          import android.net.Uri
+          import android.os.Build
+          import android.os.IBinder
+          import androidx.core.app.NotificationCompat
+          import androidx.core.app.NotificationManagerCompat
+
+          class AlarmService : Service() {
+              private var mediaPlayer: MediaPlayer? = null
+
+              companion object {
+                  const val ACTION_START_ALARM = "com.example.roster_pro.START_ALARM"
+                  const val ACTION_STOP_ALARM = "com.example.roster_pro.STOP_ALARM"
+                  const val CHANNEL_ID = "roster_alarm_foreground_channel"
+                  const val NOTIFICATION_ID = 9999
+              }
+
+              override fun onBind(intent: Intent?): IBinder? = null
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  if (intent?.action == ACTION_STOP_ALARM) {
+                      stopAlarmAndSelf()
+                      return START_NOT_STICKY
+                  }
+
+                  val title = intent?.getStringExtra("title") ?: "上班提醒"
+                  val body = intent?.getStringExtra("body") ?: ""
+                  val soundUri = intent?.getStringExtra("soundUri")
+                  val requestCode = intent?.getIntExtra("requestCode", 0) ?: 0
+
+                  startForeground(NOTIFICATION_ID, buildNotification(title, body, requestCode))
+                  playAlarmSound(soundUri)
+
+                  return START_STICKY
+              }
+
+              private fun playAlarmSound(soundUri: String?) {
+                  try {
+                      val uri = if (soundUri.isNullOrEmpty()) {
+                          RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                      } else {
+                          Uri.parse(soundUri)
+                      }
+                      mediaPlayer = MediaPlayer().apply {
+                          setAudioAttributes(
+                              AudioAttributes.Builder()
+                                  .setUsage(AudioAttributes.USAGE_ALARM)
+                                  .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                  .build()
+                          )
+                          setDataSource(this@AlarmService, uri)
+                          isLooping = true
+                          prepare()
+                          start()
+                      }
+                  } catch (e: Exception) {
+                      e.printStackTrace()
+                  }
+              }
+
+              private fun buildNotification(title: String, body: String, requestCode: Int): android.app.Notification {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val channel = NotificationChannel(
+                          CHANNEL_ID,
+                          "鬧鐘響鈴",
+                          NotificationManager.IMPORTANCE_HIGH
+                      ).apply {
+                          description = "班次上班鬧鐘響鈴"
+                          setSound(null, null)
+                      }
+                      val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                      nm.createNotificationChannel(channel)
+                  }
+
+                  val stopIntent = Intent(this, AlarmService::class.java).apply {
+                      action = ACTION_STOP_ALARM
+                  }
+                  val stopPendingIntent = PendingIntent.getService(
+                      this, requestCode + 10000, stopIntent,
                       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                   )
 
-                  val builder = NotificationCompat.Builder(context, channelId)
+                  val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+                  val contentPendingIntent = PendingIntent.getActivity(
+                      this, requestCode, launchIntent,
+                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                  )
+
+                  return NotificationCompat.Builder(this, CHANNEL_ID)
                       .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
                       .setContentTitle(title)
                       .setContentText(body)
@@ -657,50 +694,33 @@ workflows:
                       .setPriority(NotificationCompat.PRIORITY_MAX)
                       .setCategory(NotificationCompat.CATEGORY_ALARM)
                       .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                      .setAutoCancel(true)
-                      .setContentIntent(pendingIntent)
-                      .setWhen(System.currentTimeMillis())
-                      .setShowWhen(true)
-
-                  if (soundUri.isNullOrEmpty()) {
-                      val defaultAlarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                      builder.setSound(defaultAlarmUri)
-                  }
-
-                  try {
-                      notificationManager.notify(requestCode, builder.build())
-                  } catch (_: SecurityException) {
-                  }
+                      .setContentIntent(contentPendingIntent)
+                      .addAction(android.R.drawable.ic_media_pause, "停止響鈴", stopPendingIntent)
+                      .setOngoing(true)
+                      .build()
               }
 
-              private fun createCustomSoundChannel(context: Context, soundUri: String): String {
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      val channelId = "roster_alarm_custom_${soundUri.hashCode()}"
-                      val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-                      val audioAttributes = AudioAttributes.Builder()
-                          .setUsage(AudioAttributes.USAGE_ALARM)
-                          .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                          .build()
-
-                      val channel = NotificationChannel(
-                          channelId,
-                          "自訂鈴聲提醒",
-                          NotificationManager.IMPORTANCE_HIGH
-                      ).apply {
-                          description = "使用自訂鈴聲的班次提醒（鬧鐘模式）"
-                          enableVibration(true)
-                          enableLights(true)
-                          setShowBadge(true)
-                          setSound(Uri.parse(soundUri), audioAttributes)
-                      }
-                      nm.createNotificationChannel(channel)
-                      return channelId
+              private fun stopAlarmAndSelf() {
+                  mediaPlayer?.let {
+                      if (it.isPlaying) it.stop()
+                      it.release()
                   }
-                  return MainActivity.ALARM_CHANNEL_ID
+                  mediaPlayer = null
+                  stopForeground(true)
+                  NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID)
+                  stopSelf()
+              }
+
+              override fun onDestroy() {
+                  super.onDestroy()
+                  mediaPlayer?.let {
+                      if (it.isPlaying) it.stop()
+                      it.release()
+                  }
+                  mediaPlayer = null
               }
           }
-          ALARM_EOF
+          SERVICE_EOF
 
           cat > android/app/src/main/kotlin/com/example/roster_pro/DateTimeUtils.kt <<'DATETIME_EOF'
           package com.example.roster_pro
