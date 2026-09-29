@@ -41,19 +41,8 @@ class AlarmService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification(title, body, requestCode))
         playAlarmSound(soundUri)
 
-        // 後備方案：如果系統沒有彈出全屏，嘗試直接啟動 Activity
-        try {
-            val fullScreenIntent = Intent(this, AlarmActivity::class.java).apply {
-                putExtra("title", title)
-                putExtra("body", body)
-                putExtra("requestCode", requestCode)
-                // 使用 this.flags 避免與外層 onStartCommand 的 flags 參數衝突
-                this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            startActivity(fullScreenIntent)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        // 已移除手動 startActivity，完全依賴 setFullScreenIntent 觸發全屏
+        // 這樣可避免從 Service 背景啟動 Activity 觸發系統崩潰
 
         return START_STICKY
     }
