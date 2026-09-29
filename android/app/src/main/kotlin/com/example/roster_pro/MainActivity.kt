@@ -10,6 +10,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
 import android.media.MediaScannerConnection
 import android.media.Ringtone
 import android.media.RingtoneManager
@@ -66,6 +67,33 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // ==================== 通知頻道（關鍵修改：真鬧鐘體驗） ====================
+
+    private fun ensureNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // 關鍵：使用 USAGE_ALARM，即使手機靜音/震動，鬧鐘依然會響
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+
+            val channel = NotificationChannel(
+                ALARM_CHANNEL_ID,
+                "上班提醒",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "班次上班前的提醒通知（鬧鐘模式）"
+                enableVibration(true)
+                enableLights(true)
+                setShowBadge(true)
+                // 關鍵：設定系統預設鬧鐘鈴聲 + 鬧鐘音訊屬性
+                setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM), audioAttributes)
+            }
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(channel)
+        }
+    }
+
     // ==================== 鈴聲處理 ====================
 
     private fun handleGetRingtones(result: MethodChannel.Result) {
@@ -112,23 +140,7 @@ class MainActivity : FlutterActivity() {
         stopCurrentRingtone()
     }
 
-    // ==================== 通知頻道與鬧鐘 ====================
-
-    private fun ensureNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                ALARM_CHANNEL_ID,
-                "上班提醒",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "班次上班前的提醒通知"
-                enableVibration(true)
-                setShowBadge(true)
-            }
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.createNotificationChannel(channel)
-        }
-    }
+    // ==================== 精確鬧鐘權限檢查 ====================
 
     private fun handleCanScheduleExactAlarms(result: MethodChannel.Result) {
         try {
@@ -143,13 +155,15 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // ==================== 鬧鐘排程 ====================
+
     private fun handleScheduleAlarm(call: MethodChannel.MethodCall, result: MethodChannel.Result) {
         try {
             val alarmMillis = call.argument<Long>("alarmMillis")
             val requestCode = call.argument<Int>("requestCode") ?: 0
             val title = call.argument<String>("title") ?: "上班提醒"
             val body = call.argument<String>("body") ?: ""
-            val soundUri = call.argument<String>("soundUri") // 接收自訂鈴聲
+            val soundUri = call.argument<String>("soundUri")
 
             if (alarmMillis == null) {
                 result.error("NO_TIME", "alarmMillis is null", null)
@@ -161,7 +175,7 @@ class MainActivity : FlutterActivity() {
                 putExtra("title", title)
                 putExtra("body", body)
                 putExtra("requestCode", requestCode)
-                putExtra("soundUri", soundUri) // 傳給接收器
+                putExtra("soundUri", soundUri)
             }
             val pendingIntent = PendingIntent.getBroadcast(
                 this,
