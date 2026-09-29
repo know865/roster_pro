@@ -10,6 +10,8 @@ import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.AudioAttributes
 import android.media.MediaScannerConnection
 import android.media.Ringtone
@@ -21,16 +23,24 @@ import android.os.Environment
 import android.provider.CalendarContract
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.io.FileOutputStream
+import java.io.InputStream
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.roster/calendar_real"
     private val RINGTONE_CHANNEL = "com.roster/ringtone"
     private var currentRingtone: Ringtone? = null
+
+    // 用於圖片選擇後的 Flutter result 回調
+    private var pendingPickIconResult: MethodChannel.Result? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,6 +60,89 @@ class MainActivity : FlutterActivity() {
             }
             startService(stopIntent)
         } catch (_: Exception) {}
+    }
+
+    // ==================== 圖片選擇後的回調 ====================
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode == 1001) {
+            if (resultCode != RESULT_OK || data?.data == null) {
+                pendingPickIconResult?.success(false)
+                pendingPickIconResult = null
+                return
+            }
+            val imageUri = data.data!!
+            try {
+                val savedIconPath = saveIconImage(imageUri)
+                if (savedIconPath == null) {
+                    pendingPickIconResult?.error("SAVE_FAIL", "無法儲存圖片", null)
+                } else {
+                    val success = createAppShortcut(savedIconPath)
+                    pendingPickIconResult?.success(success)
+                }
+            } catch (e: Exception) {
+                pendingPickIconResult?.error("PIN_FAIL", e.message, null)
+            } finally {
+                pendingPickIconResult = null
+            }
+        }
+    }
+
+    // 將選中的圖片壓縮成 432x432 並儲存到 App 私有目錄
+    private fun saveIconImage(imageUri: Uri): String? {
+        return try {
+            val inputStream: InputStream? = contentResolver.openInputStream(imageUri)
+            val bitmap = BitmapFactory.decodeStream(inputStream)
+            inputStream?.close()
+            if (bitmap == null) return null
+
+            // 縮放到 432x432（Android 自訂圖標建議大小）
+            val size = 432
+            val scaled = Bitmap.createScaledBitmap(bitmap, size, size, true)
+
+            val iconFile = File(filesDir, "custom_app_icon.png")
+            val out = FileOutputStream(iconFile)
+            scaled.compress(Bitmap.CompressFormat.PNG, 100, out)
+            out.flush()
+            out.close()
+
+            iconFile.absolutePath
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    // 使用 ShortcutManagerCompat 建立帶有自訂圖標的桌面捷徑
+    private fun createAppShortcut(iconPath: String): Boolean {
+        return try {
+            val iconFile = File(iconPath)
+            if (!iconFile.exists()) return false
+
+            val shortcutId = "roster_pro_custom_icon_${System.currentTimeMillis()}"
+
+            val intent = Intent(this, MainActivity::class.java).apply {
+                action = Intent.ACTION_MAIN
+                addCategory(Intent.CATEGORY_LAUNCHER)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+
+            val icon = IconCompat.createWithContentUri(Uri.fromFile(iconFile))
+
+            val shortcut = ShortcutInfoCompat.Builder(this, shortcutId)
+                .setShortLabel("Roster Pro")
+                .setLongLabel("Roster Pro 排更日曆")
+                .setIcon(icon)
+                .setIntent(intent)
+                .build()
+
+            ShortcutManagerCompat.requestPinShortcut(this, shortcut, null)
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
     }
 
     // 請求懸浮窗權限（Android 10+ 從背景啟動 Activity 的關鍵）
@@ -104,13 +197,21 @@ class MainActivity : FlutterActivity() {
                         handleDeleteEvent(calendarId, eventId, result)
                     }
                 }
-                // ====== 新增：處理選擇相冊圖片的方法 ======
+                // ====== 選擇相冊圖片並建立自訂圖標捷徑 ======
                 "pickAndPinIcon" -> {
                     try {
-                        val intent = Intent(Intent.ACTION_PICK, android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
-                        startActivityForResult(intent, 1001)
-                        result.success(true)
+                        if (pendingPickIconResult != null) {
+                            result.error("BUSY", "上一個圖片選擇尚未完成", null)
+                        } else {
+                            pendingPickIconResult = result
+                            val intent = Intent(
+                                Intent.ACTION_PICK,
+                                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                            )
+                            startActivityForResult(intent, 1001)
+                        }
                     } catch (e: Exception) {
+                        pendingPickIconResult = null
                         result.error("PICK_ICON_FAIL", e.message, null)
                     }
                 }
