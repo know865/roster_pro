@@ -47,6 +47,9 @@ class ShiftDef {
   bool hasCustomLeave; String? customLeaveCode;
   bool alarmEnabled;
   int alarmMinutesBefore;
+  String? alarmSoundUri;
+  String? alarmSoundName;
+
   ShiftDef(this.code, this.label, this.hours, this.color, {
     this.ot = 0, this.start = '07:00', this.end = '15:30',
     this.hasMorningAllow = false, this.hasNightAllow = false, this.hasMealAllow = false,
@@ -55,6 +58,8 @@ class ShiftDef {
     this.hasCustomLeave = false, this.customLeaveCode,
     this.alarmEnabled = false,
     this.alarmMinutesBefore = 30,
+    this.alarmSoundUri,
+    this.alarmSoundName,
   });
   Map<String, dynamic> toJson() => {
     'code': code, 'label': label, 'hours': hours, 'ot': ot, 'color': color.value,
@@ -65,6 +70,8 @@ class ShiftDef {
     'hasCustomLeave': hasCustomLeave, 'customLeaveCode': customLeaveCode,
     'alarmEnabled': alarmEnabled,
     'alarmMinutesBefore': alarmMinutesBefore,
+    'alarmSoundUri': alarmSoundUri,
+    'alarmSoundName': alarmSoundName,
   };
   factory ShiftDef.fromJson(Map<String, dynamic> j) => ShiftDef(
     j['code'], j['label'] ?? j['code'], (j['hours'] ?? 8).toDouble(), Color(j['color'] ?? 0xFFFF9800),
@@ -75,6 +82,8 @@ class ShiftDef {
     hasCustomLeave: j['hasCustomLeave'] ?? false, customLeaveCode: j['customLeaveCode'],
     alarmEnabled: j['alarmEnabled'] ?? false,
     alarmMinutesBefore: j['alarmMinutesBefore'] ?? 30,
+    alarmSoundUri: j['alarmSoundUri'],
+    alarmSoundName: j['alarmSoundName'],
   );
   String get detailTime => isAllDay ? '全天 ${hours.toStringAsFixed(1)}h' : '${start}-${end} ${hours.toStringAsFixed(1)}h';
 }
@@ -97,7 +106,6 @@ class SavedPattern {
 }
 
 class LunarHelper {
-  // 1900~2100 年農曆資料（共 201 個項目）
   static final List<int> lunarInfo = [
     0x04bd8, 0x04ae0, 0x0a570, 0x054d5, 0x0d260, 0x0d950, 0x16554, 0x056a0, 0x09ad0, 0x055d2,
     0x04ae0, 0x0a5b6, 0x0a4d0, 0x0d250, 0x1d255, 0x0b540, 0x0d6a0, 0x0ada2, 0x095b0, 0x14977,
@@ -124,25 +132,10 @@ class LunarHelper {
   static final List<String> lunarMonths = ['正','二','三','四','五','六','七','八','九','十','冬','臘'];
   static final List<String> lunarDays = ['初一','初二','初三','初四','初五','初六','初七','初八','初九','初十','十一','十二','十三','十四','十五','十六','十七','十八','十九','二十','廿一','廿二','廿三','廿四','廿五','廿六','廿七','廿八','廿九','三十'];
   static bool _isYearSupported(int y) => y >= 1900 && y <= 2100;
-  static int leapMonth(int y) {
-    if (!_isYearSupported(y)) return 0;
-    return lunarInfo[y - 1900] & 0xf;
-  }
-  static int leapDays(int y) {
-    if (!_isYearSupported(y)) return 0;
-    if (leapMonth(y) == 0) return 0;
-    return ((lunarInfo[y - 1900] & 0x10000) != 0) ? 30 : 29;
-  }
-  static int monthDays(int y, int m) {
-    if (!_isYearSupported(y)) return 30;
-    return ((lunarInfo[y - 1900] & (0x10000 >> m)) != 0) ? 30 : 29;
-  }
-  static int lYearDays(int y) {
-    if (!_isYearSupported(y)) return 365;
-    int sum = 348;
-    for (int i = 0x8000; i > 0x8; i >>= 1) sum += ((lunarInfo[y - 1900] & i) != 0) ? 1 : 0;
-    return sum + leapDays(y);
-  }
+  static int leapMonth(int y) { if (!_isYearSupported(y)) return 0; return lunarInfo[y - 1900] & 0xf; }
+  static int leapDays(int y) { if (!_isYearSupported(y)) return 0; if (leapMonth(y) == 0) return 0; return ((lunarInfo[y - 1900] & 0x10000) != 0) ? 30 : 29; }
+  static int monthDays(int y, int m) { if (!_isYearSupported(y)) return 30; return ((lunarInfo[y - 1900] & (0x10000 >> m)) != 0) ? 30 : 29; }
+  static int lYearDays(int y) { if (!_isYearSupported(y)) return 365; int sum = 348; for (int i = 0x8000; i > 0x8; i >>= 1) sum += ((lunarInfo[y - 1900] & i) != 0) ? 1 : 0; return sum + leapDays(y); }
   static List<int> solarToLunar(DateTime date) {
     int offset = date.difference(DateTime(1900, 1, 31)).inDays;
     int year = 1900;
@@ -152,12 +145,7 @@ class LunarHelper {
     int month = 1;
     while (month < 13 && offset > 0) {
       int days;
-      if (leap > 0 && month == leap + 1 && !isLeap) {
-        isLeap = true;
-        days = leapDays(year);
-      } else {
-        days = monthDays(year, month);
-      }
+      if (leap > 0 && month == leap + 1 && !isLeap) { isLeap = true; days = leapDays(year); } else { days = monthDays(year, month); }
       if (isLeap && month == leap + 1) isLeap = false;
       if (offset < days) break;
       offset -= days;
@@ -266,6 +254,7 @@ class MainPageState extends State<MainPage> {
   GlobalKey calKey = GlobalKey();
   DeviceCalendarPlugin _calendarPlugin = DeviceCalendarPlugin();
   static const _realChannel = MethodChannel('com.roster/calendar_real');
+  static const _ringtoneChannel = MethodChannel('com.roster/ringtone');
   String? _rosterCalendarId;
   String _rosterCalendarName = '未選';
   String _rosterAccountName = '';
@@ -274,7 +263,6 @@ class MainPageState extends State<MainPage> {
   Set<String> _dirtyDates = <String>{};
   bool _needsFullSync = false;
 
-  // 公眾假期 API 快取
   Map<int, Map<String, String>> _holidayCache = {};
   bool _holidayLoading = false;
   String _holidayLastUpdate = '';
@@ -291,6 +279,36 @@ class MainPageState extends State<MainPage> {
   Color todayBgColor = const Color(0xFFFFF9C4);
   Color todayBorderColor = Colors.orange;
   Color holidayDotColor = Colors.red;
+
+  // ==================== 鈴聲相關方法 ====================
+
+  Future<List<Map<String, String>>> _getSystemRingtones() async {
+    try {
+      final List<dynamic>? result = await _ringtoneChannel.invokeMethod('getRingtones');
+      return result?.map((e) => Map<String, String>.from(e as Map)).toList() ?? [];
+    } catch (e) {
+      await _writeDebugLog('[鈴聲] 獲取系統鈴聲失敗: $e');
+      return [];
+    }
+  }
+
+  Future<void> _playRingtonePreview(String uri) async {
+    try {
+      await _ringtoneChannel.invokeMethod('playRingtone', {'uri': uri});
+    } catch (e) {
+      await _writeDebugLog('[鈴聲] 播放預覽失敗: $e');
+    }
+  }
+
+  Future<void> _stopRingtonePreview() async {
+    try {
+      await _ringtoneChannel.invokeMethod('stopRingtone');
+    } catch (e) {
+      await _writeDebugLog('[鈴聲] 停止預覽失敗: $e');
+    }
+  }
+
+  // ==================== 原有方法 ====================
 
   String _requireCalendarId() {
     final id = _rosterCalendarId;
@@ -312,7 +330,6 @@ class MainPageState extends State<MainPage> {
     } catch (e) {
       await _writeDebugLog('[原生 deleteEvent 失敗] calId=$calId eventId=$eventId 失敗: $e，降級使用 device_calendar');
     }
-
     try {
       final ok = await _calendarPlugin.deleteEvent(calId, eventId);
       await _writeDebugLog('[device_calendar deleteEvent] calId=$calId eventId=$eventId ok=$ok');
@@ -334,7 +351,6 @@ class MainPageState extends State<MainPage> {
         _writeDebugLog('[原生 queryEvents 超時] $start ~ $end');
         return null;
       });
-
       if (res != null) {
         return res.map((e) {
           final map = Map<String, dynamic>.from(e as Map);
@@ -351,11 +367,9 @@ class MainPageState extends State<MainPage> {
           );
         }).toList();
       }
-      await _writeDebugLog('[原生 queryEvents 超時] $start ~ $end，降級使用 device_calendar');
     } catch (e) {
       await _writeDebugLog('[原生 queryEvents 失敗] $e，降級使用 device_calendar');
     }
-
     final res = await _calendarPlugin.retrieveEvents(
       calId,
       RetrieveEventsParams(startDate: start, endDate: end),
@@ -379,48 +393,22 @@ class MainPageState extends State<MainPage> {
     } catch (_) {}
   }
 
-  // ==================== 公眾假期 API ====================
-
   String _getCountryCode(String region) {
-    switch (region) {
-      case '香港': return 'HK';
-      case '中國內地': return 'CN';
-      case '台灣': return 'TW';
-      case '美國': return 'US';
-      default: return 'HK';
-    }
+    switch (region) { case '香港': return 'HK'; case '中國內地': return 'CN'; case '台灣': return 'TW'; case '美國': return 'US'; default: return 'HK'; }
   }
 
   static const Map<String, String> _holidayNameMap = {
-    "New Year's Day": "元旦",
-    "Lunar New Year's Day": "農曆年初一",
-    "Second Day of Lunar New Year": "農曆年初二",
-    "Third Day of Lunar New Year": "農曆年初三",
-    "Good Friday": "耶穌受難節",
-    "Easter Monday": "復活節星期一",
-    "The day following Good Friday": "耶穌受難節翌日",
-    "Ching Ming Festival": "清明節",
-    "Labour Day": "勞動節",
-    "The Birthday of the Buddha": "佛誕",
-    "Tuen Ng Festival": "端午節",
-    "Hong Kong Special Administrative Region Establishment Day": "香港特區成立紀念日",
-    "National Day": "國慶日",
-    "The day following the Chinese Mid-Autumn Festival": "中秋翌日",
-    "Chinese Mid-Autumn Festival": "中秋節",
-    "Chung Yeung Festival": "重陽節",
-    "Christmas Day": "聖誕節",
-    "Boxing Day": "聖誕節後第一個周日",
-    "The first weekday after Christmas Day": "聖誕節後第一個周日",
-    "First Weekday After Christmas Day": "聖誕節後第一個周日",
-    "New Year's Day (observed)": "元旦（補假）",
-    "Chinese New Year": "農曆新年",
+    "New Year's Day": "元旦", "Lunar New Year's Day": "農曆年初一", "Second Day of Lunar New Year": "農曆年初二", "Third Day of Lunar New Year": "農曆年初三",
+    "Good Friday": "耶穌受難節", "Easter Monday": "復活節星期一", "The day following Good Friday": "耶穌受難節翌日", "Ching Ming Festival": "清明節",
+    "Labour Day": "勞動節", "The Birthday of the Buddha": "佛誕", "Tuen Ng Festival": "端午節", "Hong Kong Special Administrative Region Establishment Day": "香港特區成立紀念日",
+    "National Day": "國慶日", "The day following the Chinese Mid-Autumn Festival": "中秋翌日", "Chinese Mid-Autumn Festival": "中秋節",
+    "Chung Yeung Festival": "重陽節", "Christmas Day": "聖誕節", "Boxing Day": "聖誕節後第一個周日", "The first weekday after Christmas Day": "聖誕節後第一個周日",
+    "First Weekday After Christmas Day": "聖誕節後第一個周日", "New Year's Day (observed)": "元旦（補假）", "Chinese New Year": "農曆新年",
   };
 
   String _translateHolidayName(String raw) {
     if (_holidayNameMap.containsKey(raw)) return _holidayNameMap[raw]!;
-    for (var entry in _holidayNameMap.entries) {
-      if (raw.toLowerCase().contains(entry.key.toLowerCase())) return entry.value;
-    }
+    for (var entry in _holidayNameMap.entries) { if (raw.toLowerCase().contains(entry.key.toLowerCase())) return entry.value; }
     return raw;
   }
 
@@ -431,98 +419,52 @@ class MainPageState extends State<MainPage> {
     try {
       final sp = await SharedPreferences.getInstance();
       final cacheKey = 'holidays_${_getCountryCode(holidayRegion)}_$year';
-
       if (!force) {
         final cached = sp.getString(cacheKey);
         if (cached != null && cached.isNotEmpty) {
           try {
             final map = Map<String, String>.from(jsonDecode(cached));
-            if (map.isNotEmpty) {
-              _holidayCache[year] = map;
-              await _writeDebugLog('[假期API] $year 從快取載入 ${map.length} 個');
-              _holidayLoading = false;
-              return true;
-            }
+            if (map.isNotEmpty) { _holidayCache[year] = map; _holidayLoading = false; return true; }
           } catch (_) {}
         }
       }
-
-      final countryCode = _getCountryCode(holidayRegion);
-      final url = Uri.parse('https://date.nager.at/api/v3/PublicHolidays/$year/$countryCode');
-      await _writeDebugLog('[假期API] 抓取 $url');
-
+      final url = Uri.parse('https://date.nager.at/api/v3/PublicHolidays/$year/${_getCountryCode(holidayRegion)}');
       final res = await http.get(url).timeout(const Duration(seconds: 12));
-      if (res.statusCode != 200) {
-        await _writeDebugLog('[假期API] HTTP ${res.statusCode}');
-        _holidayLoading = false;
-        return false;
-      }
-
+      if (res.statusCode != 200) { _holidayLoading = false; return false; }
       final list = jsonDecode(res.body) as List;
       final map = <String, String>{};
       for (var item in list) {
         final dateStr = item['date']?.toString() ?? '';
         if (dateStr.isEmpty) continue;
-        final rawName = (item['localName'] ?? item['name'] ?? '').toString();
-        map[dateStr] = _translateHolidayName(rawName);
+        map[dateStr] = _translateHolidayName((item['localName'] ?? item['name'] ?? '').toString());
       }
-
-      if (map.isEmpty) {
-        await _writeDebugLog('[假期API] $year 抓取成功但無資料');
-        _holidayLoading = false;
-        return false;
-      }
-
+      if (map.isEmpty) { _holidayLoading = false; return false; }
       _holidayCache[year] = map;
       await sp.setString(cacheKey, jsonEncode(map));
       _holidayLastUpdate = DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now());
       await sp.setString('holidayLastUpdate', _holidayLastUpdate);
-      await _writeDebugLog('[假期API] $year 抓取成功，共 ${map.length} 個假期');
       _holidayLoading = false;
       return true;
-    } catch (e) {
-      await _writeDebugLog('[假期API] 抓取失敗: $e');
-      _holidayLoading = false;
-      return false;
-    }
+    } catch (e) { _holidayLoading = false; return false; }
   }
 
   Future<void> _autoFetchHolidays() async {
     if (holidayRegion == '無') return;
     final now = DateTime.now();
-    for (int offset = 0; offset <= 2; offset++) {
-      final y = now.year + offset;
-      await fetchHolidaysFromApi(y);
-    }
+    for (int offset = 0; offset <= 2; offset++) { await fetchHolidaysFromApi(now.year + offset); }
     if (mounted) setState(() {});
   }
 
   Future<void> _manualRefreshHolidays() async {
-    if (holidayRegion == '無') {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('目前地區設為「無」，不會抓取假期')));
-      return;
-    }
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('正在從網路更新公眾假期...'),
-        duration: Duration(seconds: 1),
-      ));
-    }
+    if (holidayRegion == '無') { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('目前地區設為「無」，不會抓取假期'))); return; }
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在從網路更新公眾假期...'), duration: Duration(seconds: 1)));
     final now = DateTime.now();
     int success = 0;
-    for (int offset = -1; offset <= 3; offset++) {
-      final y = now.year + offset;
-      final ok = await fetchHolidaysFromApi(y, force: true);
-      if (ok) success++;
-    }
+    for (int offset = -1; offset <= 3; offset++) { final ok = await fetchHolidaysFromApi(now.year + offset, force: true); if (ok) success++; }
     if (mounted) setState(() {});
     if (mounted) {
       final count = getHolidays(focused.year, holidayRegion).length;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('已更新 $success 年假期，${focused.year} 年共 $count 個假期'),
-        duration: const Duration(seconds: 3),
-        backgroundColor: success > 0 ? Colors.green : Colors.red,
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已更新 $success 年假期，${focused.year} 年共 $count 個假期'), duration: const Duration(seconds: 3), backgroundColor: success > 0 ? Colors.green : Colors.red));
     }
   }
 
@@ -530,11 +472,7 @@ class MainPageState extends State<MainPage> {
     Map<String, String> m = {};
     if (region == '無') return m;
     if (region == '香港') {
-      m['${year}-01-01'] = '元旦';
-      m['${year}-05-01'] = '勞動節';
-      m['${year}-07-01'] = '回歸';
-      m['${year}-10-01'] = '國慶';
-      m['${year}-12-25'] = '聖誕';
+      m['${year}-01-01'] = '元旦'; m['${year}-05-01'] = '勞動節'; m['${year}-07-01'] = '回歸'; m['${year}-10-01'] = '國慶'; m['${year}-12-25'] = '聖誕';
       if (year == 2024) { m.addAll({'2024-02-10': '初一', '2024-02-11': '初二', '2024-02-12': '初三', '2024-04-04': '清明', '2024-05-15': '佛誕', '2024-06-10': '端午', '2024-09-18': '中秋翌日', '2024-10-11': '重陽', '2024-12-26': '聖誕後'}); }
       else if (year == 2025) { m.addAll({'2025-01-29': '初一', '2025-01-30': '初二', '2025-01-31': '初三', '2025-04-04': '清明', '2025-05-05': '佛誕', '2025-05-31': '端午', '2025-10-07': '中秋翌日', '2025-10-29': '重陽'}); }
       else if (year == 2026) { m.addAll({'2026-02-17': '初一', '2026-02-18': '初二', '2026-02-19': '初三', '2026-04-05': '清明', '2026-05-24': '佛誕', '2026-06-19': '端午', '2026-09-26': '中秋翌日', '2026-10-18': '重陽'}); }
@@ -552,55 +490,34 @@ class MainPageState extends State<MainPage> {
   Map<String, String> getHolidays(int year, String region) {
     if (region == '無') return Map<String, String>.from(manualHolidays);
     final cached = _holidayCache[year];
-    if (cached != null && cached.isNotEmpty) {
-      final result = Map<String, String>.from(cached);
-      result.addAll(manualHolidays);
-      return result;
-    }
-    final m = _getBuiltinHolidays(year, region);
-    m.addAll(manualHolidays);
-    return m;
+    if (cached != null && cached.isNotEmpty) { final result = Map<String, String>.from(cached); result.addAll(manualHolidays); return result; }
+    final m = _getBuiltinHolidays(year, region); m.addAll(manualHolidays); return m;
   }
 
-  bool isHoliday(DateTime d) { var map = getHolidays(d.year, holidayRegion); return map.containsKey(DateFormat('yyyy-MM-dd').format(d)); }
-  String holidayName(DateTime d) { var map = getHolidays(d.year, holidayRegion); return map[DateFormat('yyyy-MM-dd').format(d)] ?? ''; }
-
-  // ==================== 鬧鐘 ====================
+  bool isHoliday(DateTime d) { return getHolidays(d.year, holidayRegion).containsKey(DateFormat('yyyy-MM-dd').format(d)); }
+  String holidayName(DateTime d) { return getHolidays(d.year, holidayRegion)[DateFormat('yyyy-MM-dd').format(d)] ?? ''; }
 
   String _calcAlarmTimeText(String startStr, int minutesBefore) {
     try {
       final parts = startStr.split(':');
       if (parts.length != 2) return '--:--';
-      int h = int.parse(parts[0]);
-      int m = int.parse(parts[1]);
-      int total = h * 60 + m - minutesBefore;
+      int total = int.parse(parts[0]) * 60 + int.parse(parts[1]) - minutesBefore;
       while (total < 0) total += 24 * 60;
-      int ah = total ~/ 60;
-      int am = total % 60;
-      return '${ah.toString().padLeft(2, '0')}:${am.toString().padLeft(2, '0')}';
+      return '${(total ~/ 60).toString().padLeft(2, '0')}:${(total % 60).toString().padLeft(2, '0')}';
     } catch (_) { return '--:--'; }
   }
 
   Future<void> _rescheduleAllAlarms() async {
-    try {
-      await _realChannel.invokeMethod('cancelAllAlarms');
-    } catch (e) {
-      await _writeDebugLog('[鬧鐘] 取消全部鬧鐘失敗: $e');
-    }
-
+    try { await _realChannel.invokeMethod('cancelAllAlarms'); } catch (e) { await _writeDebugLog('[鬧鐘] 取消全部鬧鐘失敗: $e'); }
     DateTime now = DateTime.now();
     DateTime today = DateTime(now.year, now.month, now.day);
-    int count = 0;
-    int skipped = 0;
-    int mutedCount = 0;
+    int count = 0, skipped = 0, mutedCount = 0;
 
     for (var entry in roster.entries) {
       final dateKey = entry.key;
-      final code = entry.value;
-      final def = defs[code];
+      final def = defs[entry.value];
       if (def == null || !def.alarmEnabled) continue;
       if (def.isAllDay) { skipped++; continue; }
-
       if (rosterAlarmMuted[dateKey] == true) { mutedCount++; continue; }
 
       DateTime date;
@@ -609,13 +526,10 @@ class MainPageState extends State<MainPage> {
 
       final parts = def.start.split(':');
       if (parts.length != 2) continue;
-      final startH = int.tryParse(parts[0]);
-      final startM = int.tryParse(parts[1]);
+      final startH = int.tryParse(parts[0]); final startM = int.tryParse(parts[1]);
       if (startH == null || startM == null) continue;
 
-      DateTime alarmTime = DateTime(date.year, date.month, date.day, startH, startM)
-          .subtract(Duration(minutes: def.alarmMinutesBefore));
-
+      DateTime alarmTime = DateTime(date.year, date.month, date.day, startH, startM).subtract(Duration(minutes: def.alarmMinutesBefore));
       if (alarmTime.isBefore(now)) { skipped++; continue; }
 
       int requestCode = dateKey.hashCode & 0x7FFFFFFF;
@@ -625,27 +539,22 @@ class MainPageState extends State<MainPage> {
           'requestCode': requestCode,
           'title': '上班提醒：${def.code} ${def.label}',
           'body': '${def.start} 上班，還有 ${def.alarmMinutesBefore} 分鐘',
+          'soundUri': def.alarmSoundUri, // 傳遞自訂鈴聲
         });
         count++;
-      } catch (e) {
-        await _writeDebugLog('[鬧鐘] 排程失敗 $dateKey: $e');
-      }
+      } catch (e) { await _writeDebugLog('[鬧鐘] 排程失敗 $dateKey: $e'); }
     }
     await _writeDebugLog('[鬧鐘] 已排程 $count 個、跳過 $skipped 個、單日靜音 $mutedCount 個');
   }
 
   Future<bool> _confirmAction() async {
-    bool? r = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('⚠️ 確認操作'),
-        content: const Text('相關數據會被刪除或覆蓋，確定繼續進行？'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('確定繼續')),
-        ],
-      ),
-    );
+    bool? r = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('⚠️ 確認操作'), content: const Text('相關數據會被刪除或覆蓋，確定繼續進行？'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('確定繼續')),
+      ],
+    ));
     return r == true;
   }
 
@@ -653,8 +562,7 @@ class MainPageState extends State<MainPage> {
     try {
       String todayKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
       String tomorrowKey = DateFormat('yyyy-MM-dd').format(DateTime.now().add(const Duration(days: 1)));
-      await _writeDebugLog('--- updateWidget 開始 ---');
-      try { await HomeWidget.saveWidgetData<String>('today_code', roster[todayKey] ?? 'O'); } catch (e) { await _writeDebugLog('today_code err: $e'); }
+      try { await HomeWidget.saveWidgetData<String>('today_code', roster[todayKey] ?? 'O'); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('tomorrow_code', roster[tomorrowKey] ?? 'O'); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('note', rosterNote[todayKey] ?? ''); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('extraType', rosterExtraType[todayKey] ?? ''); } catch (_) {}
@@ -670,7 +578,7 @@ class MainPageState extends State<MainPage> {
           lunarMap[DateFormat('yyyy-MM-dd').format(d)] = LunarHelper.getLunarDayText(d);
         }
         await HomeWidget.saveWidgetData<String>('lunar_json', jsonEncode(lunarMap));
-      } catch (e) { await _writeDebugLog('寫入 lunar_json 失敗: $e'); }
+      } catch (_) {}
       try { await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('widgetTextColor', widgetTextColor.toString()); } catch (_) {}
       try { await HomeWidget.saveWidgetData<String>('widgetBgColor', widgetBgColor.toString()); } catch (_) {}
@@ -678,18 +586,14 @@ class MainPageState extends State<MainPage> {
       try { await HomeWidget.saveWidgetData<int>('initial_year', now.year); } catch (_) {}
       try { await HomeWidget.saveWidgetData<int>('initial_month', now.month); } catch (_) {}
       await Future.delayed(const Duration(milliseconds: 300));
-      try { await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider'); } catch (e) { await _writeDebugLog('觸發 HomeWidget 更新失敗: $e'); }
-      try { await _realChannel.invokeMethod('updateWidget'); } catch (e) { await _writeDebugLog('觸發原生強制更新失敗: $e'); }
+      try { await HomeWidget.updateWidget(androidName: 'RosterWidgetProvider'); } catch (_) {}
+      try { await _realChannel.invokeMethod('updateWidget'); } catch (_) {}
     } catch (e) { await _writeDebugLog('updateWidget 整體失敗: $e'); }
   }
 
   Future<void> _requestStoragePermission() async {
-    if (!await Permission.manageExternalStorage.isGranted) {
-      await Permission.manageExternalStorage.request();
-    }
-    if (!await Permission.notification.isGranted) {
-      await Permission.notification.request();
-    }
+    if (!await Permission.manageExternalStorage.isGranted) await Permission.manageExternalStorage.request();
+    if (!await Permission.notification.isGranted) await Permission.notification.request();
   }
 
   @override
@@ -705,16 +609,8 @@ class MainPageState extends State<MainPage> {
         if (dateStr != null && dateStr.isNotEmpty) {
           try {
             final dt = DateTime.parse(dateStr);
-            if (mounted) {
-              setState(() {
-                selectedDay = dt;
-                focused = DateTime(dt.year, dt.month, 1);
-                tab = 0;
-              });
-            }
-          } catch (e) {
-            await _writeDebugLog('[widget] 解析日期失敗: $dateStr, $e');
-          }
+            if (mounted) setState(() { selectedDay = dt; focused = DateTime(dt.year, dt.month, 1); tab = 0; });
+          } catch (_) {}
         }
       }
       return null;
@@ -725,13 +621,7 @@ class MainPageState extends State<MainPage> {
         final d = await _realChannel.invokeMethod('getPendingWidgetDate');
         if (d is String && d.isNotEmpty) {
           final dt = DateTime.parse(d);
-          if (mounted) {
-            setState(() {
-              selectedDay = dt;
-              focused = DateTime(dt.year, dt.month, 1);
-              tab = 0;
-            });
-          }
+          if (mounted) setState(() { selectedDay = dt; focused = DateTime(dt.year, dt.month, 1); tab = 0; });
         }
       } catch (_) {}
     });
@@ -741,32 +631,19 @@ class MainPageState extends State<MainPage> {
     load().then((_) async {
       await Future.delayed(const Duration(milliseconds: 500));
       bool ok = await handleCalendarPermission(silent: false);
-      if (!ok && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('需要日曆權限才能讀取日曆，請在設定中允許')));
-      }
+      if (!ok && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('需要日曆權限才能讀取日曆，請在設定中允許')));
       try { await _realChannel.invokeMethod('requestManageStorage'); } catch (_) {}
       await updateWidget();
       Future.microtask(() => _autoFetchHolidays());
-      if (googleSyncEnabled) {
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) { _syncToGoogle(silent: true, forceFullSync: false); }
-        });
-      }
+      if (googleSyncEnabled) Future.delayed(const Duration(seconds: 2), () { if (mounted) _syncToGoogle(silent: true, forceFullSync: false); });
     });
   }
 
   @pragma('vm:entry-point')
-  static Future<void> backgroundCallback(Uri? uri) async {
-    if (uri != null) {
-      debugPrint('小工具點擊: $uri');
-    }
-  }
+  static Future<void> backgroundCallback(Uri? uri) async { if (uri != null) debugPrint('小工具點擊: $uri'); }
 
   Future<void> _loadVersion() async {
-    try {
-      final info = await PackageInfo.fromPlatform();
-      setState(() { appVersion = '${info.version}+${info.buildNumber}'; });
-    } catch (_) { setState(() { appVersion = '未知版本'; }); }
+    try { final info = await PackageInfo.fromPlatform(); setState(() { appVersion = '${info.version}+${info.buildNumber}'; }); } catch (_) { setState(() { appVersion = '未知版本'; }); }
   }
 
   Future<void> load() async {
@@ -784,64 +661,24 @@ class MainPageState extends State<MainPage> {
     var evMap = sp.getString('googleEventIdMap'); if (evMap != null) { try { _googleEventIdMap = Map<String, String>.from(jsonDecode(evMap)); } catch (_) {} }
     var mh = sp.getString('manualHolidays'); if (mh != null) { try { manualHolidays = Map<String, String>.from(jsonDecode(mh)); } catch (_) {} }
 
-    var ld = sp.getString('leaveDefs');
-    if (ld != null) {
-      try { leaveDefs = (jsonDecode(ld) as List).map((e) => LeaveDef.fromJson(Map<String, dynamic>.from(e))).toList(); } catch (_) {}
-    }
-    var lr = sp.getString('leaveRecords');
-    if (lr != null) {
-      try {
-        leaveRecords = Map<String, Map<String, dynamic>>.from(
-          (jsonDecode(lr) as Map).map((k, v) => MapEntry(k as String, Map<String, dynamic>.from(v as Map)))
-        );
-      } catch (_) {}
-    }
-    var rl = sp.getString('rosterLeave');
-    if (rl != null) {
-      try { rosterLeave = Map<String, String>.from(jsonDecode(rl)); } catch (_) {}
-    }
-    var ram = sp.getString('rosterAlarmMuted');
-    if (ram != null) {
-      try {
-        rosterAlarmMuted = Map<String, bool>.from(
-          (jsonDecode(ram) as Map).map((k, v) => MapEntry(k as String, v as bool))
-        );
-      } catch (_) {}
-    }
+    var ld = sp.getString('leaveDefs'); if (ld != null) { try { leaveDefs = (jsonDecode(ld) as List).map((e) => LeaveDef.fromJson(Map<String, dynamic>.from(e))).toList(); } catch (_) {} }
+    var lr = sp.getString('leaveRecords'); if (lr != null) { try { leaveRecords = Map<String, Map<String, dynamic>>.from((jsonDecode(lr) as Map).map((k, v) => MapEntry(k as String, Map<String, dynamic>.from(v as Map)))); } catch (_) {} }
+    var rl = sp.getString('rosterLeave'); if (rl != null) { try { rosterLeave = Map<String, String>.from(jsonDecode(rl)); } catch (_) {} }
+    var ram = sp.getString('rosterAlarmMuted'); if (ram != null) { try { rosterAlarmMuted = Map<String, bool>.from((jsonDecode(ram) as Map).map((k, v) => MapEntry(k as String, v as bool))); } catch (_) {} }
 
-    var ddList = sp.getStringList('dirtyDates');
-    if (ddList != null) _dirtyDates = ddList.toSet();
+    var ddList = sp.getStringList('dirtyDates'); if (ddList != null) _dirtyDates = ddList.toSet();
     _needsFullSync = sp.getBool('needsFullSync') ?? false;
 
     setState(() {
-      carry = sp.getDouble('carry') ?? 0;
-      carryAnchorWeekKey = sp.getString('carryAnchorWeekKey') ?? '';
-      customName = sp.getString('cName') ?? '我的排更-專屬日曆';
-      nameCtrl.text = customName;
-      standardWeeklyHours = sp.getDouble('stdWeek') ?? 42;
-      overtimeRate = sp.getDouble('otRate') ?? 80;
-      monthlySalary = sp.getDouble('monthlySalary') ?? 0;
-      hourlyDivisor = sp.getDouble('hourlyDivisor') ?? 182;
-      otMultiplier = sp.getDouble('otMultiplier') ?? 1.5;
-      morningAllowance = sp.getDouble('morningAllow') ?? 0;
-      nightAllowance = sp.getDouble('nightAllow') ?? 0;
-      mealAllowance = sp.getDouble('mealAllow') ?? 0;
-      nightAllowMultiplier = sp.getDouble('nightAllowMultiplier') ?? 0.4;
-      calendarFontSize = sp.getDouble('calFont') ?? 14;
-      googleSyncEnabled = sp.getBool('gSync') ?? false;
-      autoSync = sp.getBool('gAuto') ?? false;
-      holidayRegion = sp.getString('holidayRegion') ?? '香港';
-      _rosterCalendarId = sp.getString('rosterCalId');
-      _rosterCalendarName = sp.getString('rosterCalName') ?? '未選';
-      _rosterAccountName = sp.getString('rosterAccName') ?? '';
-      _lastBackupPath = sp.getString('lastBackupPath') ?? '未備份';
-      todayBgColor = Color(sp.getInt('todayBg') ?? 0xFFFFF9C4);
-      todayBorderColor = Color(sp.getInt('todayBorder') ?? 0xFFFF9800);
-      showLunar = sp.getBool('showLunar') ?? true;
-      widgetFontSize = sp.getDouble('widgetFontSize') ?? 14.0;
-      widgetTextColor = sp.getInt('widgetTextColor') ?? 0xFF000000;
-      widgetBgColor = sp.getInt('widgetBgColor') ?? 0xFFFFFFFF;
-      iconIndex = sp.getInt('iconIndex') ?? 0;
+      carry = sp.getDouble('carry') ?? 0; carryAnchorWeekKey = sp.getString('carryAnchorWeekKey') ?? '';
+      customName = sp.getString('cName') ?? '我的排更-專屬日曆'; nameCtrl.text = customName;
+      standardWeeklyHours = sp.getDouble('stdWeek') ?? 42; overtimeRate = sp.getDouble('otRate') ?? 80;
+      monthlySalary = sp.getDouble('monthlySalary') ?? 0; hourlyDivisor = sp.getDouble('hourlyDivisor') ?? 182; otMultiplier = sp.getDouble('otMultiplier') ?? 1.5;
+      morningAllowance = sp.getDouble('morningAllow') ?? 0; nightAllowance = sp.getDouble('nightAllow') ?? 0; mealAllowance = sp.getDouble('mealAllow') ?? 0; nightAllowMultiplier = sp.getDouble('nightAllowMultiplier') ?? 0.4;
+      calendarFontSize = sp.getDouble('calFont') ?? 14; googleSyncEnabled = sp.getBool('gSync') ?? false; autoSync = sp.getBool('gAuto') ?? false;
+      holidayRegion = sp.getString('holidayRegion') ?? '香港'; _rosterCalendarId = sp.getString('rosterCalId'); _rosterCalendarName = sp.getString('rosterCalName') ?? '未選'; _rosterAccountName = sp.getString('rosterAccName') ?? '';
+      _lastBackupPath = sp.getString('lastBackupPath') ?? '未備份'; todayBgColor = Color(sp.getInt('todayBg') ?? 0xFFFFF9C4); todayBorderColor = Color(sp.getInt('todayBorder') ?? 0xFFFF9800);
+      showLunar = sp.getBool('showLunar') ?? true; widgetFontSize = sp.getDouble('widgetFontSize') ?? 14.0; widgetTextColor = sp.getInt('widgetTextColor') ?? 0xFF000000; widgetBgColor = sp.getInt('widgetBgColor') ?? 0xFFFFFFFF; iconIndex = sp.getInt('iconIndex') ?? 0;
     });
     _ensureAnchorWeek();
     _holidayLastUpdate = sp.getString('holidayLastUpdate') ?? '';
@@ -851,140 +688,59 @@ class MainPageState extends State<MainPage> {
 
   Future<void> save() async {
     var sp = await SharedPreferences.getInstance();
-    sp.setString('roster', jsonEncode(roster));
-    sp.setString('note', jsonEncode(rosterNote));
-    sp.setString('extraType', jsonEncode(rosterExtraType));
-    sp.setString('roOt', jsonEncode(rosterOt));
-    sp.setString('roEx', jsonEncode(rosterExtra));
-    sp.setString('roExH', jsonEncode(rosterExtraHrs));
-    sp.setString('defs', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
-    sp.setString('pattern', jsonEncode(pattern));
-    sp.setDouble('carry', carry);
-    sp.setString('carryAnchorWeekKey', carryAnchorWeekKey);
-    sp.setString('cName', customName);
-    sp.setDouble('stdWeek', standardWeeklyHours);
-    sp.setDouble('otRate', overtimeRate);
-    await sp.setDouble('monthlySalary', monthlySalary);
-    await sp.setDouble('hourlyDivisor', hourlyDivisor);
-    await sp.setDouble('otMultiplier', otMultiplier);
-    await sp.setDouble('morningAllow', morningAllowance);
-    await sp.setDouble('nightAllow', nightAllowance);
-    await sp.setDouble('mealAllow', mealAllowance);
-    await sp.setDouble('nightAllowMultiplier', nightAllowMultiplier);
-    sp.setString('extraAllowNewV36', jsonEncode(extraAllowances.map((e) => e.toJson()).toList()));
-    sp.setDouble('calFont', calendarFontSize);
-    sp.setBool('gSync', googleSyncEnabled);
-    sp.setBool('gAuto', autoSync);
-    sp.setString('savedPatternsV40', jsonEncode(savedPatterns.map((e) => e.toJson()).toList()));
-    sp.setString('holidayRegion', holidayRegion);
-    sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
-    sp.setString('manualHolidays', jsonEncode(manualHolidays));
-
-    await sp.setString('leaveDefs', jsonEncode(leaveDefs.map((e) => e.toJson()).toList()));
-    await sp.setString('leaveRecords', jsonEncode(leaveRecords));
-    await sp.setString('rosterLeave', jsonEncode(rosterLeave));
-    await sp.setString('rosterAlarmMuted', jsonEncode(rosterAlarmMuted));
-
-    await sp.setStringList('dirtyDates', _dirtyDates.toList());
-    await sp.setBool('needsFullSync', _needsFullSync);
-    if (_rosterCalendarId != null) sp.setString('rosterCalId', _rosterCalendarId!);
-    sp.setString('rosterCalName', _rosterCalendarName);
-    sp.setString('rosterAccName', _rosterAccountName);
-    sp.setString('lastBackupPath', _lastBackupPath);
-    sp.setInt('todayBg', todayBgColor.value);
-    sp.setInt('todayBorder', todayBorderColor.value);
-    sp.setString('roster_json', jsonEncode(roster));
-    sp.setString('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
-    sp.setBool('showLunar', showLunar);
-    await sp.setDouble('widgetFontSize', widgetFontSize);
-    await sp.setInt('widgetTextColor', widgetTextColor);
-    await sp.setInt('widgetBgColor', widgetBgColor);
-    await sp.setInt('iconIndex', iconIndex);
+    sp.setString('roster', jsonEncode(roster)); sp.setString('note', jsonEncode(rosterNote)); sp.setString('extraType', jsonEncode(rosterExtraType));
+    sp.setString('roOt', jsonEncode(rosterOt)); sp.setString('roEx', jsonEncode(rosterExtra)); sp.setString('roExH', jsonEncode(rosterExtraHrs));
+    sp.setString('defs', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson())))); sp.setString('pattern', jsonEncode(pattern));
+    sp.setDouble('carry', carry); sp.setString('carryAnchorWeekKey', carryAnchorWeekKey); sp.setString('cName', customName); sp.setDouble('stdWeek', standardWeeklyHours); sp.setDouble('otRate', overtimeRate);
+    await sp.setDouble('monthlySalary', monthlySalary); await sp.setDouble('hourlyDivisor', hourlyDivisor); await sp.setDouble('otMultiplier', otMultiplier);
+    await sp.setDouble('morningAllow', morningAllowance); await sp.setDouble('nightAllow', nightAllowance); await sp.setDouble('mealAllow', mealAllowance); await sp.setDouble('nightAllowMultiplier', nightAllowMultiplier);
+    sp.setString('extraAllowNewV36', jsonEncode(extraAllowances.map((e) => e.toJson()).toList())); sp.setDouble('calFont', calendarFontSize); sp.setBool('gSync', googleSyncEnabled); sp.setBool('gAuto', autoSync);
+    sp.setString('savedPatternsV40', jsonEncode(savedPatterns.map((e) => e.toJson()).toList())); sp.setString('holidayRegion', holidayRegion);
+    sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap)); sp.setString('manualHolidays', jsonEncode(manualHolidays));
+    await sp.setString('leaveDefs', jsonEncode(leaveDefs.map((e) => e.toJson()).toList())); await sp.setString('leaveRecords', jsonEncode(leaveRecords)); await sp.setString('rosterLeave', jsonEncode(rosterLeave)); await sp.setString('rosterAlarmMuted', jsonEncode(rosterAlarmMuted));
+    await sp.setStringList('dirtyDates', _dirtyDates.toList()); await sp.setBool('needsFullSync', _needsFullSync);
+    if (_rosterCalendarId != null) sp.setString('rosterCalId', _rosterCalendarId!); sp.setString('rosterCalName', _rosterCalendarName); sp.setString('rosterAccName', _rosterAccountName);
+    sp.setString('lastBackupPath', _lastBackupPath); sp.setInt('todayBg', todayBgColor.value); sp.setInt('todayBorder', todayBorderColor.value);
+    sp.setString('roster_json', jsonEncode(roster)); sp.setString('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson()))));
+    sp.setBool('showLunar', showLunar); await sp.setDouble('widgetFontSize', widgetFontSize); await sp.setInt('widgetTextColor', widgetTextColor); await sp.setInt('widgetBgColor', widgetBgColor); await sp.setInt('iconIndex', iconIndex);
     await updateWidget();
-    if (autoSync && googleSyncEnabled && !_isSyncing) {
-      _autoSyncTimer?.cancel();
-      _autoSyncTimer = Timer(const Duration(seconds: 3), () {
-        if (!_isSyncing && autoSync && googleSyncEnabled) { _syncToGoogle(silent: true); }
-      });
-    }
+    if (autoSync && googleSyncEnabled && !_isSyncing) { _autoSyncTimer?.cancel(); _autoSyncTimer = Timer(const Duration(seconds: 3), () { if (!_isSyncing && autoSync && googleSyncEnabled) _syncToGoogle(silent: true); }); }
     Future.microtask(() => _rescheduleAllAlarms());
   }
 
-  int isoWeek(DateTime date) {
-    DateTime thursday = date.add(Duration(days: 4 - date.weekday));
-    DateTime jan1 = DateTime(thursday.year, 1, 1);
-    int days = thursday.difference(jan1).inDays;
-    return 1 + (days / 7).floor();
-  }
-
-  String isoWeekKey(DateTime date) {
-    DateTime thursday = date.add(Duration(days: 4 - date.weekday));
-    DateTime jan1 = DateTime(thursday.year, 1, 1);
-    int days = thursday.difference(jan1).inDays;
-    int week = 1 + (days / 7).floor();
-    return '${thursday.year}-W${week.toString().padLeft(2, '0')}';
-  }
+  int isoWeek(DateTime date) { DateTime thursday = date.add(Duration(days: 4 - date.weekday)); return 1 + (thursday.difference(DateTime(thursday.year, 1, 1)).inDays / 7).floor(); }
+  String isoWeekKey(DateTime date) { DateTime thursday = date.add(Duration(days: 4 - date.weekday)); int week = 1 + (thursday.difference(DateTime(thursday.year, 1, 1)).inDays / 7).floor(); return '${thursday.year}-W${week.toString().padLeft(2, '0')}'; }
 
   DateTime? _parseWeekKey(String key) {
     final m = RegExp(r'^(\d{4})-W(\d{2})$').firstMatch(key);
     if (m == null) return null;
-    final year = int.parse(m.group(1)!);
-    final week = int.parse(m.group(2)!);
+    final year = int.parse(m.group(1)!); final week = int.parse(m.group(2)!);
     if (week < 1 || week > 53) return null;
-    DateTime jan4 = DateTime(year, 1, 4);
-    DateTime week1Monday = jan4.subtract(Duration(days: jan4.weekday - 1));
+    DateTime jan4 = DateTime(year, 1, 4); DateTime week1Monday = jan4.subtract(Duration(days: jan4.weekday - 1));
     return week1Monday.add(Duration(days: (week - 1) * 7));
   }
 
   DateTime _effectiveCalcStart(DateTime fallback) {
-    if (carryAnchorWeekKey.isNotEmpty) {
-      final parsed = _parseWeekKey(carryAnchorWeekKey);
-      if (parsed != null) return parsed;
-      _writeDebugLog('[累計起始週] 解析失敗: "$carryAnchorWeekKey"，改用最早排班週');
-    }
+    if (carryAnchorWeekKey.isNotEmpty) { final parsed = _parseWeekKey(carryAnchorWeekKey); if (parsed != null) return parsed; }
     DateTime? globalStart;
-    for (String k in roster.keys) {
-      try {
-        DateTime dt = DateTime.parse(k);
-        if (globalStart == null || dt.isBefore(globalStart)) globalStart = dt;
-      } catch (_) {}
-    }
-    if (globalStart != null) {
-      return globalStart.subtract(Duration(days: globalStart.weekday - 1));
-    }
+    for (String k in roster.keys) { try { DateTime dt = DateTime.parse(k); if (globalStart == null || dt.isBefore(globalStart)) globalStart = dt; } catch (_) {} }
+    if (globalStart != null) return globalStart.subtract(Duration(days: globalStart.weekday - 1));
     return fallback;
   }
 
   void _ensureAnchorWeek() {
     if (roster.isEmpty) return;
-
     DateTime? globalStart;
-    for (String k in roster.keys) {
-      try {
-        DateTime dt = DateTime.parse(k);
-        if (globalStart == null || dt.isBefore(globalStart)) globalStart = dt;
-      } catch (_) {}
-    }
+    for (String k in roster.keys) { try { DateTime dt = DateTime.parse(k); if (globalStart == null || dt.isBefore(globalStart)) globalStart = dt; } catch (_) {} }
     if (globalStart == null) return;
-
     final earliestKey = isoWeekKey(globalStart);
-
-    if (carryAnchorWeekKey.isEmpty) {
-      carryAnchorWeekKey = earliestKey;
-      _writeDebugLog('[累計起始週] 首次設定為 $earliestKey');
-      return;
-    }
-
+    if (carryAnchorWeekKey.isEmpty) { carryAnchorWeekKey = earliestKey; return; }
     final anchorDate = _parseWeekKey(carryAnchorWeekKey);
-    if (anchorDate != null && anchorDate.isAfter(globalStart)) {
-      _writeDebugLog('[累計起始週] 偵測到更早排班 $earliestKey，anchor 由 $carryAnchorWeekKey 往前移');
-      carryAnchorWeekKey = earliestKey;
-    }
+    if (anchorDate != null && anchorDate.isAfter(globalStart)) carryAnchorWeekKey = earliestKey;
   }
 
   void quickJumpMonth({bool forReport = false}) {
-    int y = focused.year;
-    int m = focused.month;
+    int y = focused.year; int m = focused.month;
     showDialog(context: context, builder: (ctx) {
       return StatefulBuilder(builder: (ctx2, setD) {
         return AlertDialog(
@@ -1016,35 +772,16 @@ class MainPageState extends State<MainPage> {
       var s3 = await Permission.calendarWriteOnly.request();
       if (s1.isGranted || s2.isGranted || s3.isGranted) return true;
       if (!silent && s1.isPermanentlyDenied) {
-        await showDialog(context: context, builder: (ctx) => AlertDialog(
-          title: const Text('需要日曆權限'),
-          content: const Text('新安裝App需允許存取日曆才能讀取，否則顯示空白(0)。請去設定>權限>允許日曆'),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-            FilledButton(onPressed: () { openAppSettings(); Navigator.pop(ctx); }, child: const Text('去設定'))
-          ]
-        ));
+        await showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('需要日曆權限'), content: const Text('新安裝App需允許存取日曆才能讀取，否則顯示空白(0)。請去設定>權限>允許日曆'), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')), FilledButton(onPressed: () { openAppSettings(); Navigator.pop(ctx); }, child: const Text('去設定'))]));
       }
     } catch (_) {}
-    try {
-      var devHas = await _calendarPlugin.hasPermissions();
-      if (devHas.isSuccess && devHas.data == true) return true;
-      var devReq = await _calendarPlugin.requestPermissions();
-      if (devReq.isSuccess && devReq.data == true) return true;
-    } catch (_) {}
+    try { var devHas = await _calendarPlugin.hasPermissions(); if (devHas.isSuccess && devHas.data == true) return true; var devReq = await _calendarPlugin.requestPermissions(); if (devReq.isSuccess && devReq.data == true) return true; } catch (_) {}
     return false;
   }
 
   Future<List<Map<String, dynamic>>> _getRealCalendars() async {
-    try {
-      var res = await _realChannel.invokeMethod('getCalendars');
-      return (res as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    } catch (e) {
-      try {
-        var r = await _calendarPlugin.retrieveCalendars();
-        return (r.data ?? []).map((c) => {'id': c.id, 'displayName': c.name, 'accountName': c.accountName, 'isGoogle': (c.accountName ?? '').contains('gmail') || (c.accountType ?? '').contains('google')}).toList();
-      } catch (_) { return []; }
-    }
+    try { var res = await _realChannel.invokeMethod('getCalendars'); return (res as List).map((e) => Map<String, dynamic>.from(e as Map)).toList(); }
+    catch (e) { try { var r = await _calendarPlugin.retrieveCalendars(); return (r.data ?? []).map((c) => {'id': c.id, 'displayName': c.name, 'accountName': c.accountName, 'isGoogle': (c.accountName ?? '').contains('gmail') || (c.accountType ?? '').contains('google')}).toList(); } catch (_) { return []; } }
   }
 
   Future<String?> _pickGoogleCalendarDialog() async {
@@ -1075,14 +812,9 @@ class MainPageState extends State<MainPage> {
       _rosterCalendarId = newId;
       _rosterCalendarName = pickedMap['displayName'].toString();
       _rosterAccountName = pickedMap['accountName'].toString();
-      if (oldId != null && oldId != newId) {
-        _googleEventIdMap.clear();
-        await _writeDebugLog('切換日曆 $oldId → $newId，已清空 googleEventIdMap');
-      }
+      if (oldId != null && oldId != newId) { _googleEventIdMap.clear(); await _writeDebugLog('切換日曆 $oldId → $newId，已清空 googleEventIdMap'); }
       var sp = await SharedPreferences.getInstance();
-      sp.setString('rosterCalId', _rosterCalendarId!);
-      sp.setString('rosterCalName', _rosterCalendarName);
-      sp.setString('rosterAccName', _rosterAccountName);
+      sp.setString('rosterCalId', _rosterCalendarId!); sp.setString('rosterCalName', _rosterCalendarName); sp.setString('rosterAccName', _rosterAccountName);
       await sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap));
       setState(() {});
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已選 $_rosterCalendarId')));
@@ -1119,9 +851,7 @@ class MainPageState extends State<MainPage> {
         _rosterCalendarId = result.data;
         _rosterCalendarName = nameCtrl.text.trim();
         var sp = await SharedPreferences.getInstance();
-        await sp.setString('rosterCalId', _rosterCalendarId!);
-        await sp.setString('rosterCalName', _rosterCalendarName);
-        await sp.setString('rosterAccName', 'local');
+        await sp.setString('rosterCalId', _rosterCalendarId!); await sp.setString('rosterCalName', _rosterCalendarName); await sp.setString('rosterAccName', 'local');
         setState(() {});
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已成功建立日曆：$_rosterCalendarName (ID: ${_rosterCalendarId})')));
         return _rosterCalendarId;
@@ -3092,6 +2822,8 @@ void editShiftDialog({ShiftDef? oldDef}) {
   String? customLeaveCode = oldDef?.customLeaveCode;
   bool alarmEnabled = oldDef?.alarmEnabled ?? false;
   int alarmMinutesBefore = oldDef?.alarmMinutesBefore ?? 30;
+  String? alarmSoundUri = oldDef?.alarmSoundUri;
+  String? alarmSoundName = oldDef?.alarmSoundName;
 
   Color picked = oldDef?.color ?? Colors.orange;
   String oldKey = oldDef?.code ?? '';
@@ -3295,6 +3027,59 @@ void editShiftDialog({ShiftDef? oldDef}) {
                       ]),
                     ),
                   const SizedBox(height: 6),
+                  // ====== 鈴聲選擇 ======
+                  Row(children: [
+                    const Icon(Icons.music_note, size: 16, color: Colors.pink),
+                    const SizedBox(width: 4),
+                    const Text('鬧鐘鈴聲', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () async {
+                        final ringtones = await _getSystemRingtones();
+                        if (ringtones.isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('無法獲取系統鈴聲，請確認權限'))); return; }
+                        if (!ctx2.mounted) return;
+                        showDialog(context: ctx2, builder: (ctx3) {
+                          String? tempUri = alarmSoundUri;
+                          String? tempName = alarmSoundName;
+                          return StatefulBuilder(builder: (ctx4, setRing) {
+                            return AlertDialog(
+                              title: const Text('選擇鬧鐘鈴聲'),
+                              content: SizedBox(width: 400, height: 400, child: ListView.builder(
+                                itemCount: ringtones.length,
+                                itemBuilder: (c, i) {
+                                  final r = ringtones[i];
+                                  final uri = r['uri'] ?? '';
+                                  final name = r['name'] ?? '未知';
+                                  final selected = tempUri == uri;
+                                  return ListTile(
+                                    dense: true,
+                                    title: Text(name, style: TextStyle(fontSize: 13, fontWeight: selected ? FontWeight.bold : FontWeight.normal)),
+                                    trailing: selected ? const Icon(Icons.check, color: Colors.pink) : null,
+                                    onTap: () async {
+                                      await _playRingtonePreview(uri);
+                                      setRing(() { tempUri = uri; tempName = name; });
+                                    },
+                                  );
+                                },
+                              )),
+                              actions: [
+                                TextButton(onPressed: () { _stopRingtonePreview(); Navigator.pop(ctx4); }, child: const Text('取消')),
+                                FilledButton(onPressed: () {
+                                  _stopRingtonePreview();
+                                  setS(() { alarmSoundUri = tempUri; alarmSoundName = tempName; });
+                                  Navigator.pop(ctx4);
+                                }, child: const Text('確定')),
+                              ],
+                            );
+                          });
+                        });
+                      },
+                      child: Text(alarmSoundName ?? '系統預設', style: const TextStyle(fontSize: 12, color: Colors.pink)),
+                    ),
+                  ]),
+                  // ====== 鈴聲選擇結束 ======
+
+                  const SizedBox(height: 6),
                   const Padding(
                     padding: EdgeInsets.only(top: 2),
                     child: Text('💡 點擊上方時間可修改；全天班次不會觸發鬧鐘；排班有變動會自動重新排程',
@@ -3333,7 +3118,8 @@ void editShiftDialog({ShiftDef? oldDef}) {
                 isAllDay: isAllDay, hasLunch: hasLunch,
                 hasAL: hasAL, hasSH: hasSH, hasGH: hasGH, hasWB: hasWB,
                 hasCustomLeave: hasCustomLeave, customLeaveCode: customLeaveCode,
-                alarmEnabled: alarmEnabled, alarmMinutesBefore: alarmMinutesBefore
+                alarmEnabled: alarmEnabled, alarmMinutesBefore: alarmMinutesBefore,
+                alarmSoundUri: alarmSoundUri, alarmSoundName: alarmSoundName
               );
               for (var entry in roster.entries) {
                 if (entry.value == newCode) affectedDates.add(entry.key);
@@ -4953,7 +4739,7 @@ void showLeaveManagementDialog() {
                 SizedBox(height: 16),
                 Text('4. 設定與同步', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
-                Text('• 「假期數據管理」：可設定每年的假期天數、微調，系統會自動計算餘額。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「上班鬧鐘」：在班次編輯卡內開啟鬧鐘，點擊時間框選一個時間，系統會自動計算提前分鐘數。\n  - 單日臨時關閉：在日期編輯卡內可針對單獨一日臨時關閉鬧鐘，不影響其他日期。\n• 「公眾假期」：自動從網路 API 抓取（date.nager.at），覆蓋當年+明年+後年，切換地區自動更新。\n  - 點「從網路更新」可強制重新抓取前 1 年 ~ 後 3 年。\n  - 離線時降級使用內建假期（2024~2030）。\n• 「農曆」：本地計算支援 1900~2100 年，超出範圍顯示空白（不崩潰）。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：掃描範圍 2000~2100 年，只刪 [RosterPro] 事件。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
+                Text('• 「假期數據管理」：可設定每年的假期天數、微調，系統會自動計算餘額。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「上班鬧鐘」：在班次編輯卡內開啟鬧鐘，點擊時間框選一個時間，系統會自動計算提前分鐘數。\n  - 可自訂鈴聲：點擊「鬧鐘鈴聲」可選擇系統鈴聲並試聽。\n  - 單日臨時關閉：在日期編輯卡內可針對單獨一日臨時關閉鬧鐘，不影響其他日期。\n• 「公眾假期」：自動從網路 API 抓取（date.nager.at），覆蓋當年+明年+後年，切換地區自動更新。\n  - 點「從網路更新」可強制重新抓取前 1 年 ~ 後 3 年。\n  - 離線時降級使用內建假期（2024~2030）。\n• 「農曆」：本地計算支援 1900~2100 年，超出範圍顯示空白（不崩潰）。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：掃描範圍 2000~2100 年，只刪 [RosterPro] 事件。\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
                 SizedBox(height: 16),
                 Text('5. 常見問題', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
