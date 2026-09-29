@@ -659,7 +659,8 @@ workflows:
                           putExtra("title", title)
                           putExtra("body", body)
                           putExtra("requestCode", requestCode)
-                          flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                          // 使用 this.flags 避免與外層 onStartCommand 的 flags 參數衝突
+                          this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                       }
                       startActivity(fullScreenIntent)
                   } catch (e: Exception) {
@@ -726,7 +727,7 @@ workflows:
                       putExtra("title", title)
                       putExtra("body", body)
                       putExtra("requestCode", requestCode)
-                      flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                      this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                   }
                   val fullScreenPendingIntent = PendingIntent.getActivity(
                       this, requestCode + 20000, fullScreenIntent,
