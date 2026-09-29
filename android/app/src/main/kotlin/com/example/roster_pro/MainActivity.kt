@@ -6,19 +6,18 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
-import android.content.BroadcastReceiver
 import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
+import android.media.Ringtone
+import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.CalendarContract
 import android.provider.Settings
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -27,10 +26,14 @@ import java.io.File
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.roster/calendar_real"
+    private val RINGTONE_CHANNEL = "com.roster/ringtone"
+    private var currentRingtone: Ringtone? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         ensureNotificationChannel()
+
+        // 日曆與鬧鐘的 Channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getCalendars" -> handleGetCalendars(result)
@@ -48,9 +51,68 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        // 鈴聲的 Channel
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, RINGTONE_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getRingtones" -> handleGetRingtones(result)
+                "playRingtone" -> handlePlayRingtone(call.argument<String>("uri"), result)
+                "stopRingtone" -> {
+                    stopCurrentRingtone()
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
-    // ==================== 通知頻道 ====================
+    // ==================== 鈴聲處理 ====================
+
+    private fun handleGetRingtones(result: MethodChannel.Result) {
+        try {
+            val ringtones = mutableListOf<Map<String, String>>()
+            val manager = RingtoneManager(this)
+            manager.setType(RingtoneManager.TYPE_ALARM)
+            val cursor = manager.cursor
+
+            while (cursor.moveToNext()) {
+                val title = cursor.getString(RingtoneManager.TITLE_COLUMN_INDEX)
+                val uri = manager.getRingtoneUri(cursor.position).toString()
+                ringtones.add(mapOf("name" to title, "uri" to uri))
+            }
+            result.success(ringtones)
+        } catch (e: Exception) {
+            result.error("GET_RINGTONES_ERROR", e.message, null)
+        }
+    }
+
+    private fun handlePlayRingtone(uriString: String?, result: MethodChannel.Result) {
+        if (uriString == null) {
+            result.error("INVALID_URI", "URI is null", null)
+            return
+        }
+        try {
+            stopCurrentRingtone()
+            val uri = Uri.parse(uriString)
+            currentRingtone = RingtoneManager.getRingtone(this, uri)
+            currentRingtone?.play()
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("PLAY_RINGTONE_ERROR", e.message, null)
+        }
+    }
+
+    private fun stopCurrentRingtone() {
+        currentRingtone?.stop()
+        currentRingtone = null
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        stopCurrentRingtone()
+    }
+
+    // ==================== 通知頻道與鬧鐘 ====================
 
     private fun ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -68,25 +130,18 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // ==================== 精確鬧鐘權限檢查 ====================
-    // 因為 AndroidManifest 已宣告 USE_EXACT_ALARM（API 33+）與 SCHEDULE_EXACT_ALARM（API 31-32），
-    // 在 API 33+ 上 canScheduleExactAlarms() 會自動回傳 true，無需引導使用者。
-    // 在 API 31-32 上 SCHEDULE_EXACT_ALARM 也是自動授予。
-
     private fun handleCanScheduleExactAlarms(result: MethodChannel.Result) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
                 result.success(alarmManager.canScheduleExactAlarms())
             } else {
-                result.success(true) // API 30 及以下無需此權限
+                result.success(true)
             }
         } catch (e: Exception) {
             result.success(false)
         }
     }
-
-    // ==================== 鬧鐘排程 ====================
 
     private fun handleScheduleAlarm(call: MethodChannel.MethodCall, result: MethodChannel.Result) {
         try {
@@ -94,6 +149,7 @@ class MainActivity : FlutterActivity() {
             val requestCode = call.argument<Int>("requestCode") ?: 0
             val title = call.argument<String>("title") ?: "上班提醒"
             val body = call.argument<String>("body") ?: ""
+            val soundUri = call.argument<String>("soundUri") // 接收自訂鈴聲
 
             if (alarmMillis == null) {
                 result.error("NO_TIME", "alarmMillis is null", null)
@@ -105,6 +161,7 @@ class MainActivity : FlutterActivity() {
                 putExtra("title", title)
                 putExtra("body", body)
                 putExtra("requestCode", requestCode)
+                putExtra("soundUri", soundUri) // 傳給接收器
             }
             val pendingIntent = PendingIntent.getBroadcast(
                 this,
@@ -113,39 +170,22 @@ class MainActivity : FlutterActivity() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            // 因為宣告了 USE_EXACT_ALARM（API 33+ 自動授予）與 SCHEDULE_EXACT_ALARM（API 31-32 自動授予），
-            // 大部分情況下 canScheduleExactAlarms() 都會是 true，可直接排精確鬧鐘。
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     if (alarmManager.canScheduleExactAlarms()) {
-                        // 有精確鬧鐘權限（自動授予）→ 精確鬧鐘
-                        alarmManager.setExactAndAllowWhileIdle(
-                            AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent
-                        )
+                        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent)
                     } else {
-                        // 極少數情況（例如使用者手動到系統設定把 SCHEDULE_EXACT_ALARM 關閉）
-                        // → 降級為非精確鬧鐘，保證功能不中斷
-                        alarmManager.setAndAllowWhileIdle(
-                            AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent
-                        )
+                        alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent)
                     }
                 } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    // Android 6~11：無需精確鬧鐘權限
-                    alarmManager.setExactAndAllowWhileIdle(
-                        AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent
-                    )
+                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent)
                 } else {
-                    // Android 5 及以下
-                    alarmManager.setExact(
-                        AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent
-                    )
+                    alarmManager.setExact(AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent)
                 }
             } catch (_: SecurityException) {
-                // 保底：若任何精確鬧鐘呼叫被拒 → 用最普通的 set()
                 alarmManager.set(AlarmManager.RTC_WAKEUP, alarmMillis, pendingIntent)
             }
 
-            // 記錄 requestCode 以便之後全部取消
             val prefs = getSharedPreferences(ALARM_PREFS, Context.MODE_PRIVATE)
             val codes = prefs.getStringSet(ALARM_CODES_KEY, emptySet())?.toMutableSet() ?: mutableSetOf()
             codes.add(requestCode.toString())
@@ -177,21 +217,13 @@ class MainActivity : FlutterActivity() {
                 cancelled++
             }
             prefs.edit().remove(ALARM_CODES_KEY).apply()
-            // 同時清掉可能殘留的通知
-            try {
-                val nm = NotificationManagerCompat.from(this)
-                for (codeStr in codes) {
-                    val code = codeStr.toIntOrNull() ?: continue
-                    nm.cancel(code)
-                }
-            } catch (_: Exception) {}
             result.success(cancelled)
         } catch (e: Exception) {
             result.error("CANCEL_FAIL", e.message, null)
         }
     }
 
-    // ==================== 原有方法（保持不變） ====================
+    // ==================== 原有方法 ====================
 
     private fun handleUpdateWidget(result: MethodChannel.Result) {
         try {
@@ -294,42 +326,5 @@ class MainActivity : FlutterActivity() {
         const val ALARM_CHANNEL_ID = "roster_alarm_channel"
         const val ALARM_PREFS = "roster_alarm_prefs"
         const val ALARM_CODES_KEY = "alarm_request_codes"
-    }
-}
-
-// ==================== 鬧鐘觸發接收器 ====================
-class AlarmReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        val title = intent.getStringExtra("title") ?: "上班提醒"
-        val body = intent.getStringExtra("body") ?: ""
-        val requestCode = intent.getIntExtra("requestCode", 0)
-
-        val notificationManager = NotificationManagerCompat.from(context)
-
-        // 點擊通知開啟 App
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-        val pendingIntent = PendingIntent.getActivity(
-            context,
-            requestCode,
-            launchIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val builder = NotificationCompat.Builder(context, MainActivity.ALARM_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setAutoCancel(true)
-            .setContentIntent(pendingIntent)
-
-        try {
-            notificationManager.notify(requestCode, builder.build())
-        } catch (_: SecurityException) {
-            // 沒有通知權限（Android 13+ 的 POST_NOTIFICATIONS），忽略
-        }
     }
 }
