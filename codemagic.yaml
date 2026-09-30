@@ -1205,11 +1205,11 @@ workflows:
                   cat >> "$LAYOUT_FILE" <<CELL_EOF
                   <LinearLayout android:id="@+id/cell$idx" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center" android:padding="1dp" android:background="#FFFFFF">
                       <TextView android:id="@+id/day$idx" android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:textSize="14sp" android:textStyle="bold" android:textColor="#000000" />
-                      <FrameLayout android:layout_width="wrap_content" android:layout_height="22dp" android:layout_marginTop="2dp">
+                      <FrameLayout android:layout_width="wrap_content" android:layout_height="26dp" android:layout_marginTop="1dp">
                           <ImageView android:id="@+id/shift_bg$idx" android:layout_width="wrap_content" android:layout_height="match_parent" android:scaleType="fitXY" />
                           <TextView android:id="@+id/shift$idx" android:layout_width="match_parent" android:layout_height="match_parent" android:paddingLeft="6dp" android:paddingRight="6dp" android:gravity="center" android:textSize="11sp" android:textStyle="bold" android:textColor="#FFFFFF" android:visibility="gone" android:includeFontPadding="false" android:shadowColor="#80000000" android:shadowDx="1" android:shadowDy="1" android:shadowRadius="2" />
                       </FrameLayout>
-                      <TextView android:id="@+id/lunar$idx" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" android:visibility="gone" />
+                      <TextView android:id="@+id/lunar$idx" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="1dp" android:gravity="center" android:textSize="9sp" android:textColor="#666666" android:visibility="gone" />
                   </LinearLayout>
           CELL_EOF
               done
@@ -1476,16 +1476,16 @@ workflows:
                                               if (c != 0) chipColor = c
                                           }
 
-                                          // 字體放大 2 倍，若字數大於 2 則縮小防溢出
-                                          var shiftTextSize = fontSize * 2.0
+                                          // 字體放大 1.5 倍，若字數大於 2 則縮小防溢出
+                                          var shiftTextSize = fontSize * 1.5
                                           if (shiftCode.length > 2) {
                                               shiftTextSize = fontSize * 1.2
                                           }
                                           views.setTextViewTextSize(shiftTvId, TypedValue.COMPLEX_UNIT_SP, shiftTextSize.toFloat())
 
-                                          // 動態生成立體膠囊背景 (高度固定 22dp，與 XML 完全匹配)
+                                          // 動態生成立體膠囊背景 (高度固定 26dp，與 XML 完全匹配)
                                           val width = dpToPx(context, 12 + shiftCode.length * 14)
-                                          val height = dpToPx(context, 22)
+                                          val height = dpToPx(context, 26)
                                           val bitmap = createRoundedRectBitmap(context, width, height, chipColor, dpToPx(context, 8).toFloat())
                                           views.setImageViewBitmap(shiftBgId, bitmap)
 
