@@ -6,7 +6,11 @@ import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
@@ -115,13 +119,41 @@ class RosterWidgetProvider : AppWidgetProvider() {
             return if ((result ushr 24) != 0) result else def
         }
 
-        private fun isDarkColor(c: Int): Boolean {
-            val a = (c ushr 24) and 0xFF
-            if (a < 0x60) return true
-            val r = (c shr 16) and 0xFF
-            val g = (c shr 8) and 0xFF
-            val b = c and 0xFF
-            return (0.299 * r + 0.587 * g + 0.114 * b) < 80
+        private fun dpToPx(context: Context, dp: Int): Int {
+            return (dp * context.resources.displayMetrics.density).toInt()
+        }
+
+        // 動態生成帶有立體感的圓角膠囊 Bitmap
+        private fun createRoundedRectBitmap(context: Context, width: Int, height: Int, color: Int, radius: Float): Bitmap {
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            val paint = Paint().apply {
+                isAntiAlias = true
+                this.color = color
+            }
+            val rectF = RectF(0f, 0f, width.toFloat(), height.toFloat())
+            canvas.drawRoundRect(rectF, radius, radius, paint)
+
+            // 頂部高光 (模擬立體感)
+            val highlightPaint = Paint().apply {
+                isAntiAlias = true
+                this.color = 0x55FFFFFF // 33% 白色
+                style = Paint.Style.STROKE
+                strokeWidth = dpToPx(context, 1).toFloat()
+            }
+            canvas.drawRoundRect(rectF, radius, radius, highlightPaint)
+
+            // 底部陰影
+            val shadowPaint = Paint().apply {
+                isAntiAlias = true
+                this.color = 0x55000000 // 33% 黑色
+                style = Paint.Style.STROKE
+                strokeWidth = dpToPx(context, 1).toFloat()
+            }
+            val shadowRect = RectF(0f, 1f, width.toFloat(), height.toFloat())
+            canvas.drawRoundRect(shadowRect, radius, radius, shadowPaint)
+
+            return bitmap
         }
 
         fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
@@ -141,17 +173,9 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 if (fontSize <= 0.0 || fontSize.isNaN()) fontSize = getFontSizeSafe(flutterPrefs, "flutter.widgetFontSize", 0.0)
                 if (fontSize <= 0.0 || fontSize.isNaN()) fontSize = 14.0
 
-                var textColor = getColorSafe(homeWidgetPrefs, "widgetTextColor", 0)
-                if (textColor == 0) textColor = getColorSafe(flutterPrefs, "flutter.widgetTextColor", 0)
-                if (textColor == 0) textColor = 0xFF333333.toInt()
-
-                var bgColor = getColorSafe(homeWidgetPrefs, "widgetBgColor", 0)
-                if (bgColor == 0) bgColor = getColorSafe(flutterPrefs, "flutter.widgetBgColor", 0)
-                if (bgColor == 0) bgColor = 0xFFFFFFFF.toInt()
-
-                var todayBgColor = getColorSafe(homeWidgetPrefs, "today_bg", 0)
-                if (todayBgColor == 0) todayBgColor = getColorSafe(flutterPrefs, "flutter.today_bg", 0)
-                if (todayBgColor == 0 || isDarkColor(todayBgColor)) todayBgColor = 0xFFBBDEFB.toInt()
+                // 強制背景為白色 (需求 1)
+                val bgColor = 0xFFFFFFFF.toInt()
+                val todayBgColor = 0xFFFFFFFF.toInt() 
 
                 var rosterJsonStr = homeWidgetPrefs.getString("roster_json", "") ?: ""
                 if (rosterJsonStr.isEmpty()) rosterJsonStr = flutterPrefs.getString("flutter.roster_json", "{}") ?: "{}"
@@ -164,10 +188,8 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 val defsJson = try { JSONObject(defsJsonStr) } catch (_: Exception) { JSONObject() }
                 val lunarJson = try { JSONObject(lunarJsonStr) } catch (_: Exception) { JSONObject() }
 
-                writeDebugLog(context, "FontSize=$fontSize TextColor=0x${Integer.toHexString(textColor)} BgColor=0x${Integer.toHexString(bgColor)} TodayBg=0x${Integer.toHexString(todayBgColor)}")
-
                 views.setTextViewText(R.id.tv_month_title, "${year}年${monthNames[month]}")
-                views.setTextColor(R.id.tv_month_title, textColor)
+                views.setTextColor(R.id.tv_month_title, 0xFF333333.toInt())
                 views.setTextViewTextSize(R.id.tv_month_title, TypedValue.COMPLEX_UNIT_SP, (fontSize * 1.5).toFloat())
 
                 val calendar = Calendar.getInstance()
@@ -178,13 +200,13 @@ class RosterWidgetProvider : AppWidgetProvider() {
                 val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
                 val weekFormat = SimpleDateFormat("ww", Locale.UK)
                 val paleTextColor = 0xFFB0B0B0.toInt()
-                val todayDrawableId = context.resources.getIdentifier("cell_bg_today", "drawable", context.packageName)
 
                 for (i in 0 until 42) {
                     try {
                         val dayIndex = i - startOffset + 1
                         val dayTvId = context.resources.getIdentifier("day$i", "id", context.packageName)
                         val shiftTvId = context.resources.getIdentifier("shift$i", "id", context.packageName)
+                        val shiftBgId = context.resources.getIdentifier("shift_bg$i", "id", context.packageName)
                         val lunarTvId = context.resources.getIdentifier("lunar$i", "id", context.packageName)
                         val cellId = context.resources.getIdentifier("cell$i", "id", context.packageName)
                         if (dayTvId == 0) continue
@@ -200,22 +222,21 @@ class RosterWidgetProvider : AppWidgetProvider() {
                         val shiftCode = rosterJson.optString(dateStr, "")
                         val lunarText = lunarJson.optString(dateStr, "")
 
+                        // 日期字體
                         views.setTextViewText(dayTvId, cellDay.toString())
-                        val cellColor = if (isCurrMonth) textColor else paleTextColor
+                        val cellColor = if (isCurrMonth) 0xFF000000.toInt() else paleTextColor
                         views.setTextColor(dayTvId, cellColor)
                         views.setTextViewTextSize(dayTvId, TypedValue.COMPLEX_UNIT_SP, fontSize.toFloat())
 
+                        // 背景全白
                         if (cellId != 0) {
-                            if (dateStr == todayStr && isCurrMonth && todayDrawableId != 0) {
-                                try { views.setInt(cellId, "setBackgroundResource", todayDrawableId) }
-                                catch (_: Exception) { try { views.setInt(cellId, "setBackgroundColor", todayBgColor) } catch (_: Exception) {} }
-                            } else try { views.setInt(cellId, "setBackgroundColor", bgColor) } catch (_: Exception) {}
+                            views.setInt(cellId, "setBackgroundColor", bgColor)
                         } else {
-                            if (dateStr == todayStr && isCurrMonth) try { views.setInt(dayTvId, "setBackgroundColor", todayBgColor) } catch (_: Exception) {}
-                            else try { views.setInt(dayTvId, "setBackgroundColor", bgColor) } catch (_: Exception) {}
+                            views.setInt(dayTvId, "setBackgroundColor", bgColor)
                         }
 
-                        if (shiftTvId != 0) {
+                        // 班次膠囊設計 (需求 2, 3, 4)
+                        if (shiftTvId != 0 && shiftBgId != 0) {
                             if (shiftCode.isNotEmpty()) {
                                 views.setTextViewText(shiftTvId, shiftCode)
                                 var chipColor = 0xFF4CAF50.toInt()
@@ -224,22 +245,29 @@ class RosterWidgetProvider : AppWidgetProvider() {
                                     val c = defObj.optLong("color", 0).toInt()
                                     if (c != 0) chipColor = c
                                 }
-                                val r = (chipColor shr 16) and 0xFF
-                                val g = (chipColor shr 8) and 0xFF
-                                val b = chipColor and 0xFF
-                                val luminance = 0.299 * r + 0.587 * g + 0.114 * b
-                                val textColorForShift = if (luminance > 150) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
-                                views.setTextColor(shiftTvId, textColorForShift)
-                                views.setTextViewTextSize(shiftTvId, TypedValue.COMPLEX_UNIT_SP, (fontSize * 0.7).toFloat())
-                                try { views.setInt(shiftTvId, "setBackgroundColor", chipColor) } catch (_: Exception) {}
+
+                                // 字體放大 2 倍，若字數大於 2 則縮小防溢出 (需求 2, 3)
+                                var shiftTextSize = fontSize * 2.0
+                                if (shiftCode.length > 2) {
+                                    shiftTextSize = fontSize * 1.2
+                                }
+                                views.setTextViewTextSize(shiftTvId, TypedValue.COMPLEX_UNIT_SP, shiftTextSize.toFloat())
+
+                                // 動態生成立體膠囊背景 (需求 4)
+                                val width = dpToPx(context, 12 + shiftCode.length * 14)
+                                val height = dpToPx(context, 26)
+                                val bitmap = createRoundedRectBitmap(context, width, height, chipColor, dpToPx(context, 10).toFloat())
+                                views.setImageViewBitmap(shiftBgId, bitmap)
+
+                                views.setViewVisibility(shiftBgId, View.VISIBLE)
                                 views.setViewVisibility(shiftTvId, View.VISIBLE)
                             } else {
-                                views.setTextViewText(shiftTvId, "")
-                                try { views.setInt(shiftTvId, "setBackgroundColor", Color.TRANSPARENT) } catch (_: Exception) {}
-                                views.setViewVisibility(shiftTvId, View.INVISIBLE)
+                                views.setViewVisibility(shiftBgId, View.GONE)
+                                views.setViewVisibility(shiftTvId, View.GONE)
                             }
                         }
 
+                        // 農曆字體
                         if (lunarTvId != 0) {
                             if (lunarText.isNotEmpty()) {
                                 views.setTextViewText(lunarTvId, lunarText)
@@ -252,7 +280,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
                             }
                         }
 
-                        // ✅ 修復：使用唯一 action + 安全 requestCode
+                        // 點擊事件
                         val intent = Intent(context, MainActivity::class.java).apply {
                             action = "com.example.roster_pro.OPEN_DATE_${appWidgetId}_$i"
                             putExtra("selected_date", dateStr)
@@ -291,7 +319,6 @@ class RosterWidgetProvider : AppWidgetProvider() {
 
                 try { views.setInt(R.id.widget_root, "setBackgroundColor", bgColor) } catch (_: Exception) {}
 
-                // ✅ 根布局點擊 → 打開 app
                 try {
                     val rootIntent = Intent(context, MainActivity::class.java).apply {
                         action = "com.example.roster_pro.OPEN_FROM_WIDGET_$appWidgetId"
