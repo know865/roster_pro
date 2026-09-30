@@ -34,6 +34,7 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.util.Calendar
 import java.util.TimeZone
 
 class MainActivity : FlutterActivity() {
@@ -41,7 +42,6 @@ class MainActivity : FlutterActivity() {
     private val RINGTONE_CHANNEL = "com.roster/ringtone"
     private var currentRingtone: Ringtone? = null
 
-    // 用於圖片選擇後的 Flutter result 回調
     private var pendingPickIconResult: MethodChannel.Result? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,8 +49,6 @@ class MainActivity : FlutterActivity() {
         requestOverlayPermission()
         requestFullScreenIntentPermission()
 
-        // 只有使用者「主動從桌面圖標開啟 App」時才停止正在響的鬧鐘
-        // 避免從通知/小工具/鬧鐘畫面跳進來時誤殺鬧鐘
         if (intent?.action == Intent.ACTION_MAIN &&
             !intent.hasExtra("selected_date") &&
             !intent.hasExtra("from_alarm")
@@ -61,7 +59,6 @@ class MainActivity : FlutterActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // 由小工具日期點擊進來（帶 selected_date）不停鬧鐘
         if (intent.hasExtra("selected_date")) return
         if (intent.hasExtra("from_alarm")) return
         if (intent.action == Intent.ACTION_MAIN) {
@@ -78,7 +75,6 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {}
     }
 
-    // ==================== 圖片選擇後的回調 ====================
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
 
@@ -105,7 +101,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // 將選中的圖片壓縮成 432x432 並儲存到 App 私有目錄
     private fun saveIconImage(imageUri: Uri): String? {
         return try {
             val inputStream: InputStream? = contentResolver.openInputStream(imageUri)
@@ -129,7 +124,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // 使用 ShortcutManagerCompat 建立帶有自訂圖標的桌面捷徑
     private fun createAppShortcut(iconPath: String): Boolean {
         return try {
             val iconFile = File(iconPath)
@@ -160,7 +154,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // 請求懸浮窗權限（部分機型從背景啟動 Activity 需要）
     private fun requestOverlayPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (!Settings.canDrawOverlays(this)) {
@@ -175,7 +168,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // 請求「全屏通知」權限（Android 14+ 必須，否則全屏 Intent 會被降級為抬頭通知）
     private fun requestFullScreenIntentPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             try {
@@ -187,7 +179,6 @@ class MainActivity : FlutterActivity() {
                         }
                         startActivity(intent)
                     } catch (_: Exception) {
-                        // 部分機型無此 action，fallback 到 app 通知設定
                         try {
                             val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
                                 putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
@@ -238,7 +229,6 @@ class MainActivity : FlutterActivity() {
                         handleDeleteEvent(calendarId, eventId, result)
                     }
                 }
-                // ====== 選擇相冊圖片並建立自訂圖標捷徑 ======
                 "pickAndPinIcon" -> {
                     try {
                         if (pendingPickIconResult != null) {
@@ -256,7 +246,6 @@ class MainActivity : FlutterActivity() {
                         result.error("PICK_ICON_FAIL", e.message, null)
                     }
                 }
-                // =========================================
                 else -> result.notImplemented()
             }
         }
@@ -489,9 +478,59 @@ class MainActivity : FlutterActivity() {
             val eventId = call.argument<String>("eventId")
             val title = call.argument<String>("title") ?: ""
             val description = call.argument<String>("description") ?: ""
-            val startMillis = call.argument<Number>("startMillis")?.toLong() ?: 0L
-            val endMillis = call.argument<Number>("endMillis")?.toLong() ?: 0L
+            val dateStr = call.argument<String>("date")
+            val startStr = call.argument<String>("start")
+            val endStr = call.argument<String>("end")
             val allDay = call.argument<Boolean>("allDay") ?: false
+
+            if (dateStr == null || startStr == null || endStr == null) {
+                result.error("BAD_ARGS", "date/start/end required", null)
+                return
+            }
+
+            val dateParts = dateStr.split("-")
+            if (dateParts.size != 3) {
+                result.error("BAD_DATE", "Invalid date format: $dateStr", null)
+                return
+            }
+            val year = dateParts[0].toInt()
+            val month = dateParts[1].toInt() - 1
+            val day = dateParts[2].toInt()
+
+            val startParts = startStr.split(":")
+            if (startParts.size != 2) {
+                result.error("BAD_TIME", "Invalid start time: $startStr", null)
+                return
+            }
+            val startHour = startParts[0].toInt()
+            val startMinute = startParts[1].toInt()
+
+            val endParts = endStr.split(":")
+            if (endParts.size != 2) {
+                result.error("BAD_TIME", "Invalid end time: $endStr", null)
+                return
+            }
+            val endHour = endParts[0].toInt()
+            val endMinute = endParts[1].toInt()
+
+            // ========= 核心：強制鎖定排班基準時區為香港 =========
+            val hkTimeZone = TimeZone.getTimeZone("Asia/Hong_Kong")
+
+            val startCal = Calendar.getInstance(hkTimeZone)
+            startCal.set(year, month, day, startHour, startMinute, 0)
+            startCal.set(Calendar.MILLISECOND, 0)
+            val startMillis = startCal.timeInMillis
+
+            val endCal = Calendar.getInstance(hkTimeZone)
+            endCal.set(year, month, day, endHour, endMinute, 0)
+            endCal.set(Calendar.MILLISECOND, 0)
+            var endMillis = endCal.timeInMillis
+
+            // 處理跨日班次（例如 22:00 到次日 06:00）
+            if (endMillis <= startMillis && !allDay) {
+                endCal.add(Calendar.DAY_OF_YEAR, 1)
+                endMillis = endCal.timeInMillis
+            }
 
             val values = ContentValues().apply {
                 put(CalendarContract.Events.CALENDAR_ID, calendarId)
@@ -500,8 +539,8 @@ class MainActivity : FlutterActivity() {
                 put(CalendarContract.Events.DTSTART, startMillis)
                 put(CalendarContract.Events.DTEND, endMillis)
                 put(CalendarContract.Events.ALL_DAY, if (allDay) 1 else 0)
-                // 修復時區偏移：使用裝置當前時區，例如 Asia/Hong_Kong，而非硬編碼 UTC
-                put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
+                // 寫入事件時區為香港，確保全球顯示一致
+                put(CalendarContract.Events.EVENT_TIMEZONE, "Asia/Hong_Kong")
             }
 
             if (eventId != null && eventId.isNotEmpty()) {
