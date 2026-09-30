@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -33,6 +34,7 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.util.TimeZone
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.roster/calendar_real"
@@ -211,6 +213,7 @@ class MainActivity : FlutterActivity() {
                 "scheduleAlarm" -> handleScheduleAlarm(call, result)
                 "cancelAllAlarms" -> handleCancelAllAlarms(result)
                 "canScheduleExactAlarms" -> handleCanScheduleExactAlarms(result)
+                "createEvent" -> handleCreateEvent(call, result)
                 "deleteAllEventsInCalendar" -> {
                     val calendarId = call.argument<String>("calendarId")
                     if (calendarId == null) result.error("NO_CAL_ID", "Calendar ID is null", null)
@@ -474,6 +477,44 @@ class MainActivity : FlutterActivity() {
             }
         }
         result.success(calendars)
+    }
+
+    private fun handleCreateEvent(call: MethodCall, result: MethodChannel.Result) {
+        try {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+                result.error("PERMISSION", "No write calendar permission", null)
+                return
+            }
+            val calendarId = call.argument<String>("calendarId")
+            val eventId = call.argument<String>("eventId")
+            val title = call.argument<String>("title") ?: ""
+            val description = call.argument<String>("description") ?: ""
+            val startMillis = call.argument<Number>("startMillis")?.toLong() ?: 0L
+            val endMillis = call.argument<Number>("endMillis")?.toLong() ?: 0L
+            val allDay = call.argument<Boolean>("allDay") ?: false
+
+            val values = ContentValues().apply {
+                put(CalendarContract.Events.CALENDAR_ID, calendarId)
+                put(CalendarContract.Events.TITLE, title)
+                put(CalendarContract.Events.DESCRIPTION, description)
+                put(CalendarContract.Events.DTSTART, startMillis)
+                put(CalendarContract.Events.DTEND, endMillis)
+                put(CalendarContract.Events.ALL_DAY, if (allDay) 1 else 0)
+                // 修復時區偏移：使用裝置當前時區，例如 Asia/Hong_Kong，而非硬編碼 UTC
+                put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
+            }
+
+            if (eventId != null && eventId.isNotEmpty()) {
+                val updateUri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId.toLong())
+                val rows = contentResolver.update(updateUri, values, null, null)
+                result.success(if (rows > 0) eventId else null)
+            } else {
+                val uri = contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
+                result.success(uri?.let { ContentUris.parseId(it).toString() })
+            }
+        } catch (e: Exception) {
+            result.error("CREATE_FAIL", e.message, null)
+        }
     }
 
     private fun handleScanImage(path: String?, result: MethodChannel.Result) {
