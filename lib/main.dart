@@ -1012,9 +1012,7 @@ String _padTime(String t) {
   return '$h:$m';
 }
 
-/// 建立/更新日曆事件。使用 tz.local 處理時區，跨時區旅行不會偏移。
-/// 跨夜班次使用 date.day + 1 建構結束時間，DST 地區不會偏移。
-/// 【修正】加入 .toUtc() 避免時區偏移問題
+/// 建立/更新日曆事件。改為呼叫原生 Android 方法，徹底解決時區偏移問題。
 Future<bool> _buildAndInsertEvent(String dateKey, String code, {String? existingEventId}) async {
   final calId = _requireCalendarId();
   final def = defs[code];
@@ -1022,85 +1020,72 @@ Future<bool> _buildAndInsertEvent(String dateKey, String code, {String? existing
   final note = rosterNote[dateKey] ?? '';
   final tag = '[RosterPro]$dateKey';
 
+  String title, desc;
+  bool allDayFlag;
+  int startMs, endMs;
+
   if (def == null) {
     if (note.isEmpty) {
       await _writeDebugLog('[createEvent] ❌ 無班次且無記事: $dateKey');
       return false;
     }
-    final desc = '$tag\n$customName\n類型: 純記事\n記事: $note';
-    final title = '📝 $note';
-    final ev = Event(calId, eventId: existingEventId, title: title, description: desc,
-      start: tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0).toUtc(),
-      end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59).toUtc(),
-      allDay: true);
-    try {
-      final res = await _calendarPlugin.createOrUpdateEvent(ev);
-      if (res == null || !res.isSuccess || res.data == null) {
-        await _writeDebugLog('[createEvent] ❌ $dateKey 純記事建立失敗');
-        return false;
-      }
-      _googleEventIdMap[dateKey] = res.data!;
-      await _writeDebugLog('[createEvent] ✅ $dateKey 純記事 → eventId=${res.data}');
-      return true;
-    } catch (e) {
-      await _writeDebugLog('[createEvent] ❌ $dateKey 純記事例外: $e');
-      return false;
-    }
-  }
-
-  final allDayFlag = def.isAllDay || def.code == 'O';
-  String desc, title;
-  if (allDayFlag) {
-    desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n類型: 全天${note.isNotEmpty ? '\n記事: $note' : ''}';
-    title = '${def.code} ${def.label}${note.isNotEmpty ? ' | $note' : ''}';
+    allDayFlag = true;
+    title = '📝 $note';
+    desc = '$tag\n$customName\n類型: 純記事\n記事: $note';
+    // 使用 tz.local 計算出正確的 UTC 毫秒
+    startMs = tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0).millisecondsSinceEpoch;
+    endMs = tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59).millisecondsSinceEpoch;
   } else {
-    desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n時間: ${def.start}-${def.end}${note.isNotEmpty ? '\n記事: $note' : ''}';
-    title = '${def.code} ${def.label} ${def.start}-${def.end}${note.isNotEmpty ? ' | $note' : ''}';
-  }
-
-  Event ev;
-  if (allDayFlag) {
-    ev = Event(calId, eventId: existingEventId, title: title, description: desc,
-      start: tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0).toUtc(),
-      end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59).toUtc(),
-      allDay: true);
-  } else {
-    final sp1 = def.start.split(':');
-    final ep1 = def.end.split(':');
-    int sH = int.parse(sp1[0]), sM = int.parse(sp1[1]);
-    int eH = int.parse(ep1[0]), eM = int.parse(ep1[1]);
-    final startT = tz.TZDateTime(tz.local, date.year, date.month, date.day, sH, sM);
-    // 判斷是否跨夜：若結束時間不大於開始時間，則結束日 +1 天
-    tz.TZDateTime endT;
-    final sameDayEnd = DateTime(date.year, date.month, date.day, eH, eM);
-    if (!sameDayEnd.isAfter(DateTime(date.year, date.month, date.day, sH, sM))) {
-      // 跨夜班次：使用 date.day + 1 讓 DateTime 自動處理跨月/跨年/DST
-      endT = tz.TZDateTime(tz.local, date.year, date.month, date.day + 1, eH, eM);
+    allDayFlag = def.isAllDay || def.code == 'O';
+    if (allDayFlag) {
+      title = '${def.code} ${def.label}${note.isNotEmpty ? ' | $note' : ''}';
+      desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n類型: 全天${note.isNotEmpty ? '\n記事: $note' : ''}';
+      startMs = tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0).millisecondsSinceEpoch;
+      endMs = tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59).millisecondsSinceEpoch;
     } else {
-      endT = tz.TZDateTime(tz.local, date.year, date.month, date.day, eH, eM);
+      title = '${def.code} ${def.label} ${def.start}-${def.end}${note.isNotEmpty ? ' | $note' : ''}';
+      desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n時間: ${def.start}-${def.end}${note.isNotEmpty ? '\n記事: $note' : ''}';
+      final sp1 = def.start.split(':');
+      final ep1 = def.end.split(':');
+      int sH = int.parse(sp1[0]), sM = int.parse(sp1[1]);
+      int eH = int.parse(ep1[0]), eM = int.parse(ep1[1]);
+      final startT = tz.TZDateTime(tz.local, date.year, date.month, date.day, sH, sM);
+      tz.TZDateTime endT;
+      final sameDayEnd = DateTime(date.year, date.month, date.day, eH, eM);
+      if (!sameDayEnd.isAfter(DateTime(date.year, date.month, date.day, sH, sM))) {
+        endT = tz.TZDateTime(tz.local, date.year, date.month, date.day + 1, eH, eM);
+      } else {
+        endT = tz.TZDateTime(tz.local, date.year, date.month, date.day, eH, eM);
+      }
+      startMs = startT.millisecondsSinceEpoch;
+      endMs = endT.millisecondsSinceEpoch;
     }
-    // 【修正】轉換為 UTC 時間，避免寫入 Google 日曆時發生時區偏移
-    ev = Event(calId, eventId: existingEventId, title: title, description: desc,
-      start: startT.toUtc(), end: endT.toUtc(), allDay: false);
   }
 
   try {
-    final res = await _calendarPlugin.createOrUpdateEvent(ev);
-    if (res == null) {
-      await _writeDebugLog('[createEvent] ❌ $dateKey res 為 null');
+    final Map<String, dynamic> args = {
+      'calendarId': calId,
+      'title': title,
+      'description': desc,
+      'startMillis': startMs,
+      'endMillis': endMs,
+      'allDay': allDayFlag,
+    };
+    if (existingEventId != null) {
+      args['eventId'] = existingEventId;
+    }
+
+    // 呼叫原生 Android 方法，直接寫入 UTC 時間
+    final String? eventId = await _realChannel.invokeMethod('createEvent', args);
+
+    if (eventId != null) {
+      _googleEventIdMap[dateKey] = eventId;
+      await _writeDebugLog('[createEvent] ✅ $dateKey → eventId=$eventId (native)');
+      return true;
+    } else {
+      await _writeDebugLog('[createEvent] ❌ $dateKey 原生建立失敗');
       return false;
     }
-    if (!res.isSuccess) {
-      await _writeDebugLog('[createEvent] ❌ $dateKey 失敗: ${res.toString()}');
-      return false;
-    }
-    if (res.data == null) {
-      await _writeDebugLog('[createEvent] ❌ $dateKey 成功但 eventId 為 null');
-      return false;
-    }
-    _googleEventIdMap[dateKey] = res.data!;
-    await _writeDebugLog('[createEvent] ✅ $dateKey → eventId=${res.data} (existing=$existingEventId)');
-    return true;
   } catch (e) {
     await _writeDebugLog('[createEvent] ❌ $dateKey 例外: $e');
     return false;
