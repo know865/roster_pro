@@ -4,16 +4,16 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.view.Gravity
-import android.view.View
+import android.view.MotionEvent
 import android.view.WindowManager
 import android.view.animation.AlphaAnimation
-import android.view.animation.Animation
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -41,27 +41,27 @@ class AlarmActivity : Activity() {
             }
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-            // 2. 設置半透明背景，讓鎖屏桌布微微透出 (高級感)
-            window.setDimAmount(0.6f)
-            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            // 2. 完全移除背景變暗，讓原生鎖屏桌布 100% 透出
+            window.setDimAmount(0f)
+            window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
 
-            // 3. 建立根佈局（全螢幕半透明黑）
+            // 3. 根佈局全透明（不遮擋桌布）
             val rootLayout = FrameLayout(this).apply {
-                setBackgroundColor(Color.parseColor("#A6000000")) // 65% 黑色
+                setBackgroundColor(Color.TRANSPARENT)
             }
 
-            // 4. 建立中央懸浮卡片 (膠囊/1/3屏效果)
+            // 4. 中央懸浮卡片（50% 磨砂半透明）
             val cardLayout = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
                 setPadding(dp(24), dp(32), dp(24), dp(32))
 
-                // 圓角背景 + 陰影
+                // 50% 透明黑 + 20% 白色細邊框 = 模擬磨砂玻璃質感
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
                     cornerRadius = dp(28).toFloat()
-                    setColor(Color.parseColor("#1A1A1A")) // 深灰近黑
-                    setStroke(dp(1), Color.parseColor("#333333")) // 細微邊框
+                    setColor(Color.parseColor("#80000000")) // 50% 透明黑
+                    setStroke(dp(1), Color.parseColor("#33FFFFFF")) // 20% 白色邊框
                 }
 
                 // 陰影
@@ -70,17 +70,17 @@ class AlarmActivity : Activity() {
                 }
             }
 
-            // 5. 頂部圖標 + 標題
+            // 5. 標題（白色）
             val titleTv = TextView(this).apply {
                 text = intent.getStringExtra("title") ?: "上班提醒"
-                setTextColor(Color.parseColor("#FF5252")) // 紅色系
+                setTextColor(Color.WHITE)
                 textSize = 22f
                 gravity = Gravity.CENTER
                 setPadding(0, 0, 0, dp(16))
-                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setTypeface(typeface, Typeface.BOLD)
             }
 
-            // 6. 超大時間/核心提示文字
+            // 6. 超大時間提示文字（白色）
             val bodyTv = TextView(this).apply {
                 val bodyText = intent.getStringExtra("body") ?: ""
                 text = bodyText
@@ -88,8 +88,7 @@ class AlarmActivity : Activity() {
                 textSize = 36f
                 gravity = Gravity.CENTER
                 setPadding(0, 0, 0, dp(28))
-                setTypeface(typeface, android.graphics.Typeface.BOLD)
-                // 如果文字太長，自動縮小
+                setTypeface(typeface, Typeface.BOLD)
                 if (bodyText.length > 15) textSize = 28f
                 if (bodyText.length > 25) textSize = 22f
             }
@@ -99,25 +98,23 @@ class AlarmActivity : Activity() {
                 text = "停止響鈴"
                 textSize = 20f
                 setTextColor(Color.WHITE)
-                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setTypeface(typeface, Typeface.BOLD)
                 isAllCaps = false
                 gravity = Gravity.CENTER
 
-                // 藥丸形狀背景
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
-                    cornerRadius = dp(50).toFloat() // 全圓角 = 藥丸
-                    setColor(Color.parseColor("#E53935")) // 鮮豔紅
+                    cornerRadius = dp(50).toFloat()
+                    setColor(Color.parseColor("#E53935"))
                 }
 
                 val params = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
-                    dp(64) // 按鈕高度
+                    dp(64)
                 )
                 params.gravity = Gravity.CENTER_HORIZONTAL
                 layoutParams = params
 
-                // 點擊效果與停止邏輯
                 setOnClickListener {
                     stopVibration()
                     val stopIntent = Intent(this@AlarmActivity, AlarmService::class.java).apply {
@@ -127,22 +124,20 @@ class AlarmActivity : Activity() {
                     finish()
                 }
 
-                // 按壓反饋 (透明度)
                 setOnTouchListener { v, event ->
                     when (event.action) {
-                        android.view.MotionEvent.ACTION_DOWN -> v.alpha = 0.7f
-                        android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> v.alpha = 1.0f
+                        MotionEvent.ACTION_DOWN -> v.alpha = 0.7f
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> v.alpha = 1.0f
                     }
                     false
                 }
             }
 
-            // 將元件加入卡片
             cardLayout.addView(titleTv)
             cardLayout.addView(bodyTv)
             cardLayout.addView(stopBtn)
 
-            // 設定卡片佔螢幕寬度 85%，高度自適應
+            // 卡片寬度 85%
             val cardParams = FrameLayout.LayoutParams(
                 (resources.displayMetrics.widthPixels * 0.85).toInt(),
                 FrameLayout.LayoutParams.WRAP_CONTENT
@@ -160,7 +155,7 @@ class AlarmActivity : Activity() {
             }
             cardLayout.startAnimation(fadeIn)
 
-            // 9. 開始震動
+            // 9. 震動
             startVibration()
 
         } catch (e: Exception) {
@@ -169,15 +164,14 @@ class AlarmActivity : Activity() {
         }
     }
 
-    // 震動邏輯
     private fun startVibration() {
         try {
             vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
             if (vibrator?.hasVibrator() == true) {
                 isVibrating = true
-                val pattern = longArrayOf(0, 800, 500) // 震 0.8秒，停 0.5秒
+                val pattern = longArrayOf(0, 800, 500)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0)) // 0 = 無限循環
+                    vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0))
                 } else {
                     @Suppress("DEPRECATION")
                     vibrator?.vibrate(pattern, 0)
@@ -199,7 +193,6 @@ class AlarmActivity : Activity() {
         }
     }
 
-    // dp 轉 px 工具
     private fun dp(value: Int): Int {
         return (value * resources.displayMetrics.density).toInt()
     }
@@ -211,6 +204,5 @@ class AlarmActivity : Activity() {
 
     override fun onBackPressed() {
         // 防止按返回鍵關閉，必須點擊停止
-        // super.onBackPressed()
     }
 }
