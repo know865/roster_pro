@@ -2332,27 +2332,35 @@ Future<void> exportReport() async {
 
       double hrs = 0, ot = 0, allow = 0;
       SplayTreeMap<String, int> shiftCount = SplayTreeMap();
-      SplayTreeMap<String, double> extraByType = SplayTreeMap();
+      SplayTreeMap<String, double> allAllowances = SplayTreeMap();
 
       for (DateTime dt = firstDayOfMonth; !dt.isAfter(lastDayOfMonth); dt = dt.add(const Duration(days: 1))) {
         String k = DateFormat('yyyy-MM-dd').format(dt);
         String? c = roster[k];
         var d = c != null ? defs[c] : null;
 
-        // 1. 班次相關統計（僅有排班時才計算）
         if (d != null) {
           hrs += d.hours;
           shiftCount[c!] = (shiftCount[c] ?? 0) + 1;
-          if (d.hasMorningAllow) allow += morningAllowance;
-          if (d.hasNightAllow) allow += nightAllowance * d.hours;
-          if (d.hasMealAllow) allow += mealAllowance;
+          if (d.hasMorningAllow) {
+            allow += morningAllowance;
+            allAllowances['早/夜班津貼'] = (allAllowances['早/夜班津貼'] ?? 0) + morningAllowance;
+          }
+          if (d.hasNightAllow) {
+            double amt = nightAllowance * d.hours;
+            allow += amt;
+            allAllowances['通宵津貼'] = (allAllowances['通宵津貼'] ?? 0) + amt;
+          }
+          if (d.hasMealAllow) {
+            allow += mealAllowance;
+            allAllowances['膳食津貼'] = (allAllowances['膳食津貼'] ?? 0) + mealAllowance;
+          }
         }
-
-        // 2. OT、額外津貼、額外工時（無論有無排班都要統計）
         ot += (rosterOt[k] ?? d?.ot ?? 0);
         allow += (rosterExtra[k] ?? 0);
         if (rosterExtraType.containsKey(k) && rosterExtra.containsKey(k)) {
-          extraByType[rosterExtraType[k]!] = (extraByType[rosterExtraType[k]!] ?? 0) + rosterExtra[k]!;
+          String t = rosterExtraType[k]!;
+          allAllowances['自訂: $t'] = (allAllowances['自訂: $t'] ?? 0) + rosterExtra[k]!;
         }
         hrs += (rosterExtraHrs[k] ?? 0);
       }
@@ -2384,26 +2392,17 @@ Future<void> exportReport() async {
       }
 
       sb.writeln('');
-      sb.writeln('【三、津貼類別統計】');
-      sb.writeln('類別, 金額');
-      double totalExtra = 0;
-      if (extraByType.isNotEmpty) {
-        extraByType.forEach((t, a) { sb.writeln('$t, \$${a.toStringAsFixed(1)}'); totalExtra += a; });
-      } else {
+      sb.writeln('【三、津貼明細】');
+      sb.writeln('津貼名稱, 金額');
+      if (allAllowances.isEmpty) {
         sb.writeln('無, \$0.0');
+      } else {
+        allAllowances.forEach((name, amount) {
+          sb.writeln('$name, \$${amount.toStringAsFixed(1)}');
+        });
       }
-      sb.writeln('小計, \$${totalExtra.toStringAsFixed(1)}');
-      sb.writeln('');
-      sb.writeln('【四、OT 統計】');
-      sb.writeln('OT 總時數, $ot h');
-      sb.writeln('OT 時薪, \$${overtimeRate.toStringAsFixed(0)}/h');
-      sb.writeln('OT 總金額, \$${(ot * overtimeRate).toStringAsFixed(1)}');
-      sb.writeln('');
-      sb.writeln('【五、總計】');
-      sb.writeln('總工時, ${hrs.toStringAsFixed(1)}h');
-      sb.writeln('班次津貼+單日額外, \$${allow.toStringAsFixed(1)}');
       sb.writeln('OT 津貼, \$${(ot * overtimeRate).toStringAsFixed(1)}');
-      sb.writeln('津貼總額, \$${(allow + ot * overtimeRate).toStringAsFixed(1)}');
+      sb.writeln('津貼總金額, \$${(allow + ot * overtimeRate).toStringAsFixed(1)}');
     } else {
       int year = focused.year;
       DateTime rangeStart = DateTime(year, 1, 1);
@@ -2447,7 +2446,7 @@ Future<void> exportReport() async {
 
       double hrs = 0, ot = 0, allow = 0;
       SplayTreeMap<String, int> shiftCount = SplayTreeMap();
-      SplayTreeMap<String, double> extraByType = SplayTreeMap();
+      SplayTreeMap<String, double> allAllowances = SplayTreeMap();
       double totalYearHrs = 0;
 
       for (DateTime dt = rangeStart; !dt.isAfter(rangeEnd); dt = dt.add(const Duration(days: 1))) {
@@ -2459,14 +2458,25 @@ Future<void> exportReport() async {
           hrs += d.hours;
           totalYearHrs += d.hours;
           shiftCount[c!] = (shiftCount[c] ?? 0) + 1;
-          if (d.hasMorningAllow) allow += morningAllowance;
-          if (d.hasNightAllow) allow += nightAllowance * d.hours;
-          if (d.hasMealAllow) allow += mealAllowance;
+          if (d.hasMorningAllow) {
+            allow += morningAllowance;
+            allAllowances['早/夜班津貼'] = (allAllowances['早/夜班津貼'] ?? 0) + morningAllowance;
+          }
+          if (d.hasNightAllow) {
+            double amt = nightAllowance * d.hours;
+            allow += amt;
+            allAllowances['通宵津貼'] = (allAllowances['通宵津貼'] ?? 0) + amt;
+          }
+          if (d.hasMealAllow) {
+            allow += mealAllowance;
+            allAllowances['膳食津貼'] = (allAllowances['膳食津貼'] ?? 0) + mealAllowance;
+          }
         }
         ot += (rosterOt[k] ?? d?.ot ?? 0);
         allow += (rosterExtra[k] ?? 0);
         if (rosterExtraType.containsKey(k) && rosterExtra.containsKey(k)) {
-          extraByType[rosterExtraType[k]!] = (extraByType[rosterExtraType[k]!] ?? 0) + rosterExtra[k]!;
+          String t = rosterExtraType[k]!;
+          allAllowances['自訂: $t'] = (allAllowances['自訂: $t'] ?? 0) + rosterExtra[k]!;
         }
         hrs += (rosterExtraHrs[k] ?? 0);
       }
@@ -2490,26 +2500,17 @@ Future<void> exportReport() async {
       sb.writeln('標準工時, ${standardWeeklyHours}h/週');
       sb.writeln('總差額, ${totalDiff >= 0 ? '+' : ''}${totalDiff.toStringAsFixed(1)}h');
       sb.writeln('');
-      sb.writeln('【三、津貼類別統計】');
-      sb.writeln('類別, 金額');
-      double totalExtra = 0;
-      if (extraByType.isNotEmpty) {
-        extraByType.forEach((t, a) { sb.writeln('$t, \$${a.toStringAsFixed(1)}'); totalExtra += a; });
-      } else {
+      sb.writeln('【三、津貼明細】');
+      sb.writeln('津貼名稱, 金額');
+      if (allAllowances.isEmpty) {
         sb.writeln('無, \$0.0');
+      } else {
+        allAllowances.forEach((name, amount) {
+          sb.writeln('$name, \$${amount.toStringAsFixed(1)}');
+        });
       }
-      sb.writeln('小計, \$${totalExtra.toStringAsFixed(1)}');
-      sb.writeln('');
-      sb.writeln('【四、OT 統計】');
-      sb.writeln('OT 總時數, $ot h');
-      sb.writeln('OT 時薪, \$${overtimeRate.toStringAsFixed(0)}/h');
-      sb.writeln('OT 總金額, \$${(ot * overtimeRate).toStringAsFixed(1)}');
-      sb.writeln('');
-      sb.writeln('【五、總計】');
-      sb.writeln('總工時, ${hrs.toStringAsFixed(1)}h');
-      sb.writeln('班次津貼+單日額外, \$${allow.toStringAsFixed(1)}');
       sb.writeln('OT 津貼, \$${(ot * overtimeRate).toStringAsFixed(1)}');
-      sb.writeln('津貼總額, \$${(allow + ot * overtimeRate).toStringAsFixed(1)}');
+      sb.writeln('津貼總金額, \$${(allow + ot * overtimeRate).toStringAsFixed(1)}');
     }
     String dir = await _getBackupDir();
     String fileName = 'report_${isYearReport ? 'year${focused.year}' : '${focused.year}${focused.month.toString().padLeft(2, '0')}'}.csv';
@@ -4039,7 +4040,7 @@ void editShiftDialog({ShiftDef? oldDef}) {
   double hrs = 0, ot = 0, allow = 0;
   Map<String, int> shiftCount = {};
   Map<String, double> shiftHours = {};
-  Map<String, double> extraByType = {};
+  Map<String, double> allAllowances = {};
 
   for (DateTime dt = rangeStart; !dt.isAfter(rangeEnd); dt = dt.add(const Duration(days: 1))) {
     String k = DateFormat('yyyy-MM-dd').format(dt);
@@ -4051,9 +4052,19 @@ void editShiftDialog({ShiftDef? oldDef}) {
       hrs += d.hours;
       shiftCount[c!] = (shiftCount[c] ?? 0) + 1;
       shiftHours[c] = (shiftHours[c] ?? 0) + d.hours;
-      if (d.hasMorningAllow) allow += morningAllowance;
-      if (d.hasNightAllow) allow += nightAllowance * d.hours;
-      if (d.hasMealAllow) allow += mealAllowance;
+      if (d.hasMorningAllow) {
+        allow += morningAllowance;
+        allAllowances['早/夜班津貼'] = (allAllowances['早/夜班津貼'] ?? 0) + morningAllowance;
+      }
+      if (d.hasNightAllow) {
+        double amt = nightAllowance * d.hours;
+        allow += amt;
+        allAllowances['通宵津貼'] = (allAllowances['通宵津貼'] ?? 0) + amt;
+      }
+      if (d.hasMealAllow) {
+        allow += mealAllowance;
+        allAllowances['膳食津貼'] = (allAllowances['膳食津貼'] ?? 0) + mealAllowance;
+      }
     }
 
     // 2. OT、額外津貼、額外工時（無論有無排班都要統計）
@@ -4061,7 +4072,7 @@ void editShiftDialog({ShiftDef? oldDef}) {
     allow += (rosterExtra[k] ?? 0);
     if (rosterExtra.containsKey(k) && rosterExtraType.containsKey(k)) {
       String t = rosterExtraType[k]!;
-      extraByType[t] = (extraByType[t] ?? 0) + rosterExtra[k]!;
+      allAllowances['自訂: $t'] = (allAllowances['自訂: $t'] ?? 0) + rosterExtra[k]!;
     }
     hrs += (rosterExtraHrs[k] ?? 0);
   }
@@ -4239,13 +4250,21 @@ void editShiftDialog({ShiftDef? oldDef}) {
           Text('（截至 ${year}年12月，累計差額）', style: const TextStyle(fontSize: 11, color: Colors.grey)),
         ]))),
         Card(color: const Color(0xFFE8F5E9), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(isYearReport ? '津貼類別 (含自定義類別) - 全年' : '津貼類別 (含自定義類別)', style: const TextStyle(fontWeight: FontWeight.bold)),
-          Row(children: [const Text('班次津貼+單日額外'), const Spacer(), Text('\$${allow.toStringAsFixed(1)}')]),
-          if (extraByType.isNotEmpty) const Divider(),
-          ...extraByType.entries.map((e) => Row(children: [Text('類別: ${e.key}'), const Spacer(), Text('\$${e.value.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple))])),
-          Row(children: [Text('OT${ot.toStringAsFixed(1)}h x ${overtimeRate.toStringAsFixed(0)}'), const Spacer(), Text('\$${otAmount.toStringAsFixed(1)}')]),
+          Text(isYearReport ? '津貼明細 (含自定義類別) - 全年' : '津貼明細 (含自定義類別)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.green)),
           const Divider(),
-          Row(children: [const Text('津貼總額'), const Spacer(), Text('\$${totalAllow.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold))]),
+          if (allAllowances.isEmpty)
+            const Padding(padding: EdgeInsets.symmetric(vertical: 4), child: Text('無津貼紀錄', style: TextStyle(color: Colors.grey))),
+          ...allAllowances.entries.map((e) => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: Row(children: [
+              Expanded(child: Text(e.key, style: const TextStyle(fontSize: 13))),
+              Text('\$${e.value.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.deepPurple, fontSize: 13)),
+            ]),
+          )),
+          const Divider(),
+          Row(children: [Text('OT${ot.toStringAsFixed(1)}h x ${overtimeRate.toStringAsFixed(0)}'), const Spacer(), Text('\$${otAmount.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))]),
+          const Divider(thickness: 2),
+          Row(children: [const Text('津貼總金額', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), const Spacer(), Text('\$${totalAllow.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple))]),
         ]))),
       ]),
     ),
