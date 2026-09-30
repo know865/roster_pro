@@ -175,7 +175,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
 
                 // 強制背景為白色 (需求 1)
                 val bgColor = 0xFFFFFFFF.toInt()
-                val todayBgColor = 0xFFFFFFFF.toInt() 
+                val todayBgColor = 0xFFFFFFFF.toInt()
 
                 var rosterJsonStr = homeWidgetPrefs.getString("roster_json", "") ?: ""
                 if (rosterJsonStr.isEmpty()) rosterJsonStr = flutterPrefs.getString("flutter.roster_json", "{}") ?: "{}"
@@ -246,14 +246,14 @@ class RosterWidgetProvider : AppWidgetProvider() {
                                     if (c != 0) chipColor = c
                                 }
 
-                                // 字體放大 2 倍，若字數大於 2 則縮小防溢出 (需求 2, 3)
+                                // 字體放大 2 倍，若字數大於 2 則縮小防溢出
                                 var shiftTextSize = fontSize * 2.0
                                 if (shiftCode.length > 2) {
                                     shiftTextSize = fontSize * 1.2
                                 }
                                 views.setTextViewTextSize(shiftTvId, TypedValue.COMPLEX_UNIT_SP, shiftTextSize.toFloat())
 
-                                // 動態生成立體膠囊背景 (需求 4)
+                                // 動態生成立體膠囊背景
                                 val width = dpToPx(context, 12 + shiftCode.length * 14)
                                 val height = dpToPx(context, 26)
                                 val bitmap = createRoundedRectBitmap(context, width, height, chipColor, dpToPx(context, 10).toFloat())
@@ -280,7 +280,7 @@ class RosterWidgetProvider : AppWidgetProvider() {
                             }
                         }
 
-                        // 點擊事件
+                        // ======== 修改點：點擊整個格子進入 App ========
                         val intent = Intent(context, MainActivity::class.java).apply {
                             action = "com.example.roster_pro.OPEN_DATE_${appWidgetId}_$i"
                             putExtra("selected_date", dateStr)
@@ -293,7 +293,14 @@ class RosterWidgetProvider : AppWidgetProvider() {
                             context, requestCode, intent,
                             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                         )
-                        views.setOnClickPendingIntent(dayTvId, pi)
+                        // 優先綁定整個 cellId，若無則退回 dayTvId
+                        if (cellId != 0) {
+                            views.setOnClickPendingIntent(cellId, pi)
+                        } else {
+                            views.setOnClickPendingIntent(dayTvId, pi)
+                        }
+                        // ==============================================
+
                     } catch (e: Exception) { writeDebugLog(context, "cell $i error: ${e.message}") }
                 }
 
