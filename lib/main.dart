@@ -1204,7 +1204,6 @@ Future<void> syncDateRange() async {
 
       await _writeDebugLog('[同步] ====== 全量重建完成 del=$del delFailed=$delFailed add=$add ======');
 
-      // === 修改：只有手動同步且確實有變更才顯示提示 ===
       if (mounted && !silent) {
         if (del == 0 && delFailed == 0 && add == 0) {
           // 全 0 不顯示提示
@@ -1373,7 +1372,6 @@ Future<void> syncDateRange() async {
 
     await _writeDebugLog('[同步] ====== 同步完成 del=$del delFailed=$delFailed add=$add upd=$upd zombieFixed=$zombieFixed ======');
 
-    // === 修改：沒有任何班次改變就不再顯示同步提示 ===
     if (mounted && !silent) {
       if (del == 0 && delFailed == 0 && add == 0 && upd == 0 && zombieFixed == 0) {
         // 全 0 不顯示提示
@@ -2302,12 +2300,15 @@ Future<void> exportReport() async {
       while (!tempDt.isAfter(calEnd)) {
         String k = DateFormat('yyyy-MM-dd').format(tempDt);
         String? c = roster[k];
-        if (c != null) {
-          var d = defs[c];
-          if (d != null) {
-            String wk = isoWeekKey(tempDt);
-            allWeeklyHours[wk] = (allWeeklyHours[wk] ?? 0) + d.hours;
-          }
+        var d = c != null ? defs[c] : null;
+
+        double dailyHours = 0.0;
+        if (d != null) dailyHours += d.hours;
+        dailyHours += (rosterExtraHrs[k] ?? 0);
+
+        if (dailyHours > 0) {
+          String wk = isoWeekKey(tempDt);
+          allWeeklyHours[wk] = (allWeeklyHours[wk] ?? 0) + dailyHours;
         }
         tempDt = tempDt.add(const Duration(days: 1));
       }
@@ -2336,15 +2337,18 @@ Future<void> exportReport() async {
       for (DateTime dt = firstDayOfMonth; !dt.isAfter(lastDayOfMonth); dt = dt.add(const Duration(days: 1))) {
         String k = DateFormat('yyyy-MM-dd').format(dt);
         String? c = roster[k];
-        if (c == null) continue;
-        var d = defs[c];
+        var d = c != null ? defs[c] : null;
+
+        // 1. 班次相關統計（僅有排班時才計算）
         if (d != null) {
           hrs += d.hours;
-          shiftCount[c] = (shiftCount[c] ?? 0) + 1;
+          shiftCount[c!] = (shiftCount[c] ?? 0) + 1;
           if (d.hasMorningAllow) allow += morningAllowance;
           if (d.hasNightAllow) allow += nightAllowance * d.hours;
           if (d.hasMealAllow) allow += mealAllowance;
         }
+
+        // 2. OT、額外津貼、額外工時（無論有無排班都要統計）
         ot += (rosterOt[k] ?? d?.ot ?? 0);
         allow += (rosterExtra[k] ?? 0);
         if (rosterExtraType.containsKey(k) && rosterExtra.containsKey(k)) {
@@ -2413,12 +2417,15 @@ Future<void> exportReport() async {
       while (!tempDt.isAfter(calEnd)) {
         String k = DateFormat('yyyy-MM-dd').format(tempDt);
         String? c = roster[k];
-        if (c != null) {
-          var d = defs[c];
-          if (d != null) {
-            String wk = isoWeekKey(tempDt);
-            allWeeklyHours[wk] = (allWeeklyHours[wk] ?? 0) + d.hours;
-          }
+        var d = c != null ? defs[c] : null;
+
+        double dailyHours = 0.0;
+        if (d != null) dailyHours += d.hours;
+        dailyHours += (rosterExtraHrs[k] ?? 0);
+
+        if (dailyHours > 0) {
+          String wk = isoWeekKey(tempDt);
+          allWeeklyHours[wk] = (allWeeklyHours[wk] ?? 0) + dailyHours;
         }
         tempDt = tempDt.add(const Duration(days: 1));
       }
@@ -2446,12 +2453,12 @@ Future<void> exportReport() async {
       for (DateTime dt = rangeStart; !dt.isAfter(rangeEnd); dt = dt.add(const Duration(days: 1))) {
         String k = DateFormat('yyyy-MM-dd').format(dt);
         String? c = roster[k];
-        if (c == null) continue;
-        var d = defs[c];
+        var d = c != null ? defs[c] : null;
+
         if (d != null) {
           hrs += d.hours;
           totalYearHrs += d.hours;
-          shiftCount[c] = (shiftCount[c] ?? 0) + 1;
+          shiftCount[c!] = (shiftCount[c] ?? 0) + 1;
           if (d.hasMorningAllow) allow += morningAllowance;
           if (d.hasNightAllow) allow += nightAllowance * d.hours;
           if (d.hasMealAllow) allow += mealAllowance;
@@ -4037,16 +4044,19 @@ void editShiftDialog({ShiftDef? oldDef}) {
   for (DateTime dt = rangeStart; !dt.isAfter(rangeEnd); dt = dt.add(const Duration(days: 1))) {
     String k = DateFormat('yyyy-MM-dd').format(dt);
     String? c = roster[k];
-    if (c == null) continue;
-    var d = defs[c];
+    var d = c != null ? defs[c] : null;
+
+    // 1. 班次相關統計（僅有排班時才計算）
     if (d != null) {
       hrs += d.hours;
-      shiftCount[c] = (shiftCount[c] ?? 0) + 1;
+      shiftCount[c!] = (shiftCount[c] ?? 0) + 1;
       shiftHours[c] = (shiftHours[c] ?? 0) + d.hours;
       if (d.hasMorningAllow) allow += morningAllowance;
       if (d.hasNightAllow) allow += nightAllowance * d.hours;
       if (d.hasMealAllow) allow += mealAllowance;
     }
+
+    // 2. OT、額外津貼、額外工時（無論有無排班都要統計）
     ot += (rosterOt[k] ?? d?.ot ?? 0);
     allow += (rosterExtra[k] ?? 0);
     if (rosterExtra.containsKey(k) && rosterExtraType.containsKey(k)) {
@@ -4068,12 +4078,15 @@ void editShiftDialog({ShiftDef? oldDef}) {
   while (!tempDt.isAfter(calEnd)) {
     String k = DateFormat('yyyy-MM-dd').format(tempDt);
     String? c = roster[k];
-    if (c != null) {
-      var d = defs[c];
-      if (d != null) {
-        String wk = isoWeekKey(tempDt);
-        allWeeklyHours[wk] = (allWeeklyHours[wk] ?? 0) + d.hours;
-      }
+    var d = c != null ? defs[c] : null;
+
+    double dailyHours = 0.0;
+    if (d != null) dailyHours += d.hours;
+    dailyHours += (rosterExtraHrs[k] ?? 0);
+
+    if (dailyHours > 0) {
+      String wk = isoWeekKey(tempDt);
+      allWeeklyHours[wk] = (allWeeklyHours[wk] ?? 0) + dailyHours;
     }
     tempDt = tempDt.add(const Duration(days: 1));
   }
