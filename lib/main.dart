@@ -1014,6 +1014,7 @@ String _padTime(String t) {
 
 /// 建立/更新日曆事件。使用 tz.local 處理時區，跨時區旅行不會偏移。
 /// 跨夜班次使用 date.day + 1 建構結束時間，DST 地區不會偏移。
+/// 【修正】加入 .toUtc() 避免時區偏移問題
 Future<bool> _buildAndInsertEvent(String dateKey, String code, {String? existingEventId}) async {
   final calId = _requireCalendarId();
   final def = defs[code];
@@ -1029,8 +1030,8 @@ Future<bool> _buildAndInsertEvent(String dateKey, String code, {String? existing
     final desc = '$tag\n$customName\n類型: 純記事\n記事: $note';
     final title = '📝 $note';
     final ev = Event(calId, eventId: existingEventId, title: title, description: desc,
-      start: tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0),
-      end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59),
+      start: tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0).toUtc(),
+      end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59).toUtc(),
       allDay: true);
     try {
       final res = await _calendarPlugin.createOrUpdateEvent(ev);
@@ -1060,8 +1061,8 @@ Future<bool> _buildAndInsertEvent(String dateKey, String code, {String? existing
   Event ev;
   if (allDayFlag) {
     ev = Event(calId, eventId: existingEventId, title: title, description: desc,
-      start: tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0),
-      end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59),
+      start: tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0).toUtc(),
+      end: tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59).toUtc(),
       allDay: true);
   } else {
     final sp1 = def.start.split(':');
@@ -1078,8 +1079,9 @@ Future<bool> _buildAndInsertEvent(String dateKey, String code, {String? existing
     } else {
       endT = tz.TZDateTime(tz.local, date.year, date.month, date.day, eH, eM);
     }
+    // 【修正】轉換為 UTC 時間，避免寫入 Google 日曆時發生時區偏移
     ev = Event(calId, eventId: existingEventId, title: title, description: desc,
-      start: startT, end: endT, allDay: false);
+      start: startT.toUtc(), end: endT.toUtc(), allDay: false);
   }
 
   try {
