@@ -673,6 +673,7 @@ Future<void> load() async {
     customName = sp.getString('cName') ?? '我的排更-專屬日曆'; nameCtrl.text = customName;
     standardWeeklyHours = sp.getDouble('stdWeek') ?? 42; overtimeRate = sp.getDouble('otRate') ?? 80;
     monthlySalary = sp.getDouble('monthlySalary') ?? 0; hourlyDivisor = sp.getDouble('hourlyDivisor') ?? 182; otMultiplier = sp.getDouble('otMultiplier') ?? 1.5;
+    if (monthlySalary <= 0) overtimeRate = 0; // 👈 修正：若無月薪，強制將超時時薪歸零
     morningAllowance = sp.getDouble('morningAllow') ?? 0; nightAllowance = sp.getDouble('nightAllow') ?? 0; mealAllowance = sp.getDouble('mealAllow') ?? 0; nightAllowMultiplier = sp.getDouble('nightAllowMultiplier') ?? 0.4;
     calendarFontSize = sp.getDouble('calFont') ?? 14; googleSyncEnabled = sp.getBool('gSync') ?? false; autoSync = sp.getBool('gAuto') ?? false;
     holidayRegion = sp.getString('holidayRegion') ?? '香港'; _rosterCalendarId = sp.getString('rosterCalId'); _rosterCalendarName = sp.getString('rosterCalName') ?? '未選'; _rosterAccountName = sp.getString('rosterAccName') ?? '';
@@ -2365,6 +2366,9 @@ Future<void> exportReport() async {
         hrs += (rosterExtraHrs[k] ?? 0);
       }
 
+      // 👈 修正：若月薪 <= 0，強制將 OT 津貼視為 0 計算
+      double effectiveOtRate = (monthlySalary > 0) ? overtimeRate : 0.0;
+
       sb.writeln('========================================');
       sb.writeln('       ${focused.year}年${focused.month}月 排更報表');
       sb.writeln('========================================');
@@ -2401,8 +2405,8 @@ Future<void> exportReport() async {
           sb.writeln('$name, \$${amount.toStringAsFixed(1)}');
         });
       }
-      sb.writeln('OT 津貼, \$${(ot * overtimeRate).toStringAsFixed(1)}');
-      sb.writeln('津貼總金額, \$${(allow + ot * overtimeRate).toStringAsFixed(1)}');
+      sb.writeln('OT 津貼, \$${(ot * effectiveOtRate).toStringAsFixed(1)}');
+      sb.writeln('津貼總金額, \$${(allow + ot * effectiveOtRate).toStringAsFixed(1)}');
     } else {
       int year = focused.year;
       DateTime rangeStart = DateTime(year, 1, 1);
@@ -2481,6 +2485,9 @@ Future<void> exportReport() async {
         hrs += (rosterExtraHrs[k] ?? 0);
       }
 
+      // 👈 修正：若月薪 <= 0，強制將 OT 津貼視為 0 計算
+      double effectiveOtRate = (monthlySalary > 0) ? overtimeRate : 0.0;
+
       sb.writeln('========================================');
       sb.writeln('       ${year}年 全年排更報表');
       sb.writeln('========================================');
@@ -2509,8 +2516,8 @@ Future<void> exportReport() async {
           sb.writeln('$name, \$${amount.toStringAsFixed(1)}');
         });
       }
-      sb.writeln('OT 津貼, \$${(ot * overtimeRate).toStringAsFixed(1)}');
-      sb.writeln('津貼總金額, \$${(allow + ot * overtimeRate).toStringAsFixed(1)}');
+      sb.writeln('OT 津貼, \$${(ot * effectiveOtRate).toStringAsFixed(1)}');
+      sb.writeln('津貼總金額, \$${(allow + ot * effectiveOtRate).toStringAsFixed(1)}');
     }
     String dir = await _getBackupDir();
     String fileName = 'report_${isYearReport ? 'year${focused.year}' : '${focused.year}${focused.month.toString().padLeft(2, '0')}'}.csv';
@@ -4077,7 +4084,9 @@ void editShiftDialog({ShiftDef? oldDef}) {
     hrs += (rosterExtraHrs[k] ?? 0);
   }
 
-  double otAmount = ot * overtimeRate;
+  // 👈 修正：若月薪 <= 0，強制將 OT 津貼視為 0 計算
+  double effectiveOtRate = (monthlySalary > 0) ? overtimeRate : 0.0;
+  double otAmount = ot * effectiveOtRate;
   double totalAllow = allow + otAmount;
 
   DateTime calStart = rangeStart.subtract(Duration(days: rangeStart.weekday - 1));
@@ -4262,7 +4271,7 @@ void editShiftDialog({ShiftDef? oldDef}) {
             ]),
           )),
           const Divider(),
-          Row(children: [Text('OT${ot.toStringAsFixed(1)}h x ${overtimeRate.toStringAsFixed(0)}'), const Spacer(), Text('\$${otAmount.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))]),
+          Row(children: [Text('OT${ot.toStringAsFixed(1)}h x ${effectiveOtRate.toStringAsFixed(0)}'), const Spacer(), Text('\$${otAmount.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))]),
           const Divider(thickness: 2),
           Row(children: [const Text('津貼總金額', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), const Spacer(), Text('\$${totalAllow.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple))]),
         ]))),
@@ -4544,7 +4553,7 @@ void editShiftDialog({ShiftDef? oldDef}) {
                         final nA = (s / (d > 0 ? d : 182)) * (nMult <= 0 ? 0 : nMult);
                         setState(() {
                           monthlySalary = s; hourlyDivisor = d > 0 ? d : 182; otMultiplier = m > 0 ? m : 1.5;
-                          overtimeRate = (monthlySalary / hourlyDivisor) * otMultiplier;
+                          overtimeRate = (monthlySalary > 0) ? (monthlySalary / hourlyDivisor) * otMultiplier : 0; // 👈 修正：若無月薪，超時時薪歸零
                           morningAllowance = mA; nightAllowance = nA; mealAllowance = mealA; nightAllowMultiplier = nMult;
                           for (var i = 0; i < extraAllowances.length; i++) { extraAllowances[i].amount = standardHourlyRate * extraAllowances[i].multiplier; }
                         });
