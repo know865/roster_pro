@@ -22,6 +22,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:http/http.dart' as http;
 
+/// 設為 true 可開啟詳細調試日誌（正式版建議 false）
+const bool _enableVerboseLog = false;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   tzData.initializeTimeZones();
@@ -372,7 +375,9 @@ class MainPageState extends State<MainPage> {
     return res.data ?? [];
   }
 
+  /// 調試日誌：正式版預設關閉（_enableVerboseLog = false），需要時可開啟
   Future<void> _writeDebugLog(String message) async {
+    if (!_enableVerboseLog) return;
     try {
       final dir = await getExternalStorageDirectory();
       if (dir == null) return;
@@ -673,7 +678,7 @@ Future<void> load() async {
     customName = sp.getString('cName') ?? '我的排更-專屬日曆'; nameCtrl.text = customName;
     standardWeeklyHours = sp.getDouble('stdWeek') ?? 42; overtimeRate = sp.getDouble('otRate') ?? 80;
     monthlySalary = sp.getDouble('monthlySalary') ?? 0; hourlyDivisor = sp.getDouble('hourlyDivisor') ?? 182; otMultiplier = sp.getDouble('otMultiplier') ?? 1.5;
-    if (monthlySalary <= 0) overtimeRate = 0; // 👈 修正：若無月薪，強制將超時時薪歸零
+    if (monthlySalary <= 0) overtimeRate = 0; // 若無月薪，強制將超時時薪歸零
     morningAllowance = sp.getDouble('morningAllow') ?? 0; nightAllowance = sp.getDouble('nightAllow') ?? 0; mealAllowance = sp.getDouble('mealAllow') ?? 0; nightAllowMultiplier = sp.getDouble('nightAllowMultiplier') ?? 0.4;
     calendarFontSize = sp.getDouble('calFont') ?? 14; googleSyncEnabled = sp.getBool('gSync') ?? false; autoSync = sp.getBool('gAuto') ?? false;
     holidayRegion = sp.getString('holidayRegion') ?? '香港'; _rosterCalendarId = sp.getString('rosterCalId'); _rosterCalendarName = sp.getString('rosterCalName') ?? '未選'; _rosterAccountName = sp.getString('rosterAccName') ?? '';
@@ -986,7 +991,8 @@ String _padTime(String t) {
   return '$h:$m';
 }
 
-Future<bool> _buildAndInsertEvent(String dateKey, String code, Duration offset, {String? existingEventId}) async {
+/// 建立/更新日曆事件。使用 tz.local 處理時區，跨時區旅行不會偏移。
+Future<bool> _buildAndInsertEvent(String dateKey, String code, {String? existingEventId}) async {
   final calId = _requireCalendarId();
   final def = defs[code];
   final date = DateTime.parse(dateKey);
@@ -1038,15 +1044,21 @@ Future<bool> _buildAndInsertEvent(String dateKey, String code, Duration offset, 
   } else {
     final sp1 = def.start.split(':');
     final ep1 = def.end.split(':');
-    DateTime sLocal = DateTime(date.year, date.month, date.day, int.parse(sp1[0]), int.parse(sp1[1]));
-    DateTime eLocal = DateTime(date.year, date.month, date.day, int.parse(ep1[0]), int.parse(ep1[1]));
-    if (!eLocal.isAfter(sLocal)) eLocal = eLocal.add(const Duration(days: 1));
-    DateTime sUtc = sLocal.subtract(offset);
-    DateTime eUtc = eLocal.subtract(offset);
-    ev = Event(calId, eventId: existingEventId, title: title, description: desc,
-      start: tz.TZDateTime.utc(sUtc.year, sUtc.month, sUtc.day, sUtc.hour, sUtc.minute),
-      end: tz.TZDateTime.utc(eUtc.year, eUtc.month, eUtc.day, eUtc.hour, eUtc.minute),
-      allDay: false);
+    int sH = int.parse(sp1[0]), sM = int.parse(sp1[1]);
+    int eH = int.parse(ep1[0]), eM = int.parse(ep1[1]);
+    DateTime eLocal = DateTime(date.year, date.month, date.day, eH, eM);
+    if (!eLocal.isAfter(DateTime(date.year, date.month, date.day, sH, sM))) {
+      // 跨夜班次
+      ev = Event(calId, eventId: existingEventId, title: title, description: desc,
+        start: tz.TZDateTime(tz.local, date.year, date.month, date.day, sH, sM),
+        end: tz.TZDateTime(tz.local, date.year, date.month, date.day, eH, eM).add(const Duration(days: 1)),
+        allDay: false);
+    } else {
+      ev = Event(calId, eventId: existingEventId, title: title, description: desc,
+        start: tz.TZDateTime(tz.local, date.year, date.month, date.day, sH, sM),
+        end: tz.TZDateTime(tz.local, date.year, date.month, date.day, eH, eM),
+        allDay: false);
+    }
   }
 
   try {
@@ -1151,14 +1163,13 @@ Future<void> syncDateRange() async {
   try {
     final calId = _requireCalendarId();
     final sp = await SharedPreferences.getInstance();
-    final offset = DateTime.now().timeZoneOffset;
     int del = 0, delFailed = 0, add = 0, upd = 0;
     int zombieFixed = 0;
 
     if (needFull) {
       await _writeDebugLog('[同步] 全量重建：分批掃描清理 [RosterPro]');
 
-      // 👈 修正：使用動態計算的掃描範圍，而不是硬編碼 2000~2100
+      // 使用動態計算的掃描範圍，不硬編碼
       DateTime scanStart = _calcScanStart();
       DateTime scanEnd = _calcScanEnd();
       final Set<String> deletedIds = <String>{};
@@ -1188,12 +1199,12 @@ Future<void> syncDateRange() async {
       _googleEventIdMap.clear();
 
       for (var entry in roster.entries) {
-        final added = await _buildAndInsertEvent(entry.key, entry.value, offset, existingEventId: null);
+        final added = await _buildAndInsertEvent(entry.key, entry.value, existingEventId: null);
         if (added) add++;
       }
       for (var dateKey in rosterNote.keys) {
         if (!roster.containsKey(dateKey) && rosterNote[dateKey]!.isNotEmpty) {
-          final added = await _buildAndInsertEvent(dateKey, '', offset, existingEventId: null);
+          final added = await _buildAndInsertEvent(dateKey, '', existingEventId: null);
           if (added) add++;
         }
       }
@@ -1302,7 +1313,7 @@ Future<void> syncDateRange() async {
                 if (ok) del++; else delFailed++;
               }
             }
-            final updated = await _buildAndInsertEvent(dateKey, '', offset, existingEventId: matchedEventId);
+            final updated = await _buildAndInsertEvent(dateKey, '', existingEventId: matchedEventId);
             if (updated) {
               upd++;
               if (matchedEventId != null) _googleEventIdMap[dateKey] = matchedEventId;
@@ -1356,14 +1367,14 @@ Future<void> syncDateRange() async {
         }
 
         if (matchedEventId != null) {
-          final updated = await _buildAndInsertEvent(dateKey, newCode, offset, existingEventId: matchedEventId);
+          final updated = await _buildAndInsertEvent(dateKey, newCode, existingEventId: matchedEventId);
           if (updated) { upd++; _googleEventIdMap[dateKey] = matchedEventId; }
           else {
-            final added = await _buildAndInsertEvent(dateKey, newCode, offset);
+            final added = await _buildAndInsertEvent(dateKey, newCode);
             if (added) { add++; upd++; }
           }
         } else {
-          final added = await _buildAndInsertEvent(dateKey, newCode, offset);
+          final added = await _buildAndInsertEvent(dateKey, newCode);
           if (added) { add++; upd++; }
         }
         _dirtyDates.remove(dateKey);
@@ -1796,7 +1807,7 @@ Future<void> _forceFullResync() async {
 
   bool? confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
     title: const Text('⚠️ 全清重建確認'),
-    content: const Text('這會掃描範圍內所有帶 [RosterPro] 的事件並刪除，然後根據 App 排班重新建立。\n\n掃描範圍：\n• App 排班有資料的所有日期\n• 2000年 ~ 2100年（強制）\n\n✅ App 排班資料不受影響\n✅ 你其他 Google 行程不會被刪除\n✅ 只會影響選定日曆\n\n確定要執行嗎？'),
+    content: const Text('這會掃描範圍內所有帶 [RosterPro] 的事件並刪除，然後根據 App 排班重新建立。\n\n掃描範圍：\n• App 排班有資料的所有日期\n• 動態計算最早/最晚年份\n\n✅ App 排班資料不受影響\n✅ 你其他 Google 行程不會被刪除\n✅ 只會影響選定日曆\n\n確定要執行嗎？'),
     actions: [
       TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
       FilledButton(
@@ -2129,7 +2140,7 @@ Future<void> showWidgetDebugLog() async {
       final dir = await getExternalStorageDirectory();
       await showDialog(context: context, builder: (ctx) => AlertDialog(
         title: const Text('小工具調試日誌'),
-        content: Text('尚未產生除錯日誌。\n\n檢查以下路徑：\n${dir?.path ?? '未知'}/roster_widget_debug.txt\n\n或點「立即備份」後再查看。', style: const TextStyle(fontSize: 12)),
+        content: Text('尚未產生除錯日誌。\n\n提示：如需開啟詳細調試日誌，請將 main.dart 中的 _enableVerboseLog 改為 true 後重新編譯。\n\n檢查以下路徑：\n${dir?.path ?? '未知'}/roster_widget_debug.txt', style: const TextStyle(fontSize: 12)),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('關閉'))],
       ));
     }
@@ -2369,7 +2380,6 @@ Future<void> exportReport() async {
         hrs += (rosterExtraHrs[k] ?? 0);
       }
 
-      // 👈 修正：若月薪 <= 0，強制將 OT 津貼視為 0 計算
       double effectiveOtRate = (monthlySalary > 0) ? overtimeRate : 0.0;
 
       sb.writeln('========================================');
@@ -2488,7 +2498,6 @@ Future<void> exportReport() async {
         hrs += (rosterExtraHrs[k] ?? 0);
       }
 
-      // 👈 修正：若月薪 <= 0，強制將 OT 津貼視為 0 計算
       double effectiveOtRate = (monthlySalary > 0) ? overtimeRate : 0.0;
 
       sb.writeln('========================================');
@@ -2637,6 +2646,8 @@ Future<void> pickRangeAndApply() async {
     for (DateTime d = p.start; !d.isAfter(p.end); d = d.add(const Duration(days: 1))) {
       String dateKey = DateFormat('yyyy-MM-dd').format(d);
       roster[dateKey] = flat[i % flat.length];
+      // 覆蓋排班時，清除該日的臨時靜音狀態（因為班次改變了）
+      rosterAlarmMuted.remove(dateKey);
       _markDirty(dateKey);
       i++;
     }
@@ -2683,6 +2694,8 @@ Future<void> smartSchedule() async {
       DateTime d = startDate.add(Duration(days: i));
       String dateKey = DateFormat('yyyy-MM-dd').format(d);
       roster[dateKey] = flat[i % flat.length];
+      // 覆蓋排班時，清除該日的臨時靜音狀態（因為班次改變了）
+      rosterAlarmMuted.remove(dateKey);
       _markDirty(dateKey);
     }
   });
@@ -2722,7 +2735,7 @@ void showDetail(DateTime day) {
               setM(() {
                 cur = c;
                 final newDef = defs[c];
-                // 👈 修正：若新班次不支援鬧鐘或為全天，清除該日的臨時靜音狀態
+                // 若新班次不支援鬧鐘或為全天，清除該日的臨時靜音狀態
                 if (newDef == null || !newDef.alarmEnabled || newDef.isAllDay) {
                   rosterAlarmMuted.remove(k);
                 }
@@ -4069,7 +4082,7 @@ void editShiftDialog({ShiftDef? oldDef}) {
     String? c = roster[k];
     var d = c != null ? defs[c] : null;
 
-    // 1. 班次相關統計（僅有排班時才計算）
+    // 班次相關統計（僅有排班時才計算）
     if (d != null) {
       hrs += d.hours;
       shiftCount[c!] = (shiftCount[c] ?? 0) + 1;
@@ -4089,7 +4102,7 @@ void editShiftDialog({ShiftDef? oldDef}) {
       }
     }
 
-    // 2. OT、額外津貼、額外工時（無論有無排班都要統計）
+    // OT、額外津貼、額外工時（無論有無排班都要統計）
     ot += (rosterOt[k] ?? d?.ot ?? 0);
     allow += (rosterExtra[k] ?? 0);
     if (rosterExtra.containsKey(k) && rosterExtraType.containsKey(k)) {
@@ -4099,7 +4112,7 @@ void editShiftDialog({ShiftDef? oldDef}) {
     hrs += (rosterExtraHrs[k] ?? 0);
   }
 
-  // 👈 修正：若月薪 <= 0，強制將 OT 津貼視為 0 計算
+  // 若月薪 <= 0，強制將 OT 津貼視為 0 計算
   double effectiveOtRate = (monthlySalary > 0) ? overtimeRate : 0.0;
   double otAmount = ot * effectiveOtRate;
   double totalAllow = allow + otAmount;
@@ -4345,7 +4358,7 @@ void editShiftDialog({ShiftDef? oldDef}) {
                   context: context,
                   builder: (ctx) => AlertDialog(
                     title: const Text('確認刪除'),
-                    content: Text('刪除班次「${d.code}」後，所有使用此班次的排班記錄和模式也會被清除，確定嗎？'),
+                    content: Text('刪除班次「${d.code}」後，所有使用此班次的排班記錄、模式及鬧鐘靜音狀態也會被清除，確定嗎？'),
                     actions: [
                       TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
                       FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('刪除')),
@@ -4355,7 +4368,16 @@ void editShiftDialog({ShiftDef? oldDef}) {
                 if (confirm != true) return;
                 setState(() {
                   defs.remove(e.key);
-                  roster.removeWhere((key, value) => value == e.key);
+                  // 清理 roster 中所有使用該班次的日期，並同步清理靜音狀態
+                  final keysToRemove = <String>[];
+                  roster.forEach((k, v) {
+                    if (v == e.key) {
+                      keysToRemove.add(k);
+                      rosterAlarmMuted.remove(k);
+                    }
+                  });
+                  for (var k in keysToRemove) roster.remove(k);
+                  // 清理 pattern 中的舊代號
                   for (int i = 0; i < pattern.length; i++) {
                     for (int j = 0; j < pattern[i].length; j++) {
                       if (pattern[i][j] == e.key) pattern[i][j] = 'O';
@@ -4441,7 +4463,7 @@ void editShiftDialog({ShiftDef? oldDef}) {
         decoration: BoxDecoration(color: Colors.red.withOpacity(0.08), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.withOpacity(0.3))),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('⚠️ 全清重建（救援用）', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 13)),
-          const Text('• 掃描範圍：2000年 ~ 2100年 (徹底清理)\n• 只刪 [RosterPro] 事件，個人行程不受影響\n• 全部操作使用當前日曆 ID + eventId', style: TextStyle(fontSize: 10, color: Colors.black54)),
+          const Text('• 掃描範圍：動態計算 App 內所有排班年份\n• 只刪 [RosterPro] 事件，個人行程不受影響\n• 全部操作使用當前日曆 ID + eventId', style: TextStyle(fontSize: 10, color: Colors.black54)),
           const SizedBox(height: 8),
           SizedBox(width: double.infinity, child: FilledButton.icon(
             onPressed: (googleSyncEnabled && !_isSyncing) ? _forceFullResync : null,
@@ -4607,7 +4629,7 @@ void editShiftDialog({ShiftDef? oldDef}) {
                         final nA = (s / (d > 0 ? d : 182)) * (nMult <= 0 ? 0 : nMult);
                         setState(() {
                           monthlySalary = s; hourlyDivisor = d > 0 ? d : 182; otMultiplier = m > 0 ? m : 1.5;
-                          overtimeRate = (monthlySalary > 0) ? (monthlySalary / hourlyDivisor) * otMultiplier : 0; // 👈 修正：若無月薪，超時時薪歸零
+                          overtimeRate = (monthlySalary > 0) ? (monthlySalary / hourlyDivisor) * otMultiplier : 0; // 若無月薪，超時時薪歸零
                           morningAllowance = mA; nightAllowance = nA; mealAllowance = mealA; nightAllowMultiplier = nMult;
                           for (var i = 0; i < extraAllowances.length; i++) { extraAllowances[i].amount = standardHourlyRate * extraAllowances[i].multiplier; }
                         });
@@ -4828,7 +4850,7 @@ void editShiftDialog({ShiftDef? oldDef}) {
                 SizedBox(height: 16),
                 Text('4. 設定與同步', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
-                Text('• 「假期數據管理」：可設定每年的假期天數、微調，系統會自動計算餘額。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「上班鬧鐘」：在班次編輯卡內開啟鬧鐘，點擊時間框選一個時間，系統會自動計算提前分鐘數。\n  - 可自訂鈴聲：點擊「鬧鐘鈴聲」可選擇系統鈴聲並試聽。\n  - 單日臨時關閉：在日期編輯卡內可針對單獨一日臨時關閉鬧鐘，不影響其他日期。\n• 「公眾假期」：自動從網路 API 抓取（date.nager.at），覆蓋當年+明年+後年，切換地區自動更新。\n  - 點「從網路更新」可強制重新抓取前 1 年 ~ 後 3 年。\n  - 離線時降級使用內建假期（2024~2030）。\n• 「農曆」：本地計算支援 1900~2100 年，超出範圍顯示空白（不崩潰）。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：掃描範圍 2000~2100 年，只刪 [RosterPro] 事件。\n• 「App 圖標」：可從相冊選擇圖片建立自訂圖標捷徑。\n  - 點「選擇相冊圖片」→ 選圖 → 系統問「加到主畫面」→ 點「新增」\n  - 完成後，長按桌面上「舊的」Roster Pro 圖標 → 選擇「移除」\n  - 最終桌面只會留下一個帶有自訂圖標的 Roster Pro\n  - ⚠️ Android 8.0+ 系統限制：無法直接替換 App 本身圖標，只能建立新捷徑\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
+                Text('• 「假期數據管理」：可設定每年的假期天數、微調，系統會自動計算餘額。\n• 「匯出清單管理」：可查看、刪除、分享所有匯出的檔案。\n• 「自定班次」：可修改班次名稱、顏色、時間、津貼及假期設定（AL/SH/GH/WB）。\n• 「上班鬧鐘」：在班次編輯卡內開啟鬧鐘，點擊時間框選一個時間，系統會自動計算提前分鐘數。\n  - 可自訂鈴聲：點擊「鬧鐘鈴聲」可選擇系統鈴聲並試聽。\n  - 單日臨時關閉：在日期編輯卡內可針對單獨一日臨時關閉鬧鐘，不影響其他日期。\n• 「公眾假期」：自動從網路 API 抓取（date.nager.at），覆蓋當年+明年+後年，切換地區自動更新。\n  - 點「從網路更新」可強制重新抓取前 1 年 ~ 後 3 年。\n  - 離線時降級使用內建假期（2024~2030）。\n• 「農曆」：本地計算支援 1900~2100 年，超出範圍顯示空白（不崩潰）。\n• 「日曆同步」：開啟後可選擇已有日曆或建立自訂日曆來寫入排班。\n  - 手動同步：立即同步所有變更。\n  - 範圍同步：只同步指定日期範圍內的變更。\n  - 全清重建：動態掃描 App 內所有排班年份，只刪 [RosterPro] 事件。\n• 「App 圖標」：可從相冊選擇圖片建立自訂圖標捷徑。\n  - 點「選擇相冊圖片」→ 選圖 → 系統問「加到主畫面」→ 點「新增」\n  - 完成後，長按桌面上「舊的」Roster Pro 圖標 → 選擇「移除」\n  - 最終桌面只會留下一個帶有自訂圖標的 Roster Pro\n  - ⚠️ Android 8.0+ 系統限制：無法直接替換 App 本身圖標，只能建立新捷徑\n• 「備份與還原」：可將所有設定備份為 JSON 檔案，或從檔案還原。\n• 「桌面小工具」：字體與顏色已自動優化。', style: TextStyle(fontSize: 13)),
                 SizedBox(height: 16),
                 Text('5. 常見問題', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple)),
                 SizedBox(height: 4),
