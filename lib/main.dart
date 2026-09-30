@@ -1158,8 +1158,11 @@ Future<void> syncDateRange() async {
     if (needFull) {
       await _writeDebugLog('[同步] 全量重建：分批掃描清理 [RosterPro]');
 
+      // 👈 修正：使用動態計算的掃描範圍，而不是硬編碼 2000~2100
+      DateTime scanStart = _calcScanStart();
+      DateTime scanEnd = _calcScanEnd();
       final Set<String> deletedIds = <String>{};
-      for (int year = 2000; year <= 2100; year++) {
+      for (int year = scanStart.year; year <= scanEnd.year; year++) {
         DateTime startScan = DateTime(year, 1, 1);
         DateTime endScan = DateTime(year, 12, 31);
 
@@ -2715,7 +2718,16 @@ void showDetail(DateTime day) {
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Text('${DateFormat('yyyy-MM-dd EEE').format(day)} ${isHoliday(day) ? ' [${holidayName(day)}]' : ''}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            Wrap(spacing: 8, children: defs.keys.map((c) => ChoiceChip(label: Text(c), selected: cur == c, onSelected: (_) => setM(() => cur = c))).toList()),
+            Wrap(spacing: 8, children: defs.keys.map((c) => ChoiceChip(label: Text(c), selected: cur == c, onSelected: (_) {
+              setM(() {
+                cur = c;
+                final newDef = defs[c];
+                // 👈 修正：若新班次不支援鬧鐘或為全天，清除該日的臨時靜音狀態
+                if (newDef == null || !newDef.alarmEnabled || newDef.isAllDay) {
+                  rosterAlarmMuted.remove(k);
+                }
+              });
+            })).toList()),
 
             if (alarmApplicable) ...[
               const SizedBox(height: 10),
@@ -4031,6 +4043,9 @@ void editShiftDialog({ShiftDef? oldDef}) {
       for (int d = 1; d <= dim; d++) {
         String k = DateFormat('yyyy-MM-dd').format(DateTime(year, m, d));
         String? c = roster[k];
+        double extraHrs = rosterExtraHrs[k] ?? 0;
+        hrsM += extraHrs;
+        totalYearHrs += extraHrs;
         if (c == null) continue;
         var def = defs[c];
         if (def != null) {
@@ -4271,7 +4286,20 @@ void editShiftDialog({ShiftDef? oldDef}) {
             ]),
           )),
           const Divider(),
-          Row(children: [Text('OT${ot.toStringAsFixed(1)}h x ${effectiveOtRate.toStringAsFixed(0)}'), const Spacer(), Text('\$${otAmount.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))]),
+          Row(children: [
+            Text('OT${ot.toStringAsFixed(1)}h x ${effectiveOtRate.toStringAsFixed(0)}'),
+            if (monthlySalary <= 0 && ot > 0) ...[
+              const SizedBox(width: 4),
+              const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 16),
+            ],
+            const Spacer(),
+            Text('\$${otAmount.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+          ]),
+          if (monthlySalary <= 0 && ot > 0)
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text('💡 未設定月薪，無法計算 OT 津貼金額', style: TextStyle(fontSize: 10, color: Colors.orange)),
+            ),
           const Divider(thickness: 2),
           Row(children: [const Text('津貼總金額', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), const Spacer(), Text('\$${totalAllow.toStringAsFixed(1)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepPurple))]),
         ]))),
@@ -4310,7 +4338,33 @@ void editShiftDialog({ShiftDef? oldDef}) {
           subtitle: (d.hasLunch || d.hasMorningAllow || d.hasNightAllow || d.hasMealAllow || d.hasAL || d.hasSH || d.hasGH || d.hasWB || d.hasCustomLeave || d.alarmEnabled) ? Text('${d.hasMorningAllow ? '早/夜班 ' : ''}${d.hasNightAllow ? '通宵 ' : ''}${d.hasMealAllow ? '膳食 ' : ''}${d.hasLunch ? '午飯1h ' : ''}${d.hasAL ? 'AL ' : ''}${d.hasSH ? 'SH ' : ''}${d.hasGH ? 'GH ' : ''}${d.hasWB ? 'WB ' : ''}${d.hasCustomLeave ? '自訂假期(${d.customLeaveCode}) ' : ''}${d.alarmEnabled ? '鬧鐘(${d.alarmMinutesBefore}分前)' : ''}', style: const TextStyle(fontSize: 11, color: Colors.deepPurple)) : null,
           trailing: Row(mainAxisSize: MainAxisSize.min, children: [
             IconButton(icon: const Icon(Icons.edit), onPressed: () => editShiftDialog(oldDef: d)),
-            IconButton(icon: const Icon(Icons.delete), onPressed: () { setState(() => defs.remove(e.key)); save(); })
+            IconButton(
+              icon: const Icon(Icons.delete),
+              onPressed: () async {
+                bool? confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('確認刪除'),
+                    content: Text('刪除班次「${d.code}」後，所有使用此班次的排班記錄和模式也會被清除，確定嗎？'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+                      FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('刪除')),
+                    ],
+                  ),
+                );
+                if (confirm != true) return;
+                setState(() {
+                  defs.remove(e.key);
+                  roster.removeWhere((key, value) => value == e.key);
+                  for (int i = 0; i < pattern.length; i++) {
+                    for (int j = 0; j < pattern[i].length; j++) {
+                      if (pattern[i][j] == e.key) pattern[i][j] = 'O';
+                    }
+                  }
+                });
+                save();
+              },
+            )
           ])
         );
       }),
