@@ -192,6 +192,7 @@ class MainPage extends StatefulWidget {
   @override
   State<MainPage> createState() => MainPageState();
 }
+
 class MainPageState extends State<MainPage> {
   int tab = 0;
   DateTime focused = DateTime.now();
@@ -268,6 +269,10 @@ class MainPageState extends State<MainPage> {
   Map<int, Map<String, String>> _holidayCache = {};
   bool _holidayLoading = false;
   String _holidayLastUpdate = '';
+
+  /// 農曆快取：避免 updateWidget 每次都重新計算 3 年農曆資料
+  String _lunarCacheKey = '';
+  Map<String, String> _lunarCache = {};
 
   double widgetFontSize = 14.0;
   int widgetTextColor = 0xFF000000;
@@ -378,6 +383,11 @@ class MainPageState extends State<MainPage> {
   /// 調試日誌：正式版預設關閉（_enableVerboseLog = false），需要時可開啟
   Future<void> _writeDebugLog(String message) async {
     if (!_enableVerboseLog) return;
+    await _writeDebugLogForce(message);
+  }
+
+  /// 強制寫入日誌，不受 _enableVerboseLog 開關影響（用於手動觸發的調試）
+  Future<void> _writeDebugLogForce(String message) async {
     try {
       final dir = await getExternalStorageDirectory();
       if (dir == null) return;
@@ -565,13 +575,19 @@ Future<void> updateWidget() async {
     try { await HomeWidget.saveWidgetData<String>('roster_json', jsonEncode(roster)); } catch (_) {}
     try { await HomeWidget.saveWidgetData<String>('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson())))); } catch (_) {}
     try {
-      Map<String, String> lunarMap = {};
-      DateTime startLunar = DateTime(DateTime.now().year - 1, 1, 1);
-      DateTime endLunar = DateTime(DateTime.now().year + 1, 12, 31);
-      for (DateTime d = startLunar; !d.isAfter(endLunar); d = d.add(const Duration(days: 1))) {
-        lunarMap[DateFormat('yyyy-MM-dd').format(d)] = LunarHelper.getLunarDayText(d);
+      // 農曆快取：以「當前年份」為 key，同一年內不重複計算
+      String newCacheKey = '${DateTime.now().year}';
+      if (_lunarCacheKey != newCacheKey || _lunarCache.isEmpty) {
+        Map<String, String> lunarMap = {};
+        DateTime startLunar = DateTime(DateTime.now().year - 1, 1, 1);
+        DateTime endLunar = DateTime(DateTime.now().year + 1, 12, 31);
+        for (DateTime d = startLunar; !d.isAfter(endLunar); d = d.add(const Duration(days: 1))) {
+          lunarMap[DateFormat('yyyy-MM-dd').format(d)] = LunarHelper.getLunarDayText(d);
+        }
+        _lunarCache = lunarMap;
+        _lunarCacheKey = newCacheKey;
       }
-      await HomeWidget.saveWidgetData<String>('lunar_json', jsonEncode(lunarMap));
+      await HomeWidget.saveWidgetData<String>('lunar_json', jsonEncode(_lunarCache));
     } catch (_) {}
     try { await HomeWidget.saveWidgetData<double>('widgetFontSize', widgetFontSize); } catch (_) {}
     try { await HomeWidget.saveWidgetData<String>('widgetTextColor', widgetTextColor.toString()); } catch (_) {}
@@ -743,7 +759,8 @@ void _ensureAnchorWeek() {
   final anchorDate = _parseWeekKey(carryAnchorWeekKey);
   if (anchorDate != null && anchorDate.isAfter(globalStart)) carryAnchorWeekKey = earliestKey;
 }
-  void quickJumpMonth({bool forReport = false}) {
+
+void quickJumpMonth({bool forReport = false}) {
   int y = focused.year; int m = focused.month;
   showDialog(context: context, builder: (ctx) {
     return StatefulBuilder(builder: (ctx2, setD) {
@@ -908,15 +925,17 @@ Future<void> _ensureCalendar() async {
 
 void _markDirty(String dateKey) { _dirtyDates.add(dateKey); }
 
+/// 掃描範圍：同時考慮 roster 與 _googleEventIdMap，避免備份還原後留下殭屍記錄
 DateTime _calcScanStart() {
   int currentYear = DateTime.now().year;
   int minYear = currentYear - 2;
-  if (roster.isNotEmpty) {
-    for (String k in roster.keys) {
-      if (k.length >= 4) {
-        int? y = int.tryParse(k.substring(0, 4));
-        if (y != null && y - 1 < minYear) minYear = y - 1;
-      }
+  Set<String> allKeys = <String>{};
+  allKeys.addAll(roster.keys);
+  allKeys.addAll(_googleEventIdMap.keys);
+  for (String k in allKeys) {
+    if (k.length >= 4) {
+      int? y = int.tryParse(k.substring(0, 4));
+      if (y != null && y - 1 < minYear) minYear = y - 1;
     }
   }
   if (minYear < 2000) minYear = 2000;
@@ -926,17 +945,19 @@ DateTime _calcScanStart() {
 DateTime _calcScanEnd() {
   int currentYear = DateTime.now().year;
   int maxYear = currentYear + 2;
-  if (roster.isNotEmpty) {
-    for (String k in roster.keys) {
-      if (k.length >= 4) {
-        int? y = int.tryParse(k.substring(0, 4));
-        if (y != null && y + 1 > maxYear) maxYear = y + 1;
-      }
+  Set<String> allKeys = <String>{};
+  allKeys.addAll(roster.keys);
+  allKeys.addAll(_googleEventIdMap.keys);
+  for (String k in allKeys) {
+    if (k.length >= 4) {
+      int? y = int.tryParse(k.substring(0, 4));
+      if (y != null && y + 1 > maxYear) maxYear = y + 1;
     }
   }
   return DateTime(maxYear, 12, 31);
 }
-  Map<String, String>? _parseShiftFromDesc(String? desc, {String? title}) {
+
+Map<String, String>? _parseShiftFromDesc(String? desc, {String? title}) {
   try {
     if (desc != null && desc.isNotEmpty) {
       if (desc.contains('類型: 純記事')) return null;
@@ -992,6 +1013,7 @@ String _padTime(String t) {
 }
 
 /// 建立/更新日曆事件。使用 tz.local 處理時區，跨時區旅行不會偏移。
+/// 跨夜班次使用 date.day + 1 建構結束時間，DST 地區不會偏移。
 Future<bool> _buildAndInsertEvent(String dateKey, String code, {String? existingEventId}) async {
   final calId = _requireCalendarId();
   final def = defs[code];
@@ -1046,19 +1068,18 @@ Future<bool> _buildAndInsertEvent(String dateKey, String code, {String? existing
     final ep1 = def.end.split(':');
     int sH = int.parse(sp1[0]), sM = int.parse(sp1[1]);
     int eH = int.parse(ep1[0]), eM = int.parse(ep1[1]);
-    DateTime eLocal = DateTime(date.year, date.month, date.day, eH, eM);
-    if (!eLocal.isAfter(DateTime(date.year, date.month, date.day, sH, sM))) {
-      // 跨夜班次
-      ev = Event(calId, eventId: existingEventId, title: title, description: desc,
-        start: tz.TZDateTime(tz.local, date.year, date.month, date.day, sH, sM),
-        end: tz.TZDateTime(tz.local, date.year, date.month, date.day, eH, eM).add(const Duration(days: 1)),
-        allDay: false);
+    final startT = tz.TZDateTime(tz.local, date.year, date.month, date.day, sH, sM);
+    // 判斷是否跨夜：若結束時間不大於開始時間，則結束日 +1 天
+    tz.TZDateTime endT;
+    final sameDayEnd = DateTime(date.year, date.month, date.day, eH, eM);
+    if (!sameDayEnd.isAfter(DateTime(date.year, date.month, date.day, sH, sM))) {
+      // 跨夜班次：使用 date.day + 1 讓 DateTime 自動處理跨月/跨年/DST
+      endT = tz.TZDateTime(tz.local, date.year, date.month, date.day + 1, eH, eM);
     } else {
-      ev = Event(calId, eventId: existingEventId, title: title, description: desc,
-        start: tz.TZDateTime(tz.local, date.year, date.month, date.day, sH, sM),
-        end: tz.TZDateTime(tz.local, date.year, date.month, date.day, eH, eM),
-        allDay: false);
+      endT = tz.TZDateTime(tz.local, date.year, date.month, date.day, eH, eM);
     }
+    ev = Event(calId, eventId: existingEventId, title: title, description: desc,
+      start: startT, end: endT, allDay: false);
   }
 
   try {
@@ -1123,7 +1144,8 @@ Future<void> syncDateRange() async {
   var sp = await SharedPreferences.getInstance();
   await sp.setStringList('dirtyDates', _dirtyDates.toList());
 }
-  Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) async {
+
+Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) async {
   if (!googleSyncEnabled && !silent) {
     bool? en = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
       title: const Text('未開啟同步'),
@@ -1165,6 +1187,7 @@ Future<void> syncDateRange() async {
     final sp = await SharedPreferences.getInstance();
     int del = 0, delFailed = 0, add = 0, upd = 0;
     int zombieFixed = 0;
+    int createFailed = 0; // 事件建立失敗計數
 
     if (needFull) {
       await _writeDebugLog('[同步] 全量重建：分批掃描清理 [RosterPro]');
@@ -1200,12 +1223,12 @@ Future<void> syncDateRange() async {
 
       for (var entry in roster.entries) {
         final added = await _buildAndInsertEvent(entry.key, entry.value, existingEventId: null);
-        if (added) add++;
+        if (added) { add++; } else { createFailed++; }
       }
       for (var dateKey in rosterNote.keys) {
         if (!roster.containsKey(dateKey) && rosterNote[dateKey]!.isNotEmpty) {
           final added = await _buildAndInsertEvent(dateKey, '', existingEventId: null);
-          if (added) add++;
+          if (added) { add++; } else { createFailed++; }
         }
       }
 
@@ -1217,16 +1240,19 @@ Future<void> syncDateRange() async {
       await sp.setBool('needsFullSync', _needsFullSync);
       updateWidget();
 
-      await _writeDebugLog('[同步] ====== 全量重建完成 del=$del delFailed=$delFailed add=$add ======');
+      await _writeDebugLog('[同步] ====== 全量重建完成 del=$del delFailed=$delFailed add=$add createFailed=$createFailed ======');
 
       if (mounted && !silent) {
-        if (del == 0 && delFailed == 0 && add == 0) {
+        if (del == 0 && delFailed == 0 && add == 0 && createFailed == 0) {
           // 全 0 不顯示提示
         } else {
+          String msg = '✅ 完整同步完成：刪 $del / 失敗 $delFailed / 建立 $add';
+          if (createFailed > 0) msg += ' / ⚠️ 建立失敗 $createFailed';
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('✅ 完整同步完成：刪 $del / 失敗 $delFailed / 建立 $add'),
+            content: Text(msg),
             duration: const Duration(seconds: 4),
             behavior: SnackBarBehavior.floating,
+            backgroundColor: createFailed > 0 ? Colors.orange : null,
           ));
         }
       }
@@ -1317,6 +1343,8 @@ Future<void> syncDateRange() async {
             if (updated) {
               upd++;
               if (matchedEventId != null) _googleEventIdMap[dateKey] = matchedEventId;
+            } else {
+              createFailed++;
             }
             _dirtyDates.remove(dateKey);
             continue;
@@ -1371,11 +1399,11 @@ Future<void> syncDateRange() async {
           if (updated) { upd++; _googleEventIdMap[dateKey] = matchedEventId; }
           else {
             final added = await _buildAndInsertEvent(dateKey, newCode);
-            if (added) { add++; upd++; }
+            if (added) { add++; upd++; } else { createFailed++; }
           }
         } else {
           final added = await _buildAndInsertEvent(dateKey, newCode);
-          if (added) { add++; upd++; }
+          if (added) { add++; upd++; } else { createFailed++; }
         }
         _dirtyDates.remove(dateKey);
       }
@@ -1385,20 +1413,22 @@ Future<void> syncDateRange() async {
     await sp.setBool('needsFullSync', _needsFullSync);
     updateWidget();
 
-    await _writeDebugLog('[同步] ====== 同步完成 del=$del delFailed=$delFailed add=$add upd=$upd zombieFixed=$zombieFixed ======');
+    await _writeDebugLog('[同步] ====== 同步完成 del=$del delFailed=$delFailed add=$add upd=$upd zombieFixed=$zombieFixed createFailed=$createFailed ======');
 
     if (mounted && !silent) {
-      if (del == 0 && delFailed == 0 && add == 0 && upd == 0 && zombieFixed == 0) {
+      if (del == 0 && delFailed == 0 && add == 0 && upd == 0 && zombieFixed == 0 && createFailed == 0) {
         // 全 0 不顯示提示
       } else {
         String msg = needFull
             ? '✅ 完整同步完成：刪 $del / 失敗 $delFailed / 建立 $add'
             : '✅ 已同步：刪 $del / 失敗 $delFailed / 更新 $upd / 建立 $add';
         if (zombieFixed > 0) msg += ' / 修復僵屍 $zombieFixed';
+        if (createFailed > 0) msg += ' / ⚠️ 建立失敗 $createFailed';
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(msg),
           duration: const Duration(seconds: 3),
           behavior: SnackBarBehavior.floating,
+          backgroundColor: createFailed > 0 ? Colors.orange : null,
         ));
       }
     }
@@ -1610,7 +1640,8 @@ Future<void> _forceCleanDuplicates() async {
     }
   }
 }
-  Future<void> _purgeRosterProInRange() async {
+
+Future<void> _purgeRosterProInRange() async {
   if (_isSyncing) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在同步中，請稍候...')));
     return;
@@ -1824,7 +1855,8 @@ Future<void> _forceFullResync() async {
   _dirtyDates.clear();
   await _syncToGoogle(forceFullSync: true);
 }
-  Future<String> _getBackupDir() async {
+
+Future<String> _getBackupDir() async {
   try {
     Directory dir = Directory('/storage/emulated/0/RosterPro_Backups');
     if (!await dir.exists()) await dir.create(recursive: true);
@@ -2002,7 +2034,8 @@ Future<void> showBackupList() async {
     });
   });
 }
-  Future<void> showExportListManager() async {
+
+Future<void> showExportListManager() async {
   final dirPath = await _getBackupDir();
   final dir = Directory(dirPath);
   if (!await dir.exists()) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('沒有匯出檔案'))); return; }
@@ -2118,7 +2151,8 @@ Future<void> _showExportResultDialog(String path) async {
 }
 
 Future<void> showWidgetDebugLog() async {
-  await _writeDebugLog('=== 手動觸發調試日誌 ===');
+  // 手動觸發時，無論開關狀態如何，都強制寫入一行
+  await _writeDebugLogForce('=== 手動觸發調試日誌（開關：${_enableVerboseLog ? "開啟" : "關閉"}）===');
   String content = '';
   String usedPath = '';
   try {
@@ -2140,7 +2174,7 @@ Future<void> showWidgetDebugLog() async {
       final dir = await getExternalStorageDirectory();
       await showDialog(context: context, builder: (ctx) => AlertDialog(
         title: const Text('小工具調試日誌'),
-        content: Text('尚未產生除錯日誌。\n\n提示：如需開啟詳細調試日誌，請將 main.dart 中的 _enableVerboseLog 改為 true 後重新編譯。\n\n檢查以下路徑：\n${dir?.path ?? '未知'}/roster_widget_debug.txt', style: const TextStyle(fontSize: 12)),
+        content: Text('尚未產生除錯日誌。\n\n當前日誌開關：${_enableVerboseLog ? "開啟" : "關閉"}\n（如需記錄詳細日誌，請將 main.dart 中的 _enableVerboseLog 改為 true 後重新編譯）\n\n檢查以下路徑：\n${dir?.path ?? '未知'}/roster_widget_debug.txt', style: const TextStyle(fontSize: 12)),
         actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('關閉'))],
       ));
     }
@@ -2150,7 +2184,7 @@ Future<void> showWidgetDebugLog() async {
   await showDialog(context: context, builder: (ctx) => AlertDialog(
     title: const Text('小工具調試日誌'),
     content: SizedBox(width: 500, height: 500, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(6)), child: Text('路徑: $usedPath', style: const TextStyle(fontSize: 9))),
+      Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(6)), child: Text('路徑: $usedPath\n開關: ${_enableVerboseLog ? "開啟" : "關閉"}', style: const TextStyle(fontSize: 9))),
       const SizedBox(height: 8),
       Expanded(child: SingleChildScrollView(child: SelectableText(content, style: const TextStyle(fontSize: 11, fontFamily: 'monospace')))),
     ])),
@@ -2203,7 +2237,8 @@ Future<void> backupAnywhere() async {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('備份失敗 $e')));
   }
 }
-  Future<void> clearRosterByRange() async {
+
+Future<void> clearRosterByRange() async {
   if (_rosterCalendarId == null || _rosterCalendarId!.isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('尚未選擇日曆')));
     return;
@@ -2544,7 +2579,8 @@ Future<void> exportReport() async {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('匯出失敗 $e')));
   }
 }
-  Future<void> showNotesListDialog() async {
+
+Future<void> showNotesListDialog() async {
   int queryYear = focused.year;
   int queryMonth = focused.month;
   bool yearMode = false;
@@ -2898,7 +2934,8 @@ void showDetail(DateTime day) {
     });
   });
 }
-  Future<TimeOfDay?> _pickWheelTime(BuildContext ctx, TimeOfDay init) async {
+
+Future<TimeOfDay?> _pickWheelTime(BuildContext ctx, TimeOfDay init) async {
   return await showTimePicker(context: ctx, initialTime: init, builder: (ctx, child) {
     return MediaQuery(data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true), child: child!);
   });
@@ -3234,7 +3271,8 @@ void editShiftDialog({ShiftDef? oldDef}) {
     });
   });
 }
-  Future<void> showLeaveListDialog() async {
+
+Future<void> showLeaveListDialog() async {
   int queryYear = focused.year;
   int queryMonth = focused.month;
   bool yearMode = false;
@@ -3382,7 +3420,8 @@ void editShiftDialog({ShiftDef? oldDef}) {
     });
   });
 }
-  void showLeaveManagementDialog() {
+
+void showLeaveManagementDialog() {
   int selectedYear = DateTime.now().year;
 
   final Map<String, TextEditingController> totalCtrls = {};
@@ -3551,7 +3590,8 @@ void editShiftDialog({ShiftDef? oldDef}) {
     });
   });
 }
-  Widget calTab() {
+
+Widget calTab() {
   DateTime first = DateTime(focused.year, focused.month, 1);
   DateTime start = first.subtract(Duration(days: first.weekday - 1));
   int daysInMonth = DateTime(focused.year, focused.month + 1, 0).day;
@@ -3872,7 +3912,8 @@ void editShiftDialog({ShiftDef? oldDef}) {
     ),
   );
 }
-  Widget patternTab() {
+
+Widget patternTab() {
   return SafeArea(child: Column(children: [
     const Padding(padding: EdgeInsets.only(top: 12), child: Center(child: Text('排更模式', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)))),
     Padding(
@@ -4038,7 +4079,8 @@ void editShiftDialog({ShiftDef? oldDef}) {
     })),
   ]));
 }
-  Widget reportTab() {
+
+Widget reportTab() {
   int year = focused.year;
   int month = focused.month;
 
@@ -4082,7 +4124,6 @@ void editShiftDialog({ShiftDef? oldDef}) {
     String? c = roster[k];
     var d = c != null ? defs[c] : null;
 
-    // 班次相關統計（僅有排班時才計算）
     if (d != null) {
       hrs += d.hours;
       shiftCount[c!] = (shiftCount[c] ?? 0) + 1;
@@ -4102,7 +4143,6 @@ void editShiftDialog({ShiftDef? oldDef}) {
       }
     }
 
-    // OT、額外津貼、額外工時（無論有無排班都要統計）
     ot += (rosterOt[k] ?? d?.ot ?? 0);
     allow += (rosterExtra[k] ?? 0);
     if (rosterExtra.containsKey(k) && rosterExtraType.containsKey(k)) {
@@ -4112,7 +4152,6 @@ void editShiftDialog({ShiftDef? oldDef}) {
     hrs += (rosterExtraHrs[k] ?? 0);
   }
 
-  // 若月薪 <= 0，強制將 OT 津貼視為 0 計算
   double effectiveOtRate = (monthlySalary > 0) ? overtimeRate : 0.0;
   double otAmount = ot * effectiveOtRate;
   double totalAllow = allow + otAmount;
@@ -4320,7 +4359,8 @@ void editShiftDialog({ShiftDef? oldDef}) {
     ),
   );
 }
-  Widget settingsTab() {
+
+Widget settingsTab() {
   var stdCtrl = TextEditingController(text: standardWeeklyHours.toString());
   var carryCtrl = TextEditingController(text: carry.toString());
   List<MapEntry<String, ShiftDef>> shiftList = defs.entries.toList();
@@ -4629,7 +4669,7 @@ void editShiftDialog({ShiftDef? oldDef}) {
                         final nA = (s / (d > 0 ? d : 182)) * (nMult <= 0 ? 0 : nMult);
                         setState(() {
                           monthlySalary = s; hourlyDivisor = d > 0 ? d : 182; otMultiplier = m > 0 ? m : 1.5;
-                          overtimeRate = (monthlySalary > 0) ? (monthlySalary / hourlyDivisor) * otMultiplier : 0; // 若無月薪，超時時薪歸零
+                          overtimeRate = (monthlySalary > 0) ? (monthlySalary / hourlyDivisor) * otMultiplier : 0;
                           morningAllowance = mA; nightAllowance = nA; mealAllowance = mealA; nightAllowMultiplier = nMult;
                           for (var i = 0; i < extraAllowances.length; i++) { extraAllowances[i].amount = standardHourlyRate * extraAllowances[i].multiplier; }
                         });
