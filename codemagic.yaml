@@ -160,6 +160,7 @@ workflows:
           import java.io.File
           import java.io.FileOutputStream
           import java.io.InputStream
+          import java.util.Calendar
           import java.util.TimeZone
 
           class MainActivity : FlutterActivity() {
@@ -603,9 +604,59 @@ workflows:
                       val eventId = call.argument<String>("eventId")
                       val title = call.argument<String>("title") ?: ""
                       val description = call.argument<String>("description") ?: ""
-                      val startMillis = call.argument<Number>("startMillis")?.toLong() ?: 0L
-                      val endMillis = call.argument<Number>("endMillis")?.toLong() ?: 0L
+                      val dateStr = call.argument<String>("date")       // "2024-10-01"
+                      val startStr = call.argument<String>("start")     // "07:00"
+                      val endStr = call.argument<String>("end")         // "15:30"
                       val allDay = call.argument<Boolean>("allDay") ?: false
+
+                      if (dateStr == null || startStr == null || endStr == null) {
+                          result.error("BAD_ARGS", "date/start/end required", null)
+                          return
+                      }
+
+                      val dateParts = dateStr.split("-")
+                      if (dateParts.size != 3) {
+                          result.error("BAD_DATE", "Invalid date format: $dateStr", null)
+                          return
+                      }
+                      val year = dateParts[0].toInt()
+                      val month = dateParts[1].toInt() - 1
+                      val day = dateParts[2].toInt()
+
+                      val startParts = startStr.split(":")
+                      if (startParts.size != 2) {
+                          result.error("BAD_TIME", "Invalid start time: $startStr", null)
+                          return
+                      }
+                      val startHour = startParts[0].toInt()
+                      val startMinute = startParts[1].toInt()
+
+                      val endParts = endStr.split(":")
+                      if (endParts.size != 2) {
+                          result.error("BAD_TIME", "Invalid end time: $endStr", null)
+                          return
+                      }
+                      val endHour = endParts[0].toInt()
+                      val endMinute = endParts[1].toInt()
+
+                      // ========= 核心：鎖定排班基準時區為香港 =========
+                      val hkTimeZone = TimeZone.getTimeZone("Asia/Hong_Kong")
+
+                      val startCal = Calendar.getInstance(hkTimeZone)
+                      startCal.set(year, month, day, startHour, startMinute, 0)
+                      startCal.set(Calendar.MILLISECOND, 0)
+                      val startMillis = startCal.timeInMillis
+
+                      val endCal = Calendar.getInstance(hkTimeZone)
+                      endCal.set(year, month, day, endHour, endMinute, 0)
+                      endCal.set(Calendar.MILLISECOND, 0)
+                      var endMillis = endCal.timeInMillis
+
+                      // 處理跨日班次（例如 22:00 到次日 06:00）
+                      if (endMillis <= startMillis && !allDay) {
+                          endCal.add(Calendar.DAY_OF_YEAR, 1)
+                          endMillis = endCal.timeInMillis
+                      }
 
                       val values = ContentValues().apply {
                           put(CalendarContract.Events.CALENDAR_ID, calendarId)
@@ -614,8 +665,8 @@ workflows:
                           put(CalendarContract.Events.DTSTART, startMillis)
                           put(CalendarContract.Events.DTEND, endMillis)
                           put(CalendarContract.Events.ALL_DAY, if (allDay) 1 else 0)
-                          // 修復時區偏移：使用裝置當前時區
-                          put(CalendarContract.Events.EVENT_TIMEZONE, java.util.TimeZone.getDefault().id)
+                          // 事件時區固定為香港
+                          put(CalendarContract.Events.EVENT_TIMEZONE, "Asia/Hong_Kong")
                       }
 
                       if (eventId != null && eventId.isNotEmpty()) {
