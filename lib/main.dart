@@ -1012,17 +1012,16 @@ String _padTime(String t) {
   return '$h:$m';
 }
 
-/// 建立/更新日曆事件。改為呼叫原生 Android 方法，徹底解決時區偏移問題。
+/// 建立/更新日曆事件。改為傳送字串給原生 Android，由 Android 鎖定香港時區計算時間戳。
 Future<bool> _buildAndInsertEvent(String dateKey, String code, {String? existingEventId}) async {
   final calId = _requireCalendarId();
   final def = defs[code];
-  final date = DateTime.parse(dateKey);
   final note = rosterNote[dateKey] ?? '';
   final tag = '[RosterPro]$dateKey';
 
   String title, desc;
   bool allDayFlag;
-  int startMs, endMs;
+  String startStr, endStr;
 
   if (def == null) {
     if (note.isEmpty) {
@@ -1032,33 +1031,20 @@ Future<bool> _buildAndInsertEvent(String dateKey, String code, {String? existing
     allDayFlag = true;
     title = '📝 $note';
     desc = '$tag\n$customName\n類型: 純記事\n記事: $note';
-    // 使用 tz.local 計算出正確的 UTC 毫秒
-    startMs = tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0).millisecondsSinceEpoch;
-    endMs = tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59).millisecondsSinceEpoch;
+    startStr = '00:00';
+    endStr = '23:59';
   } else {
     allDayFlag = def.isAllDay || def.code == 'O';
     if (allDayFlag) {
       title = '${def.code} ${def.label}${note.isNotEmpty ? ' | $note' : ''}';
       desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n類型: 全天${note.isNotEmpty ? '\n記事: $note' : ''}';
-      startMs = tz.TZDateTime(tz.local, date.year, date.month, date.day, 0, 0, 0).millisecondsSinceEpoch;
-      endMs = tz.TZDateTime(tz.local, date.year, date.month, date.day, 23, 59, 59).millisecondsSinceEpoch;
+      startStr = '00:00';
+      endStr = '23:59';
     } else {
       title = '${def.code} ${def.label} ${def.start}-${def.end}${note.isNotEmpty ? ' | $note' : ''}';
       desc = '$tag\n$customName\n班次: ${def.code} ${def.label}\n時間: ${def.start}-${def.end}${note.isNotEmpty ? '\n記事: $note' : ''}';
-      final sp1 = def.start.split(':');
-      final ep1 = def.end.split(':');
-      int sH = int.parse(sp1[0]), sM = int.parse(sp1[1]);
-      int eH = int.parse(ep1[0]), eM = int.parse(ep1[1]);
-      final startT = tz.TZDateTime(tz.local, date.year, date.month, date.day, sH, sM);
-      tz.TZDateTime endT;
-      final sameDayEnd = DateTime(date.year, date.month, date.day, eH, eM);
-      if (!sameDayEnd.isAfter(DateTime(date.year, date.month, date.day, sH, sM))) {
-        endT = tz.TZDateTime(tz.local, date.year, date.month, date.day + 1, eH, eM);
-      } else {
-        endT = tz.TZDateTime(tz.local, date.year, date.month, date.day, eH, eM);
-      }
-      startMs = startT.millisecondsSinceEpoch;
-      endMs = endT.millisecondsSinceEpoch;
+      startStr = def.start;
+      endStr = def.end;
     }
   }
 
@@ -1067,15 +1053,16 @@ Future<bool> _buildAndInsertEvent(String dateKey, String code, {String? existing
       'calendarId': calId,
       'title': title,
       'description': desc,
-      'startMillis': startMs,
-      'endMillis': endMs,
+      'date': dateKey,
+      'start': startStr,
+      'end': endStr,
       'allDay': allDayFlag,
     };
     if (existingEventId != null) {
       args['eventId'] = existingEventId;
     }
 
-    // 呼叫原生 Android 方法，直接寫入 UTC 時間
+    // 呼叫原生 Android 方法，由 Android 鎖定香港時區計算時間戳
     final String? eventId = await _realChannel.invokeMethod('createEvent', args);
 
     if (eventId != null) {
