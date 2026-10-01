@@ -2254,6 +2254,8 @@ Future<void> exportShareImage() async {
     double width = 1080;
     double y = 0;
     final paintWhite = Paint()..color = Colors.white;
+
+    // 計算圖片各區塊高度
     double calHeight = calImg != null ? width * calImg.height / calImg.width : 0;
     Set<String> usedCodes = {};
     int dim = DateTime(focused.year, focused.month + 1, 0).day;
@@ -2263,17 +2265,47 @@ Future<void> exportShareImage() async {
     }
     List<ShiftDef> legendDefs = defs.entries.where((e) => usedCodes.contains(e.key)).map((e) => e.value).toList();
     double legendHeight = legendDefs.length * 44 + 80;
-    double totalHeight = calHeight + legendHeight + 40;
+
+    // 修改點 1：計算頂部標題所需的高度 (加上 100 的緩衝空間)
+    double titleHeight = 100.0;
+    double totalHeight = titleHeight + calHeight + legendHeight + 40;
+
+    // 繪製全白背景
     canvas.drawRect(Rect.fromLTWH(0, 0, width, totalHeight), paintWhite);
+
+    // ========= 修改點 2：在頂部繪製年月標題 =========
+    TextPainter tpTitle = TextPainter(textDirection: ui.TextDirection.ltr);
+    tpTitle.text = TextSpan(
+        text: '${focused.year}年 ${focused.month}月',
+        style: const TextStyle(color: Colors.black, fontSize: 48, fontWeight: FontWeight.bold)
+    );
+    tpTitle.layout(maxWidth: width - 48);
+    // 將標題畫在頂部中央
+    tpTitle.paint(canvas, Offset((width - tpTitle.width) / 2, 30));
+
+    // 將 y 座標往下推移，準備繪製日曆
+    y = titleHeight;
+    // =============================================
+
     if (calImg != null) {
-      canvas.drawImageRect(calImg, Rect.fromLTWH(0, 0, calImg.width.toDouble(), calImg.height.toDouble()), Rect.fromLTWH(0, 0, width, calHeight), Paint());
-      y = calHeight + 16;
+      // 修改點 3：從 y 座標開始畫日曆，而不是從 0 開始
+      canvas.drawImageRect(
+          calImg,
+          Rect.fromLTWH(0, 0, calImg.width.toDouble(), calImg.height.toDouble()),
+          Rect.fromLTWH(0, y, width, calHeight),
+          Paint()
+      );
+      y += calHeight + 16; // 更新 y 座標供下方圖例使用
     }
+
+    // 繪製圖例標題
     TextPainter tp = TextPainter(textDirection: ui.TextDirection.ltr);
     tp.text = TextSpan(text: '班次詳細時間圖例 (本月使用)：', style: TextStyle(color: Colors.black, fontSize: 32, fontWeight: FontWeight.bold));
     tp.layout(maxWidth: width);
     tp.paint(canvas, Offset(24, y));
     y += 54;
+
+    // 繪製圖例內容
     for (var v in legendDefs) {
       canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(24, y, 32, 32), const Radius.circular(8)), Paint()..color = v.color);
       tp.text = TextSpan(text: ' ${v.code} ${v.label} ${v.isAllDay ? '全天' : '${v.start}-${v.end}'} ${v.hours.toStringAsFixed(1)}h${v.hasMorningAllow ? ' 早/夜班津貼' : ''}${v.hasNightAllow ? ' 通宵津貼' : ''}${v.hasMealAllow ? ' 膳食津貼' : ''}', style: const TextStyle(color: Colors.black87, fontSize: 28, fontWeight: FontWeight.w600));
@@ -2281,6 +2313,7 @@ Future<void> exportShareImage() async {
       tp.paint(canvas, Offset(64, y));
       y += 46;
     }
+
     final pic = recorder.endRecording();
     final img0 = await pic.toImage(width.toInt(), (y + 20).toInt());
     final byte = await img0.toByteData(format: ui.ImageByteFormat.png);
@@ -2421,14 +2454,15 @@ Future<void> exportReport() async {
       sb.writeln('【三、津貼明細】');
       sb.writeln('津貼名稱, 金額');
       if (allAllowances.isEmpty) {
-        sb.writeln('無, \$0.0');
+        sb.writeln('無, "\$0.0"');
       } else {
         allAllowances.forEach((name, amount) {
-          sb.writeln('$name, \$${amount.toStringAsFixed(1)}');
+          // 修改點：將金額用雙引號包起來，防止 Excel 自動加上 US
+          sb.writeln('$name, "\$${amount.toStringAsFixed(1)}"');
         });
       }
-      sb.writeln('OT 津貼, \$${(ot * effectiveOtRate).toStringAsFixed(1)}');
-      sb.writeln('津貼總金額, \$${(allow + ot * effectiveOtRate).toStringAsFixed(1)}');
+      sb.writeln('OT 津貼, "\$${(ot * effectiveOtRate).toStringAsFixed(1)}"');
+      sb.writeln('津貼總金額, "\$${(allow + ot * effectiveOtRate).toStringAsFixed(1)}"');
     } else {
       int year = focused.year;
       DateTime rangeStart = DateTime(year, 1, 1);
@@ -2531,14 +2565,15 @@ Future<void> exportReport() async {
       sb.writeln('【三、津貼明細】');
       sb.writeln('津貼名稱, 金額');
       if (allAllowances.isEmpty) {
-        sb.writeln('無, \$0.0');
+        sb.writeln('無, "\$0.0"');
       } else {
         allAllowances.forEach((name, amount) {
-          sb.writeln('$name, \$${amount.toStringAsFixed(1)}');
+          // 修改點：將金額用雙引號包起來，防止 Excel 自動加上 US
+          sb.writeln('$name, "\$${amount.toStringAsFixed(1)}"');
         });
       }
-      sb.writeln('OT 津貼, \$${(ot * effectiveOtRate).toStringAsFixed(1)}');
-      sb.writeln('津貼總金額, \$${(allow + ot * effectiveOtRate).toStringAsFixed(1)}');
+      sb.writeln('OT 津貼, "\$${(ot * effectiveOtRate).toStringAsFixed(1)}"');
+      sb.writeln('津貼總金額, "\$${(allow + ot * effectiveOtRate).toStringAsFixed(1)}"');
     }
     String dir = await _getBackupDir();
     String fileName = 'report_${isYearReport ? 'year${focused.year}' : '${focused.year}${focused.month.toString().padLeft(2, '0')}'}.csv';
