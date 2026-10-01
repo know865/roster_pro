@@ -497,50 +497,71 @@ class MainActivity : FlutterActivity() {
             val month = dateParts[1].toInt() - 1
             val day = dateParts[2].toInt()
 
-            val startParts = startStr.split(":")
-            if (startParts.size != 2) {
-                result.error("BAD_TIME", "Invalid start time: $startStr", null)
-                return
-            }
-            val startHour = startParts[0].toInt()
-            val startMinute = startParts[1].toInt()
-
-            val endParts = endStr.split(":")
-            if (endParts.size != 2) {
-                result.error("BAD_TIME", "Invalid end time: $endStr", null)
-                return
-            }
-            val endHour = endParts[0].toInt()
-            val endMinute = endParts[1].toInt()
-
-            // ========= 核心：強制鎖定排班基準時區為香港 =========
-            val hkTimeZone = TimeZone.getTimeZone("Asia/Hong_Kong")
-
-            val startCal = Calendar.getInstance(hkTimeZone)
-            startCal.set(year, month, day, startHour, startMinute, 0)
-            startCal.set(Calendar.MILLISECOND, 0)
-            val startMillis = startCal.timeInMillis
-
-            val endCal = Calendar.getInstance(hkTimeZone)
-            endCal.set(year, month, day, endHour, endMinute, 0)
-            endCal.set(Calendar.MILLISECOND, 0)
-            var endMillis = endCal.timeInMillis
-
-            // 處理跨日班次（例如 22:00 到次日 06:00）
-            if (endMillis <= startMillis && !allDay) {
-                endCal.add(Calendar.DAY_OF_YEAR, 1)
-                endMillis = endCal.timeInMillis
-            }
-
             val values = ContentValues().apply {
                 put(CalendarContract.Events.CALENDAR_ID, calendarId)
                 put(CalendarContract.Events.TITLE, title)
                 put(CalendarContract.Events.DESCRIPTION, description)
-                put(CalendarContract.Events.DTSTART, startMillis)
-                put(CalendarContract.Events.DTEND, endMillis)
-                put(CalendarContract.Events.ALL_DAY, if (allDay) 1 else 0)
-                // 寫入事件時區為香港，確保全球顯示一致
-                put(CalendarContract.Events.EVENT_TIMEZONE, "Asia/Hong_Kong")
+            }
+
+            if (allDay) {
+                // ========= 全天事件：使用 UTC 時區 =========
+                // Android CalendarContract 規定：全天事件的 DTSTART/DTEND 必須以 UTC 表示
+                // DTSTART = 當天 00:00 UTC，DTEND = 隔天 00:00 UTC（Google 官方建議）
+                val utcTz = TimeZone.getTimeZone("UTC")
+
+                val startCal = Calendar.getInstance(utcTz)
+                startCal.set(year, month, day, 0, 0, 0)
+                startCal.set(Calendar.MILLISECOND, 0)
+
+                val endCal = Calendar.getInstance(utcTz)
+                endCal.set(year, month, day, 0, 0, 0)
+                endCal.set(Calendar.MILLISECOND, 0)
+                endCal.add(Calendar.DAY_OF_YEAR, 1) // 隔天 00:00 UTC
+
+                values.put(CalendarContract.Events.DTSTART, startCal.timeInMillis)
+                values.put(CalendarContract.Events.DTEND, endCal.timeInMillis)
+                values.put(CalendarContract.Events.ALL_DAY, 1)
+                values.put(CalendarContract.Events.EVENT_TIMEZONE, "UTC")
+            } else {
+                // ========= 非全天事件：使用香港時區 =========
+                val startParts = startStr.split(":")
+                if (startParts.size != 2) {
+                    result.error("BAD_TIME", "Invalid start time: $startStr", null)
+                    return
+                }
+                val startHour = startParts[0].toInt()
+                val startMinute = startParts[1].toInt()
+
+                val endParts = endStr.split(":")
+                if (endParts.size != 2) {
+                    result.error("BAD_TIME", "Invalid end time: $endStr", null)
+                    return
+                }
+                val endHour = endParts[0].toInt()
+                val endMinute = endParts[1].toInt()
+
+                val hkTimeZone = TimeZone.getTimeZone("Asia/Hong_Kong")
+
+                val startCal = Calendar.getInstance(hkTimeZone)
+                startCal.set(year, month, day, startHour, startMinute, 0)
+                startCal.set(Calendar.MILLISECOND, 0)
+                val startMillis = startCal.timeInMillis
+
+                val endCal = Calendar.getInstance(hkTimeZone)
+                endCal.set(year, month, day, endHour, endMinute, 0)
+                endCal.set(Calendar.MILLISECOND, 0)
+                var endMillis = endCal.timeInMillis
+
+                // 處理跨日班次（例如 22:00 到次日 06:00）
+                if (endMillis <= startMillis) {
+                    endCal.add(Calendar.DAY_OF_YEAR, 1)
+                    endMillis = endCal.timeInMillis
+                }
+
+                values.put(CalendarContract.Events.DTSTART, startMillis)
+                values.put(CalendarContract.Events.DTEND, endMillis)
+                values.put(CalendarContract.Events.ALL_DAY, 0)
+                values.put(CalendarContract.Events.EVENT_TIMEZONE, "Asia/Hong_Kong")
             }
 
             if (eventId != null && eventId.isNotEmpty()) {
