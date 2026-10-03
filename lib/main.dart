@@ -204,7 +204,7 @@ class MainPageState extends State<MainPage> {
   Map<String, double> rosterExtra = {};
   Map<String, double> rosterExtraHrs = {};
   Map<String, bool> rosterAlarmMuted = {};
-  Map<String, String> rosterLeaveNumber = {}; // 假期編號
+  Map<String, String> rosterLeaveNumber = {};
 
   List<LeaveDef> leaveDefs = [
     LeaveDef('AL', 'Annual Leave', Colors.teal),
@@ -271,7 +271,6 @@ class MainPageState extends State<MainPage> {
   bool _holidayLoading = false;
   String _holidayLastUpdate = '';
 
-  /// 農曆快取：避免 updateWidget 每次都重新計算 3 年農曆資料
   String _lunarCacheKey = '';
   Map<String, String> _lunarCache = {};
 
@@ -381,13 +380,11 @@ class MainPageState extends State<MainPage> {
     return res.data ?? [];
   }
 
-  /// 調試日誌：正式版預設關閉（_enableVerboseLog = false），需要時可開啟
   Future<void> _writeDebugLog(String message) async {
     if (!_enableVerboseLog) return;
     await _writeDebugLogForce(message);
   }
 
-  /// 強制寫入日誌，不受 _enableVerboseLog 開關影響（用於手動觸發的調試）
   Future<void> _writeDebugLogForce(String message) async {
     try {
       final dir = await getExternalStorageDirectory();
@@ -576,7 +573,6 @@ Future<void> updateWidget() async {
     try { await HomeWidget.saveWidgetData<String>('roster_json', jsonEncode(roster)); } catch (_) {}
     try { await HomeWidget.saveWidgetData<String>('defs_json', jsonEncode(defs.map((k, v) => MapEntry(k, v.toJson())))); } catch (_) {}
     try {
-      // 農曆快取：以「當前年份」為 key，同一年內不重複計算
       String newCacheKey = '${DateTime.now().year}';
       if (_lunarCacheKey != newCacheKey || _lunarCache.isEmpty) {
         Map<String, String> lunarMap = {};
@@ -686,8 +682,6 @@ Future<void> load() async {
   var lr = sp.getString('leaveRecords'); if (lr != null) { try { leaveRecords = Map<String, Map<String, dynamic>>.from((jsonDecode(lr) as Map).map((k, v) => MapEntry(k as String, Map<String, dynamic>.from(v as Map)))); } catch (_) {} }
   var rl = sp.getString('rosterLeave'); if (rl != null) { try { rosterLeave = Map<String, String>.from(jsonDecode(rl)); } catch (_) {} }
   var ram = sp.getString('rosterAlarmMuted'); if (ram != null) { try { rosterAlarmMuted = Map<String, bool>.from((jsonDecode(ram) as Map).map((k, v) => MapEntry(k as String, v as bool))); } catch (_) {} }
-  
-  // 讀取假期編號
   var rln = sp.getString('rosterLeaveNumber'); if (rln != null) { try { rosterLeaveNumber = Map<String, String>.from(jsonDecode(rln)); } catch (_) {} }
 
   var ddList = sp.getStringList('dirtyDates'); if (ddList != null) _dirtyDates = ddList.toSet();
@@ -698,7 +692,7 @@ Future<void> load() async {
     customName = sp.getString('cName') ?? '我的排更-專屬日曆'; nameCtrl.text = customName;
     standardWeeklyHours = sp.getDouble('stdWeek') ?? 42; overtimeRate = sp.getDouble('otRate') ?? 80;
     monthlySalary = sp.getDouble('monthlySalary') ?? 0; hourlyDivisor = sp.getDouble('hourlyDivisor') ?? 182; otMultiplier = sp.getDouble('otMultiplier') ?? 1.5;
-    if (monthlySalary <= 0) overtimeRate = 0; // 若無月薪，強制將超時時薪歸零
+    if (monthlySalary <= 0) overtimeRate = 0;
     morningAllowance = sp.getDouble('morningAllow') ?? 0; nightAllowance = sp.getDouble('nightAllow') ?? 0; mealAllowance = sp.getDouble('mealAllow') ?? 0; nightAllowMultiplier = sp.getDouble('nightAllowMultiplier') ?? 0.4;
     calendarFontSize = sp.getDouble('calFont') ?? 14; googleSyncEnabled = sp.getBool('gSync') ?? false; autoSync = sp.getBool('gAuto') ?? false;
     holidayRegion = sp.getString('holidayRegion') ?? '香港'; _rosterCalendarId = sp.getString('rosterCalId'); _rosterCalendarName = sp.getString('rosterCalName') ?? '未選'; _rosterAccountName = sp.getString('rosterAccName') ?? '';
@@ -723,7 +717,6 @@ Future<void> save() async {
   sp.setString('savedPatternsV40', jsonEncode(savedPatterns.map((e) => e.toJson()).toList())); sp.setString('holidayRegion', holidayRegion);
   sp.setString('googleEventIdMap', jsonEncode(_googleEventIdMap)); sp.setString('manualHolidays', jsonEncode(manualHolidays));
   await sp.setString('leaveDefs', jsonEncode(leaveDefs.map((e) => e.toJson()).toList())); await sp.setString('leaveRecords', jsonEncode(leaveRecords)); await sp.setString('rosterLeave', jsonEncode(rosterLeave)); await sp.setString('rosterAlarmMuted', jsonEncode(rosterAlarmMuted));
-  // 儲存假期編號
   await sp.setString('rosterLeaveNumber', jsonEncode(rosterLeaveNumber));
   await sp.setStringList('dirtyDates', _dirtyDates.toList()); await sp.setBool('needsFullSync', _needsFullSync);
   if (_rosterCalendarId != null) sp.setString('rosterCalId', _rosterCalendarId!); sp.setString('rosterCalName', _rosterCalendarName); sp.setString('rosterAccName', _rosterAccountName);
@@ -931,7 +924,6 @@ Future<void> _ensureCalendar() async {
 
 void _markDirty(String dateKey) { _dirtyDates.add(dateKey); }
 
-/// 掃描範圍：同時考慮 roster 與 _googleEventIdMap，避免備份還原後留下殭屍記錄
 DateTime _calcScanStart() {
   int currentYear = DateTime.now().year;
   int minYear = currentYear - 2;
@@ -1018,12 +1010,11 @@ String _padTime(String t) {
   return '$h:$m';
 }
 
-/// 建立/更新日曆事件。改為傳送字串給原生 Android，由 Android 鎖定香港時區計算時間戳。
 Future<bool> _buildAndInsertEvent(String dateKey, String code, {String? existingEventId}) async {
   final calId = _requireCalendarId();
   final def = defs[code];
   final note = rosterNote[dateKey] ?? '';
-  final leaveNo = rosterLeaveNumber[dateKey] ?? ''; // 取得假期編號
+  final leaveNo = rosterLeaveNumber[dateKey] ?? '';
   final tag = '[RosterPro]$dateKey';
 
   String title, desc;
@@ -1042,19 +1033,15 @@ Future<bool> _buildAndInsertEvent(String dateKey, String code, {String? existing
     endStr = '23:59';
   } else {
     allDayFlag = def.isAllDay || def.code == 'O';
-    
-    // 如果假期編號不為空，組合成字串
     String leaveNoStr = leaveNo.isNotEmpty ? '\n假期編號: $leaveNo' : '';
 
     if (allDayFlag) {
       title = '${def.code} ${def.label}${note.isNotEmpty ? ' | $note' : ''}';
-      // 將假期編號插入到「班次」下方
       desc = '$tag\n$customName\n班次: ${def.code} ${def.label}$leaveNoStr\n類型: 全天${note.isNotEmpty ? '\n記事: $note' : ''}';
       startStr = '00:00';
       endStr = '23:59';
     } else {
       title = '${def.code} ${def.label} ${def.start}-${def.end}${note.isNotEmpty ? ' | $note' : ''}';
-      // 將假期編號插入到「班次」下方
       desc = '$tag\n$customName\n班次: ${def.code} ${def.label}$leaveNoStr\n時間: ${def.start}-${def.end}${note.isNotEmpty ? '\n記事: $note' : ''}';
       startStr = def.start;
       endStr = def.end;
@@ -1075,7 +1062,6 @@ Future<bool> _buildAndInsertEvent(String dateKey, String code, {String? existing
       args['eventId'] = existingEventId;
     }
 
-    // 呼叫原生 Android 方法，由 Android 鎖定香港時區計算時間戳
     final String? eventId = await _realChannel.invokeMethod('createEvent', args);
 
     if (eventId != null) {
@@ -1174,19 +1160,16 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
     final sp = await SharedPreferences.getInstance();
     int del = 0, delFailed = 0, add = 0, upd = 0;
     int zombieFixed = 0;
-    int createFailed = 0; // 事件建立失敗計數
+    int createFailed = 0;
 
     if (needFull) {
       await _writeDebugLog('[同步] 全量重建：分批掃描清理 [RosterPro]');
-
-      // 使用動態計算的掃描範圍，不硬編碼
       DateTime scanStart = _calcScanStart();
       DateTime scanEnd = _calcScanEnd();
       final Set<String> deletedIds = <String>{};
       for (int year = scanStart.year; year <= scanEnd.year; year++) {
         DateTime startScan = DateTime(year, 1, 1);
         DateTime endScan = DateTime(year, 12, 31);
-
         List<Event> events = [];
         try {
           events = await _safeRetrieveEvents(startScan, endScan);
@@ -1194,13 +1177,11 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
           await _writeDebugLog('[同步] ⚠️ 掃描 $year 年失敗，跳過該年：$e');
           continue;
         }
-
         for (var e in events) {
           final desc = e.description ?? '';
           if (!desc.contains('[RosterPro]')) continue;
           if (e.eventId == null) continue;
           if (deletedIds.contains(e.eventId)) continue;
-
           final ok = await _safeDeleteEvent(e.eventId!);
           if (ok) { deletedIds.add(e.eventId!); del++; } else { delFailed++; }
         }
@@ -1231,7 +1212,6 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
 
       if (mounted && !silent) {
         if (del == 0 && delFailed == 0 && add == 0 && createFailed == 0) {
-          // 全 0 不顯示提示
         } else {
           String msg = '✅ 完整同步完成：刪 $del / 失敗 $delFailed / 建立 $add';
           if (createFailed > 0) msg += ' / ⚠️ 建立失敗 $createFailed';
@@ -1404,7 +1384,6 @@ Future<void> _syncToGoogle({bool silent = false, bool forceFullSync = false}) as
 
     if (mounted && !silent) {
       if (del == 0 && delFailed == 0 && add == 0 && upd == 0 && zombieFixed == 0 && createFailed == 0) {
-        // 全 0 不顯示提示
       } else {
         String msg = needFull
             ? '✅ 完整同步完成：刪 $del / 失敗 $delFailed / 建立 $add'
@@ -1906,7 +1885,6 @@ Future<void> restoreFromFile(String path) async {
       if (j['leaveRecords'] != null) leaveRecords = Map<String, Map<String, dynamic>>.from((j['leaveRecords'] as Map).map((k, v) => MapEntry(k as String, Map<String, dynamic>.from(v as Map))));
       if (j['rosterLeave'] != null) rosterLeave = Map<String, String>.from(j['rosterLeave']);
       if (j['rosterAlarmMuted'] != null) rosterAlarmMuted = Map<String, bool>.from(j['rosterAlarmMuted']);
-      // 還原假期編號
       if (j['rosterLeaveNumber'] != null) rosterLeaveNumber = Map<String, String>.from(j['rosterLeaveNumber']);
     });
 
@@ -2140,7 +2118,6 @@ Future<void> _showExportResultDialog(String path) async {
 }
 
 Future<void> showWidgetDebugLog() async {
-  // 手動觸發時，無論開關狀態如何，都強制寫入一行
   await _writeDebugLogForce('=== 手動觸發調試日誌（開關：${_enableVerboseLog ? "開啟" : "關閉"}）===');
   String content = '';
   String usedPath = '';
@@ -2213,7 +2190,7 @@ Future<void> backupAnywhere() async {
       'leaveRecords': leaveRecords,
       'rosterLeave': rosterLeave,
       'rosterAlarmMuted': rosterAlarmMuted,
-      'rosterLeaveNumber': rosterLeaveNumber, // 備份假期編號
+      'rosterLeaveNumber': rosterLeaveNumber,
     };
     var f = File('$dirPath/$fileName');
     await f.writeAsString(jsonEncode(backup));
@@ -2245,7 +2222,7 @@ Future<void> clearRosterByRange() async {
     if (roster.containsKey(k) || rosterNote.containsKey(k)) {
       count++;
       roster.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k); rosterExtraType.remove(k); rosterLeave.remove(k); rosterAlarmMuted.remove(k); rosterNote.remove(k);
-      rosterLeaveNumber.remove(k); // 清除假期編號
+      rosterLeaveNumber.remove(k);
       if (_googleEventIdMap.containsKey(k)) {
         await _safeDeleteEvent(_googleEventIdMap[k]!);
         _googleEventIdMap.remove(k);
@@ -2272,7 +2249,6 @@ Future<void> exportShareImage() async {
     double y = 0;
     final paintWhite = Paint()..color = Colors.white;
 
-    // 計算圖片各區塊高度
     double calHeight = calImg != null ? width * calImg.height / calImg.width : 0;
     Set<String> usedCodes = {};
     int dim = DateTime(focused.year, focused.month + 1, 0).day;
@@ -2283,45 +2259,37 @@ Future<void> exportShareImage() async {
     List<ShiftDef> legendDefs = defs.entries.where((e) => usedCodes.contains(e.key)).map((e) => e.value).toList();
     double legendHeight = legendDefs.length * 44 + 80;
 
-    // 計算頂部標題所需的高度
     double titleHeight = 100.0;
     double totalHeight = titleHeight + calHeight + legendHeight + 40;
 
-    // 繪製全白背景
     canvas.drawRect(Rect.fromLTWH(0, 0, width, totalHeight), paintWhite);
 
-    // 在頂部繪製年月標題
     TextPainter tpTitle = TextPainter(textDirection: ui.TextDirection.ltr);
     tpTitle.text = TextSpan(
         text: '${focused.year}年 ${focused.month}月',
         style: const TextStyle(color: Colors.black, fontSize: 48, fontWeight: FontWeight.bold)
     );
     tpTitle.layout(maxWidth: width - 48);
-    // 將標題畫在頂部中央
     tpTitle.paint(canvas, Offset((width - tpTitle.width) / 2, 30));
 
-    // 將 y 座標往下推移，準備繪製日曆
     y = titleHeight;
 
     if (calImg != null) {
-      // 從 y 座標開始畫日曆，而不是從 0 開始
       canvas.drawImageRect(
           calImg,
           Rect.fromLTWH(0, 0, calImg.width.toDouble(), calImg.height.toDouble()),
           Rect.fromLTWH(0, y, width, calHeight),
           Paint()
       );
-      y += calHeight + 16; // 更新 y 座標供下方圖例使用
+      y += calHeight + 16;
     }
 
-    // 繪製圖例標題
     TextPainter tp = TextPainter(textDirection: ui.TextDirection.ltr);
     tp.text = TextSpan(text: '班次詳細時間圖例 (本月使用)：', style: TextStyle(color: Colors.black, fontSize: 32, fontWeight: FontWeight.bold));
     tp.layout(maxWidth: width);
     tp.paint(canvas, Offset(24, y));
     y += 54;
 
-    // 繪製圖例內容
     for (var v in legendDefs) {
       canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(24, y, 32, 32), const Radius.circular(8)), Paint()..color = v.color);
       tp.text = TextSpan(text: ' ${v.code} ${v.label} ${v.isAllDay ? '全天' : '${v.start}-${v.end}'} ${v.hours.toStringAsFixed(1)}h${v.hasMorningAllow ? ' 早/夜班津貼' : ''}${v.hasNightAllow ? ' 通宵津貼' : ''}${v.hasMealAllow ? ' 膳食津貼' : ''}', style: const TextStyle(color: Colors.black87, fontSize: 28, fontWeight: FontWeight.w600));
@@ -2470,15 +2438,14 @@ Future<void> exportReport() async {
       sb.writeln('【三、津貼明細】');
       sb.writeln('津貼名稱, 金額');
       if (allAllowances.isEmpty) {
-        sb.writeln('無, "\$0.0"');
+        sb.writeln('無, 0.0');
       } else {
         allAllowances.forEach((name, amount) {
-          // 將金額用雙引號包起來，防止 Excel 自動加上 US
-          sb.writeln('$name, "\$${amount.toStringAsFixed(1)}"');
+          sb.writeln('$name, ${amount.toStringAsFixed(1)}');
         });
       }
-      sb.writeln('OT 津貼, "\$${(ot * effectiveOtRate).toStringAsFixed(1)}"');
-      sb.writeln('津貼總金額, "\$${(allow + ot * effectiveOtRate).toStringAsFixed(1)}"');
+      sb.writeln('OT 津貼, ${(ot * effectiveOtRate).toStringAsFixed(1)}');
+      sb.writeln('津貼總金額, ${(allow + ot * effectiveOtRate).toStringAsFixed(1)}');
     } else {
       int year = focused.year;
       DateTime rangeStart = DateTime(year, 1, 1);
@@ -2581,15 +2548,14 @@ Future<void> exportReport() async {
       sb.writeln('【三、津貼明細】');
       sb.writeln('津貼名稱, 金額');
       if (allAllowances.isEmpty) {
-        sb.writeln('無, "\$0.0"');
+        sb.writeln('無, 0.0');
       } else {
         allAllowances.forEach((name, amount) {
-          // 將金額用雙引號包起來，防止 Excel 自動加上 US
-          sb.writeln('$name, "\$${amount.toStringAsFixed(1)}"');
+          sb.writeln('$name, ${amount.toStringAsFixed(1)}');
         });
       }
-      sb.writeln('OT 津貼, "\$${(ot * effectiveOtRate).toStringAsFixed(1)}"');
-      sb.writeln('津貼總金額, "\$${(allow + ot * effectiveOtRate).toStringAsFixed(1)}"');
+      sb.writeln('OT 津貼, ${(ot * effectiveOtRate).toStringAsFixed(1)}');
+      sb.writeln('津貼總金額, ${(allow + ot * effectiveOtRate).toStringAsFixed(1)}');
     }
     String dir = await _getBackupDir();
     String fileName = 'report_${isYearReport ? 'year${focused.year}' : '${focused.year}${focused.month.toString().padLeft(2, '0')}'}.csv';
@@ -2707,9 +2673,8 @@ Future<void> pickRangeAndApply() async {
     for (DateTime d = p.start; !d.isAfter(p.end); d = d.add(const Duration(days: 1))) {
       String dateKey = DateFormat('yyyy-MM-dd').format(d);
       roster[dateKey] = flat[i % flat.length];
-      // 覆蓋排班時，清除該日的臨時靜音狀態（因為班次改變了）
       rosterAlarmMuted.remove(dateKey);
-      rosterLeaveNumber.remove(dateKey); // 清除假期編號
+      rosterLeaveNumber.remove(dateKey);
       _markDirty(dateKey);
       i++;
     }
@@ -2756,9 +2721,8 @@ Future<void> smartSchedule() async {
       DateTime d = startDate.add(Duration(days: i));
       String dateKey = DateFormat('yyyy-MM-dd').format(d);
       roster[dateKey] = flat[i % flat.length];
-      // 覆蓋排班時，清除該日的臨時靜音狀態（因為班次改變了）
       rosterAlarmMuted.remove(dateKey);
-      rosterLeaveNumber.remove(dateKey); // 清除假期編號
+      rosterLeaveNumber.remove(dateKey);
       _markDirty(dateKey);
     }
   });
@@ -2782,14 +2746,13 @@ void showDetail(DateTime day) {
   var exCtrl = TextEditingController(text: (rosterExtra[k] ?? 0).toString());
   var exHCtrl = TextEditingController(text: (rosterExtraHrs[k] ?? 0).toString());
   var exTypeCtrl = TextEditingController(text: rosterExtraType[k] ?? '');
-  var leaveNoCtrl = TextEditingController(text: rosterLeaveNumber[k] ?? ''); // 假期編號控制器
+  var leaveNoCtrl = TextEditingController(text: rosterLeaveNumber[k] ?? '');
 
   showModalBottomSheet(context: context, isScrollControlled: true, builder: (ctx) {
     return StatefulBuilder(builder: (ctx2, setM) {
       final currentDef = defs[cur];
       final bool alarmApplicable = currentDef != null && currentDef.alarmEnabled && !currentDef.isAllDay;
       final bool isMuted = rosterAlarmMuted[k] == true;
-      // 判斷是否為假期類型
       final bool isLeaveType = currentDef != null && (currentDef.hasAL || currentDef.hasSH || currentDef.hasGH || currentDef.hasWB || currentDef.hasCustomLeave);
 
       return Padding(
@@ -2803,7 +2766,6 @@ void showDetail(DateTime day) {
               setM(() {
                 cur = c;
                 final newDef = defs[c];
-                // 若新班次不支援鬧鐘或為全天，清除該日的臨時靜音狀態
                 if (newDef == null || !newDef.alarmEnabled || newDef.isAllDay) {
                   rosterAlarmMuted.remove(k);
                 }
@@ -2870,7 +2832,6 @@ void showDetail(DateTime day) {
 
             const SizedBox(height: 8),
 
-            // 假期編號輸入欄
             if (isLeaveType) ...[
               Padding(
                 padding: const EdgeInsets.only(top: 6, bottom: 6),
@@ -2949,7 +2910,7 @@ void showDetail(DateTime day) {
                 setState(() {
                   roster.remove(k); rosterLeave.remove(k); rosterOt.remove(k); rosterExtra.remove(k); rosterExtraHrs.remove(k);
                   rosterExtraType.remove(k); rosterAlarmMuted.remove(k);
-                  rosterLeaveNumber.remove(k); // 清除假期編號
+                  rosterLeaveNumber.remove(k);
                 });
                 if (eventId != null) {
                   await _safeDeleteEvent(eventId);
@@ -2966,14 +2927,14 @@ void showDetail(DateTime day) {
                 final exHVal = double.tryParse(exHCtrl.text);
                 final noteText = nc.text;
                 final exTypeText = exTypeCtrl.text.trim();
-                final leaveNoText = leaveNoCtrl.text.trim(); // 取得假期編號
+                final leaveNoText = leaveNoCtrl.text.trim();
                 final curCode = cur;
                 Navigator.pop(ctx2);
                 setState(() {
                   if (curCode.isNotEmpty) roster[k] = curCode; else roster.remove(k);
                   if (noteText.isNotEmpty) rosterNote[k] = noteText; else rosterNote.remove(k);
                   if (exTypeText.isNotEmpty) rosterExtraType[k] = exTypeText; else rosterExtraType.remove(k);
-                  if (leaveNoText.isNotEmpty) rosterLeaveNumber[k] = leaveNoText; else rosterLeaveNumber.remove(k); // 儲存假期編號
+                  if (leaveNoText.isNotEmpty) rosterLeaveNumber[k] = leaveNoText; else rosterLeaveNumber.remove(k);
                   if (otVal != null) rosterOt[k] = otVal;
                   if (exVal != null && exVal != 0) rosterExtra[k] = exVal; else if (exVal == 0) rosterExtra.remove(k);
                   if (exHVal != null && exHVal != 0) rosterExtraHrs[k] = exHVal; else rosterExtraHrs.remove(k);
@@ -3372,6 +3333,18 @@ Future<void> showLeaveListDialog() async {
       }
       leaveEntries.sort((a, b) => a.key.compareTo(b.key));
 
+      Map<String, int> leaveCounter = {};
+      List<Map<String, dynamic>> displayEntries = [];
+      for (var entry in leaveEntries) {
+        String code = entry.value;
+        leaveCounter[code] = (leaveCounter[code] ?? 0) + 1;
+        displayEntries.add({
+          'dateKey': entry.key,
+          'code': code,
+          'seq': leaveCounter[code]!,
+        });
+      }
+
       Map<String, double> yearUsed = {};
       roster.forEach((k, v) {
         if (k.startsWith('$queryYear')) {
@@ -3390,7 +3363,7 @@ Future<void> showLeaveListDialog() async {
 
       return AlertDialog(
         title: Text(yearMode ? '$queryYear年 全年假期清單' : '$queryYear年$queryMonth月 假期清單'),
-        content: SizedBox(width: 500, height: 500, child: Column(children: [
+        content: SizedBox(width: 520, height: 500, child: Column(children: [
           Row(children: [
             Expanded(child: SegmentedButton<bool>(
               segments: const [ButtonSegment(value: false, label: Text('指定月')), ButtonSegment(value: true, label: Text('全年'))],
@@ -3405,18 +3378,39 @@ Future<void> showLeaveListDialog() async {
             IconButton(icon: const Icon(Icons.chevron_right), onPressed: () { setD(() { if (yearMode) { queryYear++; } else { queryMonth++; if (queryMonth > 12) { queryMonth = 1; queryYear++; } } }); }),
           ]),
           const Divider(),
-          Expanded(child: leaveEntries.isEmpty ? const Center(child: Text('沒有假期記錄')) : ListView.builder(
+          Expanded(child: displayEntries.isEmpty ? const Center(child: Text('沒有假期記錄')) : ListView.builder(
             physics: const AlwaysScrollableScrollPhysics(),
-            itemCount: leaveEntries.length,
+            itemCount: displayEntries.length,
             itemBuilder: (c, i) {
-              var leave = leaveDefs.firstWhere((e) => e.name == leaveEntries[i].value, orElse: () => LeaveDef('', '', Colors.grey));
-              String dateKey = leaveEntries[i].key;
-              String leaveNo = rosterLeaveNumber[dateKey] ?? ''; // 取得假期編號
+              var item = displayEntries[i];
+              String code = item['code'];
+              int seq = item['seq'];
+              String dateKey = item['dateKey'];
+              var leave = leaveDefs.firstWhere((e) => e.name == code, orElse: () => LeaveDef('', '', Colors.grey));
+              String leaveNo = rosterLeaveNumber[dateKey] ?? '';
               return ListTile(
                 dense: true,
                 leading: CircleAvatar(backgroundColor: leave.color, child: Text(leave.name, style: const TextStyle(color: Colors.white, fontSize: 10))),
-                title: Text(dateKey, style: const TextStyle(fontWeight: FontWeight.bold)),
-                // 顯示全名，如果有編號就一併顯示
+                title: Row(children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: leave.color.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: leave.color, width: 1),
+                    ),
+                    child: Text(
+                      '$seq.',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: leave.color,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(dateKey, style: const TextStyle(fontWeight: FontWeight.bold)),
+                ]),
                 subtitle: Text('${leave.fullName}${leaveNo.isNotEmpty ? ' (編號: $leaveNo)' : ''}'),
                 onTap: () { Navigator.pop(ctx2); setState(() { selectedDay = DateTime.parse(dateKey); focused = DateTime(selectedDay.year, selectedDay.month, 1); }); showDetail(selectedDay); },
               );
@@ -3451,20 +3445,20 @@ Future<void> showLeaveListDialog() async {
           FilledButton(onPressed: () async {
             try {
               StringBuffer sb = StringBuffer();
-              // 標題加入「假期編號」
-              sb.writeln('年份,月份,日期,假期代號,假期名稱,假期編號,已用天數,結餘天數');
+              sb.writeln('年份,月份,日期,順序編號,假期代號,假期名稱,假期編號,已用天數,結餘天數');
               var yrRecords = leaveRecords['$queryYear'] ?? {};
-              for (var n in leaveEntries) {
-                var leave = leaveDefs.firstWhere((e) => e.name == n.value, orElse: () => LeaveDef('', '', Colors.grey));
+              for (var item in displayEntries) {
+                String dateStr = item['dateKey'];
+                String code = item['code'];
+                int seq = item['seq'];
+                var leave = leaveDefs.firstWhere((e) => e.name == code, orElse: () => LeaveDef('', '', Colors.grey));
                 double used = yearUsed[leave.name] ?? 0.0;
                 var rec = yrRecords[leave.name] ?? {'carry': 0.0};
                 double balance = (rec['carry'] as num).toDouble() - used;
-                String dateStr = n.key;
                 String yearStr = dateStr.substring(0, 4);
                 String monthStr = dateStr.substring(5, 7);
-                String leaveNo = rosterLeaveNumber[dateStr] ?? ''; // 取得編號
-                // 寫入編號
-                sb.writeln('$yearStr,$monthStr,$dateStr,${leave.name},${leave.fullName},$leaveNo,$used,${balance.toStringAsFixed(1)}');
+                String leaveNo = rosterLeaveNumber[dateStr] ?? '';
+                sb.writeln('$yearStr,$monthStr,$dateStr,$seq.,${leave.name},${leave.fullName},$leaveNo,$used,${balance.toStringAsFixed(1)}');
               }
               String dir = await _getBackupDir();
               String path = '$dir/leaves_${queryYear}${yearMode ? '' : queryMonth.toString().padLeft(2, '0')}.csv';
@@ -3503,7 +3497,21 @@ void showLeaveManagementDialog() {
         var record = yearRecords[def.name]!;
         double prevCarry = 0.0;
         if (selectedYear > 2000) {
-          prevCarry = (leaveRecords['${selectedYear - 1}']?[def.name]?['carry'] as num?)?.toDouble() ?? 0.0;
+          double lastYearCarry = (leaveRecords['${selectedYear - 1}']?[def.name]?['carry'] as num?)?.toDouble() ?? 0.0;
+          double lastYearUsed = 0.0;
+          roster.forEach((k, v) {
+            if (k.startsWith('${selectedYear - 1}')) {
+              var d = defs[v];
+              if (d != null) {
+                if (d.hasAL && def.name == 'AL') lastYearUsed += 1;
+                else if (d.hasSH && def.name == 'SH') lastYearUsed += 1;
+                else if (d.hasGH && def.name == 'GH') lastYearUsed += 1;
+                else if (d.hasWB && def.name == 'WB') lastYearUsed += 1;
+                else if (d.hasCustomLeave && d.customLeaveCode == def.name) lastYearUsed += 1;
+              }
+            }
+          });
+          prevCarry = lastYearCarry - lastYearUsed;
         }
         double total = (record['total'] as num?)?.toDouble() ?? 0.0;
         double adjust = (record['adjust'] as num?)?.toDouble() ?? 0.0;
@@ -3533,7 +3541,21 @@ void showLeaveManagementDialog() {
               var adjustCtrl = adjustCtrls[key]!;
               double prevCarry = 0.0;
               if (selectedYear > 2000) {
-                prevCarry = (leaveRecords['${selectedYear - 1}']?[leave.name]?['carry'] as num?)?.toDouble() ?? 0.0;
+                double lastYearCarry = (leaveRecords['${selectedYear - 1}']?[leave.name]?['carry'] as num?)?.toDouble() ?? 0.0;
+                double lastYearUsed = 0.0;
+                roster.forEach((k, v) {
+                  if (k.startsWith('${selectedYear - 1}')) {
+                    var d = defs[v];
+                    if (d != null) {
+                      if (d.hasAL && leave.name == 'AL') lastYearUsed += 1;
+                      else if (d.hasSH && leave.name == 'SH') lastYearUsed += 1;
+                      else if (d.hasGH && leave.name == 'GH') lastYearUsed += 1;
+                      else if (d.hasWB && leave.name == 'WB') lastYearUsed += 1;
+                      else if (d.hasCustomLeave && d.customLeaveCode == leave.name) lastYearUsed += 1;
+                    }
+                  }
+                });
+                prevCarry = lastYearCarry - lastYearUsed;
               }
               double total = (record['total'] as num?)?.toDouble() ?? 0.0;
               double adjust = (record['adjust'] as num?)?.toDouble() ?? 0.0;
@@ -3596,7 +3618,21 @@ void showLeaveManagementDialog() {
               var fullNameCtrl = fullNameCtrls[key]!;
               double prevCarry = 0.0;
               if (selectedYear > 2000) {
-                prevCarry = (leaveRecords['${selectedYear - 1}']?[leave.name]?['carry'] as num?)?.toDouble() ?? 0.0;
+                double lastYearCarry = (leaveRecords['${selectedYear - 1}']?[leave.name]?['carry'] as num?)?.toDouble() ?? 0.0;
+                double lastYearUsed = 0.0;
+                roster.forEach((k, v) {
+                  if (k.startsWith('${selectedYear - 1}')) {
+                    var d = defs[v];
+                    if (d != null) {
+                      if (d.hasAL && leave.name == 'AL') lastYearUsed += 1;
+                      else if (d.hasSH && leave.name == 'SH') lastYearUsed += 1;
+                      else if (d.hasGH && leave.name == 'GH') lastYearUsed += 1;
+                      else if (d.hasWB && leave.name == 'WB') lastYearUsed += 1;
+                      else if (d.hasCustomLeave && d.customLeaveCode == leave.name) lastYearUsed += 1;
+                    }
+                  }
+                });
+                prevCarry = lastYearCarry - lastYearUsed;
               }
               double total = (record['total'] as num?)?.toDouble() ?? 0.0;
               double adjust = (record['adjust'] as num?)?.toDouble() ?? 0.0;
@@ -4474,17 +4510,15 @@ Widget settingsTab() {
                 if (confirm != true) return;
                 setState(() {
                   defs.remove(e.key);
-                  // 清理 roster 中所有使用該班次的日期，並同步清理靜音狀態
                   final keysToRemove = <String>[];
                   roster.forEach((k, v) {
                     if (v == e.key) {
                       keysToRemove.add(k);
                       rosterAlarmMuted.remove(k);
-                      rosterLeaveNumber.remove(k); // 清除假期編號
+                      rosterLeaveNumber.remove(k);
                     }
                   });
                   for (var k in keysToRemove) roster.remove(k);
-                  // 清理 pattern 中的舊代號
                   for (int i = 0; i < pattern.length; i++) {
                     for (int j = 0; j < pattern[i].length; j++) {
                       if (pattern[i][j] == e.key) pattern[i][j] = 'O';
@@ -4978,7 +5012,14 @@ Widget settingsTab() {
       bottomNavigationBar: NavigationBar(
         height: 55,
         selectedIndex: tab,
-        onDestinationSelected: (i) => setState(() => tab = i),
+        onDestinationSelected: (i) {
+          // 離開設定頁時自動收起「自定班次」的全部顯示狀態
+          if (tab == 3 && i != 3) {
+            showAllShift = false;
+            showAllExtra = false;
+          }
+          setState(() => tab = i);
+        },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.calendar_month), label: '月曆'),
           NavigationDestination(icon: Icon(Icons.pattern), label: '模式'),
