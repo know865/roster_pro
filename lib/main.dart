@@ -3289,6 +3289,37 @@ void editShiftDialog({ShiftDef? oldDef}) {
   });
 }
 
+/// 動態計算某年某假期的期初餘額（自動繼承上一年）
+double calculateCarryForYear(int year, String leaveName) {
+  if (year <= 2000) return 0.0;
+  
+  // 1. 遞迴取得上一年的期末餘額
+  double lastYearCarry = calculateCarryForYear(year - 1, leaveName);
+  
+  // 2. 計算上一年的已用天數
+  double lastYearUsed = 0.0;
+  roster.forEach((k, v) {
+    if (k.startsWith('${year - 1}')) {
+      var d = defs[v];
+      if (d != null) {
+        if (d.hasAL && leaveName == 'AL') lastYearUsed += 1;
+        else if (d.hasSH && leaveName == 'SH') lastYearUsed += 1;
+        else if (d.hasGH && leaveName == 'GH') lastYearUsed += 1;
+        else if (d.hasWB && leaveName == 'WB') lastYearUsed += 1;
+        else if (d.hasCustomLeave && d.customLeaveCode == leaveName) lastYearUsed += 1;
+      }
+    }
+  });
+  
+  double prevCarry = lastYearCarry - lastYearUsed;
+  
+  // 3. 取得本年的總天數與微調（若無紀錄則為 0）
+  double total = (leaveRecords['$year']?[leaveName]?['total'] as num?)?.toDouble() ?? 0.0;
+  double adjust = (leaveRecords['$year']?[leaveName]?['adjust'] as num?)?.toDouble() ?? 0.0;
+  
+  return prevCarry + total + adjust;
+}
+
 Future<void> showLeaveListDialog() async {
   int queryYear = focused.year;
   int queryMonth = focused.month;
@@ -3426,8 +3457,9 @@ Future<void> showLeaveListDialog() async {
                 const SizedBox(height: 4),
                 ...leaveDefs.map((leave) {
                   double used = yearUsed[leave.name] ?? 0.0;
-                  var rec = leaveRecords['$queryYear']?[leave.name] ?? {'carry': 0.0};
-                  double balance = (rec['carry'] as num).toDouble() - used;
+                  // 使用動態計算，即使該年未儲存過資料，也能正確繼承上一年餘額
+                  double carryVal = calculateCarryForYear(queryYear, leave.name);
+                  double balance = carryVal - used;
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 2),
                     child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -3446,15 +3478,14 @@ Future<void> showLeaveListDialog() async {
             try {
               StringBuffer sb = StringBuffer();
               sb.writeln('年份,月份,日期,順序編號,假期代號,假期名稱,假期編號,已用天數,結餘天數');
-              var yrRecords = leaveRecords['$queryYear'] ?? {};
               for (var item in displayEntries) {
                 String dateStr = item['dateKey'];
                 String code = item['code'];
                 int seq = item['seq'];
                 var leave = leaveDefs.firstWhere((e) => e.name == code, orElse: () => LeaveDef('', '', Colors.grey));
                 double used = yearUsed[leave.name] ?? 0.0;
-                var rec = yrRecords[leave.name] ?? {'carry': 0.0};
-                double balance = (rec['carry'] as num).toDouble() - used;
+                double carryVal = calculateCarryForYear(queryYear, leave.name);
+                double balance = carryVal - used;
                 String yearStr = dateStr.substring(0, 4);
                 String monthStr = dateStr.substring(5, 7);
                 String leaveNo = rosterLeaveNumber[dateStr] ?? '';
@@ -3493,29 +3524,10 @@ void showLeaveManagementDialog() {
         if (!yearRecords.containsKey(def.name)) yearRecords[def.name] = {'total': 0.0, 'adjust': 0.0, 'carry': 0.0};
       }
 
+      // 更新 carry 用於背景計算（保持資料結構一致性）
       for (var def in leaveDefs) {
         var record = yearRecords[def.name]!;
-        double prevCarry = 0.0;
-        if (selectedYear > 2000) {
-          double lastYearCarry = (leaveRecords['${selectedYear - 1}']?[def.name]?['carry'] as num?)?.toDouble() ?? 0.0;
-          double lastYearUsed = 0.0;
-          roster.forEach((k, v) {
-            if (k.startsWith('${selectedYear - 1}')) {
-              var d = defs[v];
-              if (d != null) {
-                if (d.hasAL && def.name == 'AL') lastYearUsed += 1;
-                else if (d.hasSH && def.name == 'SH') lastYearUsed += 1;
-                else if (d.hasGH && def.name == 'GH') lastYearUsed += 1;
-                else if (d.hasWB && def.name == 'WB') lastYearUsed += 1;
-                else if (d.hasCustomLeave && d.customLeaveCode == def.name) lastYearUsed += 1;
-              }
-            }
-          });
-          prevCarry = lastYearCarry - lastYearUsed;
-        }
-        double total = (record['total'] as num?)?.toDouble() ?? 0.0;
-        double adjust = (record['adjust'] as num?)?.toDouble() ?? 0.0;
-        record['carry'] = prevCarry + total + adjust;
+        record['carry'] = calculateCarryForYear(selectedYear, def.name);
       }
 
       return AlertDialog(
@@ -3539,27 +3551,9 @@ void showLeaveManagementDialog() {
                 adjustCtrls[key] = TextEditingController(text: (record['adjust'] ?? 0.0).toString());
               }
               var adjustCtrl = adjustCtrls[key]!;
-              double prevCarry = 0.0;
-              if (selectedYear > 2000) {
-                double lastYearCarry = (leaveRecords['${selectedYear - 1}']?[leave.name]?['carry'] as num?)?.toDouble() ?? 0.0;
-                double lastYearUsed = 0.0;
-                roster.forEach((k, v) {
-                  if (k.startsWith('${selectedYear - 1}')) {
-                    var d = defs[v];
-                    if (d != null) {
-                      if (d.hasAL && leave.name == 'AL') lastYearUsed += 1;
-                      else if (d.hasSH && leave.name == 'SH') lastYearUsed += 1;
-                      else if (d.hasGH && leave.name == 'GH') lastYearUsed += 1;
-                      else if (d.hasWB && leave.name == 'WB') lastYearUsed += 1;
-                      else if (d.hasCustomLeave && d.customLeaveCode == leave.name) lastYearUsed += 1;
-                    }
-                  }
-                });
-                prevCarry = lastYearCarry - lastYearUsed;
-              }
-              double total = (record['total'] as num?)?.toDouble() ?? 0.0;
-              double adjust = (record['adjust'] as num?)?.toDouble() ?? 0.0;
-              double autoCarry = prevCarry + total + adjust;
+              
+              // 使用動態計算，取代原本的 prevCarry 邏輯
+              double autoCarry = calculateCarryForYear(selectedYear, leave.name);
 
               return Card(margin: const EdgeInsets.symmetric(vertical: 4), child: Padding(padding: const EdgeInsets.all(8.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('${leave.name} (${leave.fullName})', style: TextStyle(fontWeight: FontWeight.bold, color: leave.color)),
@@ -3616,27 +3610,8 @@ void showLeaveManagementDialog() {
                 fullNameCtrls[key] = TextEditingController(text: leave.fullName);
               }
               var fullNameCtrl = fullNameCtrls[key]!;
-              double prevCarry = 0.0;
-              if (selectedYear > 2000) {
-                double lastYearCarry = (leaveRecords['${selectedYear - 1}']?[leave.name]?['carry'] as num?)?.toDouble() ?? 0.0;
-                double lastYearUsed = 0.0;
-                roster.forEach((k, v) {
-                  if (k.startsWith('${selectedYear - 1}')) {
-                    var d = defs[v];
-                    if (d != null) {
-                      if (d.hasAL && leave.name == 'AL') lastYearUsed += 1;
-                      else if (d.hasSH && leave.name == 'SH') lastYearUsed += 1;
-                      else if (d.hasGH && leave.name == 'GH') lastYearUsed += 1;
-                      else if (d.hasWB && leave.name == 'WB') lastYearUsed += 1;
-                      else if (d.hasCustomLeave && d.customLeaveCode == leave.name) lastYearUsed += 1;
-                    }
-                  }
-                });
-                prevCarry = lastYearCarry - lastYearUsed;
-              }
-              double total = (record['total'] as num?)?.toDouble() ?? 0.0;
-              double adjust = (record['adjust'] as num?)?.toDouble() ?? 0.0;
-              double autoCarry = prevCarry + total + adjust;
+              
+              double autoCarry = calculateCarryForYear(selectedYear, leave.name);
 
               return Card(margin: const EdgeInsets.symmetric(vertical: 4), child: Padding(padding: const EdgeInsets.all(8.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
